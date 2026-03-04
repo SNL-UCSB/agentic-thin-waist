@@ -488,4 +488,4 @@ def test_bottleneck_state_verification():
 **Last Updated**: 2026-03-04
 **Status**: Specification Ready
 **Next Milestone**: Implementation (Week 1)
-**Team**: Prof. Arpit Gupta (PI), Jaber, Eugene, Haarika, Manni, Sylee
+**Team**: Prof. Arpit Gupta (PI), Jaber, Satyam, Snithik, Eugene, Haarika, Manni, Sylee

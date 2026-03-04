@@ -192,7 +192,7 @@ make logs
 
 ### Implementation Priority
 All tracks run in parallel over 4 weeks:
-1. **Weeks 1–2**: Independent development against mocked interfaces (D1: Jaber, D2: Eugene+Jaber, D3: Manni, D5: Haarika after NSDI)
+1. **Weeks 1–2**: Independent development against mocked interfaces (D1: Jaber, Satyam, Snithik, D2: Eugene+Jaber, D3: Manni, D5: Haarika after NSDI)
 2. **Weeks 3–4**: Integration across service boundaries, end-to-end demo, testing, documentation
 
 ---

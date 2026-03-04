@@ -2,14 +2,14 @@
 
 **Port**: 8000
 **Deliverable**: D1 (Network Virtualization Substrate - Intent Plane)
-**Lead**: Jaber
+**Lead**: Jaber | **Supporting**: Satyam, Snithik
 **PI**: Prof. Arpit Gupta
 **Priority**: CRITICAL
 **Status**: Implementation Ready
 
 ## Purpose
 
-The Experiment API is the **Intent Plane** of the Bottleneck Service. It provides the high-level, user-facing interface for specifying and executing network bottleneck experiments. The Intent Plane abstracts the complexity of applying static bottleneck attributes (capacity, base latency, buffering, queue management) and dynamic congestion pressure (specified via Cross-Traffic Profiles) into a simple, composable experiment specification.
+The Experiment API is the **Intent Plane** of the NetForge Service. It provides the high-level, user-facing interface for specifying and executing network bottleneck experiments. The Intent Plane abstracts the complexity of applying static bottleneck attributes (capacity, base latency, buffering, queue management) and dynamic congestion pressure (specified via Cross-Traffic Profiles) into a simple, composable experiment specification.
 
 ## Input
 

@@ -2,14 +2,14 @@
 
 **Port**: 8002
 **Deliverable**: D1 (Network Virtualization Substrate - Execution Plane)
-**Lead**: Jaber
+**Lead**: Jaber | **Supporting**: Satyam, Snithik
 **PI**: Prof. Arpit Gupta
 **Priority**: CRITICAL
 **Status**: Active Development
 
 ## Purpose
 
-The Substrate Worker is the **Execution Plane** of the Bottleneck Service. It instantiates bottleneck-regime specifications on concrete infrastructure, translating high-level network constraints into operational Linux traffic control (tc) configurations, packet capture (tshark), and traffic replay (tcpreplay) operations. It applies both static attributes (capacity, latency, AQM) and dynamic pressure (CTP background traffic) to the network interface.
+The Substrate Worker is the **Execution Plane** of the NetForge Service. It instantiates bottleneck-regime specifications on concrete infrastructure, translating high-level network constraints into operational Linux traffic control (tc) configurations, packet capture (tshark), and traffic replay (tcpreplay) operations. It applies both static attributes (capacity, latency, AQM) and dynamic pressure (CTP background traffic) to the network interface.
 
 ## Input
 
@@ -80,7 +80,7 @@ NetForge provides `NAT()` and `Tunnel()` abstractions for connectivity beyond th
 
 ```
 ┌──────────────────────────────────┐
-│  Bottleneck Service              │
+│  NetForge Service                │
 │  (CTP Orchestration Layer)       │
 └────────────┬──────────────────────┘
              │
@@ -347,7 +347,7 @@ substrate-worker:
 
 ---
 
-**Project**: Agentic Thin Waist (Bottleneck Service)
+**Project**: Agentic Thin Waist (NetForge Service)
 **PI**: Prof. Arpit Gupta
 **Lead**: Jaber
 **Last Updated**: 2026-03-04

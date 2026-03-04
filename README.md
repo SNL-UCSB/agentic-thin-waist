@@ -19,7 +19,7 @@ This platform applies the **hourglass design** from netUnicorn to network data g
             |           AGENTIC THIN WAIST             |
             |                                          |
             |  Orchestration    (Claude + OpenClaw)     |
-            |  Bottleneck Service                       |
+            |  NetForge Service                         |
             |    ├─ Intent: Link(), Bottleneck()        |
             |    ├─ Representation: CrossTraffic(), CTPs|
             |    └─ Execution: tc, tshark, tcpreplay    |
@@ -60,7 +60,7 @@ Together, these systems form the building blocks of the thin waist platform.
 
 ### Service Structure
 
-The platform is organized around a **Bottleneck Service** that maps directly to the three logical planes from the NetForge paper, plus supporting services for application execution, storage, and orchestration.
+The platform is organized around a **NetForge Service** that maps directly to the three logical planes from the NetForge paper, plus supporting services for application execution, storage, and orchestration.
 
 ```
   CONTROL PLANE                          DATA PLANE
@@ -70,7 +70,7 @@ The platform is organized around a **Bottleneck Service** that maps directly to 
  │  Orchestration (Claude +     │ specs │  Substrate Workers       │
  │    OpenClaw)                 │──────→│  (tc, tshark, tcpreplay) │
  │                              │       │                          │
- │  Bottleneck Service          │       │  NetGent Browser Workers │
+ │  NetForge Service            │       │  NetGent Browser Workers │
  │  ├─ Experiment API :8000     │       │  (app workflows)         │
  │  │  (intent plane)           │       │                          │
  │  ├─ CTP Service :8001        │results│  Telemetry Collectors    │
@@ -85,9 +85,9 @@ The platform is organized around a **Bottleneck Service** that maps directly to 
 
 The **Control Plane** runs on the researcher's machine or an SNL server — it orchestrates experiments and aggregates results. The **Data Plane** runs on infrastructure where experiments execute (can be the same machine or remote hosts).
 
-### Bottleneck Service
+### NetForge Service
 
-The Bottleneck Service is the core of the platform, implementing NetForge's three-plane disaggregation:
+The NetForge Service is the core of the platform, implementing NetForge's three-plane disaggregation:
 
 **Intent Plane (Experiment API, port 8000)**: Accepts bottleneck-regime specifications via `Link()` and `Bottleneck()` objects that define static attributes (capacity, base latency, buffering/AQM) independently of any execution context. Orchestrates the CTP Service and Substrate Worker.
 
@@ -107,17 +107,17 @@ The Bottleneck Service is the core of the platform, implementing NetForge's thre
 
 | Service | Port | Deliverable | NetForge Plane | Lead |
 |---------|------|-------------|----------------|------|
-| Experiment API | 8000 | D1 | Intent | Jaber |
-| CTP Service | 8001 | D1 | Representation | Jaber |
-| Substrate Worker | 8002 | D1 | Execution | Jaber |
+| Experiment API | 8000 | D1 | Intent | Jaber, Satyam, Snithik |
+| CTP Service | 8001 | D1 | Representation | Jaber, Satyam, Snithik |
+| Substrate Worker | 8002 | D1 | Execution | Jaber, Satyam, Snithik |
 | NetGent Service | 8003 | D2 | Application | Eugene + Jaber |
 | Telemetry Service | 8004 | D3 | Data Persistence | Manni |
 | Orchestration | 8005 | D5 | Agentic | Haarika |
 
 ## Deliverables
 
-### D1: Bottleneck Service — NetReplica as SOA (PRIORITY: CRITICAL)
-**Lead**: Jaber | **Start**: `services/experiment-api/README.md`
+### D1: NetForge Service — NetReplica as SOA (PRIORITY: CRITICAL)
+**Lead**: Jaber | **Supporting**: Satyam, Snithik | **Start**: `services/experiment-api/README.md`
 
 Refactor NetReplica's monolithic `controller.py` into three services mapping to NetForge's three planes. The Experiment API orchestrates CTP Service and Substrate Worker. An experiment can be created, executed on a local machine with bottleneck emulation via `docker compose up`, and telemetry collected — all from a single API call.
 
@@ -149,7 +149,7 @@ Three independent tracks running in parallel. Phase 1 (weeks 1–2) is independe
 
 | Track | Owner | Work |
 |-------|-------|------|
-| **Bottleneck Service** | Jaber | Track A: dataclasses, typed interfaces, `run_experiment()`. Track B: three-service SOA scaffold with mocked CTP and substrate |
+| **NetForge Service** | Jaber, Satyam, Snithik | Track A: dataclasses, typed interfaces, `run_experiment()`. Track B: three-service SOA scaffold with mocked CTP and substrate |
 | **NetGent API** | Eugene + Jaber | Programmatic API wrapper, NFA compiler integration, TOOLS.md for OpenClaw |
 | **Telemetry + Storage** | Manni | Schema design, contextual tree tagging, query API with mock data |
 | **Orchestration** | Haarika | OpenClaw integration, tool declarations, intent → experiment mapping (after NSDI camera-ready) |
@@ -159,7 +159,7 @@ Three independent tracks running in parallel. Phase 1 (weeks 1–2) is independe
 
 | Track | Work |
 |-------|------|
-| **Service integration** | Connect Bottleneck Service → Telemetry Service → Orchestration |
+| **Service integration** | Connect NetForge Service → Telemetry Service → Orchestration |
 | **End-to-end demo** | "Compare YouTube vs Zoom at 10, 25, 50 Mbps" generates experiments, executes, stores results |
 | **Testing** | Integration tests across service boundaries, bottleneck state verification |
 | **Documentation** | API reference, deployment guide, tutorials |
@@ -191,7 +191,7 @@ make build
 make up
 ```
 
-This starts the Bottleneck Service (Experiment API, CTP Service, Substrate Worker), NetGent, Telemetry, and Orchestration via Docker Compose.
+This starts the NetForge Service (Experiment API, CTP Service, Substrate Worker), NetGent, Telemetry, and Orchestration via Docker Compose.
 
 ### 3. Run Your First Experiment
 

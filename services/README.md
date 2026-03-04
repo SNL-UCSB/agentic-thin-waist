@@ -21,9 +21,9 @@ The three logical planes are:
 
 | Service | Port | Deliverable | Owner(s) | Dependencies |
 |---------|------|-------------|----------|--------------|
-| Experiment API | 8000 | D1 (CRITICAL) | Jaber | All services |
-| CTP Service | 8001 | D1 (CRITICAL) | Jaber | None |
-| Substrate Worker | 8002 | D1 (CRITICAL) | Jaber | Telemetry Service |
+| Experiment API | 8000 | D1 (CRITICAL) | Jaber, Satyam, Snithik | All services |
+| CTP Service | 8001 | D1 (CRITICAL) | Jaber, Satyam, Snithik | None |
+| Substrate Worker | 8002 | D1 (CRITICAL) | Jaber, Satyam, Snithik | Telemetry Service |
 | NetGent Service | 8003 | D2 (HIGH) | Eugene + Jaber | None (receives spec from upper layer) |
 | Telemetry Service | 8004 | D3 (HIGH) | Manni | None |
 | Orchestration Service | 8005 | D5 (VERY CRITICAL) | Haarika | All services |

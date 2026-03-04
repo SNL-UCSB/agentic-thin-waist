@@ -444,7 +444,7 @@ def test_replicability_across_substrates():
 
 ## Per-Service Testing Guide
 
-### D1: Foundation (Network Virtualization) — Jaber
+### D1: Foundation (Network Virtualization) — Jaber, Satyam, Snithik
 
 **Core tests**:
 ```bash
@@ -674,6 +674,7 @@ ptw tests/ -- -v
 ---
 
 **Lead**: Sylee (Architecture Review, CI/CD, Testing Infrastructure)
+**D1 Team**: Jaber, Satyam, Snithik
 **Last Updated**: 2026-03-04
 **Status**: Testing pyramid framework established
 **Next Milestone**: Complete unit tests for D1 services (Week 1-2), 80% coverage by Week 3

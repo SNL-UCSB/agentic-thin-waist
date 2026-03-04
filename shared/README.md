@@ -215,7 +215,7 @@ When updating dataclass schemas:
 
 **Principal Investigator**: Prof. Arpit Gupta
 
-**Team**: Jaber, Eugene, Haarika, Manni, Sylee
+**Team**: Jaber, Satyam, Snithik, Eugene, Haarika, Manni, Sylee
 
 **Reference Implementation**: OpenClaw (real private SNL-UCSB orchestration framework)
 

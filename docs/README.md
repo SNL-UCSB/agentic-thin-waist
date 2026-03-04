@@ -67,7 +67,7 @@ docs/
 
 ## Quick Navigation by Role
 
-### For Jaber (D1: Foundation - CRITICAL)
+### For Jaber, Satyam, Snithik (D1: Foundation - CRITICAL)
 - **QUICKSTART.md** — Get the system running locally
 - **ARCHITECTURE.md** — Understand the Intent → Representation → Execution planes
 - Service READMEs: Experiment API, CTP Service, Substrate Worker
@@ -184,7 +184,7 @@ See `shared/models/README.md` for complete type definitions.
 
 **PI**: Prof. Arpit Gupta
 **Team**:
-- Jaber (D1 Foundation — CRITICAL)
+- Jaber, Satyam, Snithik (D1 Foundation — CRITICAL)
 - Eugene + Jaber (D2 Application — HIGH)
 - Manni (D3 Data — HIGH)
 - Haarika (D5 Intelligence — VERY CRITICAL)

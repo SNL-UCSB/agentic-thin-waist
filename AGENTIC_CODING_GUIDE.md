@@ -34,6 +34,7 @@ You are **directing an agent**, not typing code. The agent can:
 ```
 I'm working on the Experiment API service for the Agentic Thin Waist project.
 The service manages network measurement experiments with a state machine (draft → created → running → done).
+I'm part of the D1 (NetForge Service) team with Jaber and Snithik.
 ```
 
 ### Be specific about what you want:
