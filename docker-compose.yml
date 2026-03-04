@@ -1,0 +1,162 @@
+version: '3.8'
+
+services:
+  # D1: Experiment API - Orchestration Layer
+  experiment-api:
+    build:
+      context: ./services/experiment-api
+      dockerfile: Dockerfile
+    container_name: experiment-api
+    ports:
+      - "8000:8000"
+    environment:
+      - FLASK_ENV=development
+      - CTP_SERVICE_URL=http://ctp-service:8001
+      - SUBSTRATE_WORKER_URL=http://substrate-worker:8002
+      - NETGENT_SERVICE_URL=http://netgent-service:8003
+      - STORAGE_SERVICE_URL=http://storage-service:8004
+    depends_on:
+      - ctp-service
+      - substrate-worker
+      - storage-service
+    networks:
+      - agentic-network
+    volumes:
+      - ./services/experiment-api:/app
+      - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # D1: CTP Service - Network Representation
+  ctp-service:
+    build:
+      context: ./services/ctp-service
+      dockerfile: Dockerfile
+    container_name: ctp-service
+    ports:
+      - "8001:8001"
+    environment:
+      - FLASK_ENV=development
+    networks:
+      - agentic-network
+    volumes:
+      - ./services/ctp-service:/app
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # D1: Substrate Worker - Network Execution
+  substrate-worker:
+    build:
+      context: ./services/substrate-worker
+      dockerfile: Dockerfile
+    container_name: substrate-worker
+    ports:
+      - "8002:8002"
+    environment:
+      - FLASK_ENV=development
+      - STORAGE_SERVICE_URL=http://storage-service:8004
+    depends_on:
+      - storage-service
+    networks:
+      - agentic-network
+    volumes:
+      - ./services/substrate-worker:/app
+      - /var/run/docker.sock:/var/run/docker.sock
+    # Substrate worker requires privileged mode to use tc (traffic control)
+    privileged: true
+    cap_add:
+      - NET_ADMIN
+      - SYS_ADMIN
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # D2: NetGent Service - Application Execution
+  netgent-service:
+    build:
+      context: ./services/netgent-service
+      dockerfile: Dockerfile
+    container_name: netgent-service
+    ports:
+      - "8003:8003"
+    environment:
+      - FLASK_ENV=development
+      - SUBSTRATE_WORKER_URL=http://substrate-worker:8002
+      - STORAGE_SERVICE_URL=http://storage-service:8004
+    depends_on:
+      - substrate-worker
+      - storage-service
+    networks:
+      - agentic-network
+    volumes:
+      - ./services/netgent-service:/app
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # D3: Storage Service - Telemetry and Results
+  storage-service:
+    build:
+      context: ./services/storage-service
+      dockerfile: Dockerfile
+    container_name: storage-service
+    ports:
+      - "8004:8004"
+    environment:
+      - FLASK_ENV=development
+      - DATABASE_URL=sqlite:///./agentic_thin_waist.db
+    networks:
+      - agentic-network
+    volumes:
+      - ./services/storage-service:/app
+      - storage-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # D5: Orchestration Service - Claude + OpenClaw
+  orchestration:
+    build:
+      context: ./services/orchestration
+      dockerfile: Dockerfile
+    container_name: orchestration
+    ports:
+      - "8005:8005"
+    environment:
+      - FLASK_ENV=development
+      - EXPERIMENT_API_URL=http://experiment-api:8000
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY:-}
+    depends_on:
+      - experiment-api
+      - ctp-service
+      - substrate-worker
+      - netgent-service
+      - storage-service
+    networks:
+      - agentic-network
+    volumes:
+      - ./services/orchestration:/app
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+networks:
+  agentic-network:
+    driver: bridge
+
+volumes:
+  storage-data:

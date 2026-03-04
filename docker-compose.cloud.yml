@@ -1,0 +1,131 @@
+# Cloud-optimized Docker Compose for AWS/Azure deployment
+# This extends the base docker-compose.yml with cloud-specific configurations
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.cloud.yml up
+
+version: '3.8'
+
+services:
+  experiment-api:
+    # Use image from ECR (Elastic Container Registry) if available
+    image: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/agentic-thin-waist/experiment-api:latest
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      - DEPLOYMENT_MODE=cloud
+      - LOG_LEVEL=info
+      - CORS_ORIGINS=*
+    # Deploy on cloud infrastructure
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+
+  ctp-service:
+    image: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/agentic-thin-waist/ctp-service:latest
+    restart: always
+    ports:
+      - "8001:8001"
+    environment:
+      - DEPLOYMENT_MODE=cloud
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  substrate-worker:
+    image: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/agentic-thin-waist/substrate-worker:latest
+    restart: always
+    ports:
+      - "8002:8002"
+    environment:
+      - DEPLOYMENT_MODE=cloud
+      - WORKER_ID=${WORKER_ID:-default}
+    privileged: true
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 4G
+        reservations:
+          cpus: '2'
+          memory: 2G
+
+  netgent-service:
+    image: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/agentic-thin-waist/netgent-service:latest
+    restart: always
+    ports:
+      - "8003:8003"
+    environment:
+      - DEPLOYMENT_MODE=cloud
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+
+  storage-service:
+    image: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/agentic-thin-waist/storage-service:latest
+    restart: always
+    ports:
+      - "8004:8004"
+    environment:
+      - DEPLOYMENT_MODE=cloud
+      # Use RDS PostgreSQL in cloud
+      - DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@${RDS_ENDPOINT}:5432/agentic_thin_waist
+      # Use S3 for data storage
+      - DATA_STORAGE=s3://${S3_BUCKET}/results/
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+
+  orchestration:
+    image: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/agentic-thin-waist/orchestration:latest
+    restart: always
+    ports:
+      - "8005:8005"
+    environment:
+      - DEPLOYMENT_MODE=cloud
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY}
+      - LOG_LEVEL=info
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+
+# Cloud volume configurations (for persistent data)
+volumes:
+  storage-data:
+    driver: local
+    driver_opts:
+      type: nfs
+      o: addr=${NFS_SERVER},vers=4,soft,timeo=180,bg,tcp,rw
+      device: ":${NFS_PATH}/storage"
+
+# Cloud networking
+networks:
+  agentic-network:
+    driver: bridge
+    # Configure for cloud security groups / VPC
+    driver_opts:
+      com.docker.network.driver.mtu: 1450

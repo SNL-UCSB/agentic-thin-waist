@@ -1,0 +1,10 @@
+# Experiment API Service Requirements
+flask==3.0.0
+flask-restful==0.3.10
+requests==2.31.0
+pydantic==2.5.0
+python-dotenv==1.0.0
+pyyaml==6.0.1
+
+# For production
+gunicorn==21.2.0
