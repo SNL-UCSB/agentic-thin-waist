@@ -1,456 +1,427 @@
 # NetGent Service
 
-**Port**: 8003
-**Deliverable**: D2 (Application Execution Layer)
-**Priority**: HIGH
-**Status**: To be implemented
+NFA-Based Application Workflow Execution — Deliverable D2
 
-## Purpose
-
-The NetGent Service executes application-level workflows (NFA-based browser automation) to generate application-specific traffic patterns and measure quality-of-experience (QoE) metrics. It bridges network conditions (from Substrate Worker) with application-level user experiences by simulating real user behavior on websites and streaming platforms.
-
-The NetGent Service:
-
-1. **Compiles workflows** — Convert NFA specifications to executable browser automations
-2. **Executes applications** — Run YouTube, Netflix, Zoom under controlled network conditions
-3. **Measures QoE metrics** — Capture video startup time, rebuffer events, bitrate
-4. **Manages browser instances** — Coordinate Selenium/Puppeteer automation
-5. **Stores artifacts** — Save workflow logs, screenshots, network traces
-
-This service integrates with existing NetGent NFA-based workflow engine developed at SNL-UCSB.
-
-## Architecture
-
-```
-┌──────────────────────────────┐
-│  Experiment API (8000)       │
-│  or Orchestration (8005)     │
-└────────────┬─────────────────┘
-             │ POST /workflows/execute
-             ▼
-┌──────────────────────────────┐
-│  NETGENT SERVICE (8003)      │
-│  NFA-Based Browser Automation│
-│  ┌────────────────────────┐  │
-│  │ Workflow Compiler      │  │
-│  │ Selenium/Puppeteer     │  │
-│  │ QoE Metric Extractors  │  │
-│  │ Artifact Collection    │  │
-│  └────────────────────────┘  │
-└──────────────┬────────────────┘
-               │
-      ┌────────┴─────────┐
-      ▼                  ▼
-  ┌─────────┐      ┌──────────────┐
-  │ Browser │      │ Storage      │
-  │Chrome   │      │ Service      │
-  │Firefox  │      │ :8004        │
-  └─────────┘      └──────────────┘
-```
-
-## API Specification
-
-### 1. List Available Workflows
-
-**Endpoint**: `GET /workflows/available`
-
-**Response** (200 OK):
-```json
-{
-  "workflows": [
-    {
-      "workflow_id": "youtube-watch-60s",
-      "application": "youtube",
-      "description": "Watch YouTube video for 60 seconds, measure QoE",
-      "expected_duration_seconds": 65,
-      "states": ["init", "navigate", "search", "play", "watch", "close"],
-      "qoe_metrics": ["startup_time_ms", "bitrate_mbps", "rebuffers"]
-    },
-    {
-      "workflow_id": "zoom-meeting-5m",
-      "application": "zoom",
-      "description": "Join Zoom meeting for 5 minutes",
-      "expected_duration_seconds": 310,
-      "states": ["init", "connect", "join", "active", "end"],
-      "qoe_metrics": ["video_quality", "audio_quality", "packet_loss"]
-    },
-    {
-      "workflow_id": "netflix-watch-30s",
-      "application": "netflix",
-      "description": "Watch Netflix video for 30 seconds",
-      "expected_duration_seconds": 35,
-      "states": ["init", "login", "select", "play", "watch"],
-      "qoe_metrics": ["startup_time_ms", "resolution_p", "rebuffers"]
-    }
-  ],
-  "total": 3
-}
-```
-
-**Supported Applications**:
-- youtube — Watch video (login-free)
-- youtube-premium — Premium account with recommendations
-- netflix — Streaming with login
-- zoom — Video conferencing
-- twitch — Streaming platform
-- discord — Voice/video chat
-- google-meet — Video conferencing
-- skype — Legacy video chat
-- teams — Microsoft Teams meeting
+**Port**: 8003 | **Leads**: Eugene + Jaber | **PI**: Prof. Arpit Gupta
 
 ---
 
-### 2. Execute Workflow
+## Overview
 
-**Endpoint**: `POST /workflows/execute`
+NetGent extends BQT+'s nondeterministic finite automaton (NFA) abstraction to general application workflows. The service compiles natural-language workflow specifications into executable NFA state machines, enabling high-fidelity simulation of user interactions across web-based applications (YouTube, Netflix, Zoom, Twitch, NDT speedtest, Puffer, and others).
+
+### Key Innovation
+
+The novel contribution of NetGent is **NFA compilation from natural-language specifications**. Rather than hand-coding workflows, users describe desired application interactions as NL prompts, which the service compiles into deterministic state machines executable via Selenium/Puppeteer.
+
+### Core Abstractions
+
+- **NFA Model**: States correspond to observable interface conditions; transitions encode permissible user interactions
+- **LangGraph StateGraph**: Internal execution uses four-node state machine for compilation, validation, execution, and result collection
+- **LLM Abstraction**: Uses `BaseChatModel` for swappable language models (per-call injection for OpenClaw integration)
+- **Workflow Result**: Complete execution outcome including states traversed, QoE metrics, artifacts, and timing
+
+---
+
+## API Reference
+
+### POST /workflows/execute
+
+Execute a workflow from natural-language specification.
 
 **Request**:
 ```json
 {
-  "workflow_id": "youtube-watch-60s",
-  "experiment_id": "youtube-10mbps-001",
+  "spec": "Watch YouTube for 60 seconds, measuring startup time and rebuffer events",
+  "timeout": 120,
   "application": "youtube",
-  "duration_seconds": 60,
-  "timeout_seconds": 120,
+  "llm_model": "gpt-4",
   "headless": true,
-  "record_har": true,
-  "record_video": false,
-  "network_interface": "eth0"
+  "capture_artifacts": true
 }
 ```
 
 **Response** (202 Accepted):
 ```json
 {
-  "workflow_execution_id": "exec-xyz789",
+  "workflow_id": "wf-uuid-001",
   "status": "executing",
-  "workflow_id": "youtube-watch-60s",
-  "experiment_id": "youtube-10mbps-001",
   "start_time": "2026-03-04T10:00:00Z",
-  "estimated_completion": "2026-03-04T10:01:05Z"
+  "estimated_completion": "2026-03-04T10:02:05Z"
 }
 ```
 
----
+### POST /workflows/compile
 
-### 3. Get Workflow Status
-
-**Endpoint**: `GET /workflows/{workflow_execution_id}`
-
-**Response** (200 OK):
-```json
-{
-  "workflow_execution_id": "exec-xyz789",
-  "status": "executing",
-  "progress": {
-    "current_state": "watch",
-    "states_completed": ["init", "navigate", "search", "play"],
-    "percent_complete": 75
-  },
-  "elapsed_seconds": 45
-}
-```
-
-**States**:
-- pending — created, waiting to start
-- executing — actively running
-- paused — suspended (for debugging)
-- completed — finished successfully
-- failed — error occurred
-- timeout — exceeded timeout_seconds
-
----
-
-### 4. Get Workflow Results
-
-**Endpoint**: `GET /workflows/{workflow_execution_id}/results`
-
-**Response** (200 OK):
-```json
-{
-  "workflow_execution_id": "exec-xyz789",
-  "workflow_id": "youtube-watch-60s",
-  "experiment_id": "youtube-10mbps-001",
-  "status": "completed",
-  "start_time": "2026-03-04T10:00:00Z",
-  "end_time": "2026-03-04T10:01:05Z",
-  "duration_seconds": 65.2,
-  "states_executed": ["init", "navigate", "search", "play", "watch", "close"],
-  "qoe_metrics": {
-    "video_startup_time_ms": 2500,
-    "mean_bitrate_mbps": 8.5,
-    "bitrate_changes": 3,
-    "rebuffer_events": 1,
-    "rebuffer_duration_ms": 2000,
-    "stall_duration_ms": 2000,
-    "mean_watched_bitrate_mbps": 8.2,
-    "max_bitrate_mbps": 9.5,
-    "min_bitrate_mbps": 4.2
-  },
-  "artifacts": {
-    "har_file": "/data/artifacts/exec-xyz789.har",
-    "console_log": "/data/artifacts/exec-xyz789.log",
-    "screenshot_count": 5,
-    "screenshots": ["/data/artifacts/exec-xyz789-state1.png"]
-  },
-  "errors": [],
-  "warnings": []
-}
-```
-
----
-
-### 5. Compile Workflow from Spec
-
-**Endpoint**: `POST /workflows/compile`
+Compile NL specification to executable NFA state machine.
 
 **Request**:
 ```json
 {
-  "nfa_spec": {
-    "states": [
-      {"id": "init", "type": "init"},
-      {"id": "navigate", "action": "goto", "url": "https://youtube.com"},
-      {"id": "search", "action": "click", "selector": "#search-input"},
-      {"id": "play", "action": "click", "selector": "video-player"},
-      {"id": "watch", "type": "wait", "duration": 60}
-    ],
-    "transitions": [
-      {"from": "init", "to": "navigate"},
-      {"from": "navigate", "to": "search"},
-      {"from": "search", "to": "play"},
-      {"from": "play", "to": "watch"}
-    ]
-  }
+  "spec": "Navigate to Netflix, log in, select a show, play for 30 seconds"
 }
 ```
 
 **Response** (200 OK):
 ```json
 {
-  "compiled": true,
-  "workflow_id": "compiled-abc123",
-  "states": 5,
-  "estimated_duration_seconds": 65
+  "workflow_id": "wf-compiled-abc123",
+  "states": [
+    {"id": "init", "action": "initialize_browser"},
+    {"id": "navigate", "action": "goto", "url": "https://netflix.com"},
+    {"id": "login", "action": "enter_credentials", "selectors": ["email", "password"]},
+    {"id": "select", "action": "click_video"},
+    {"id": "play", "action": "wait", "duration": 30}
+  ],
+  "transitions": [
+    {"from": "init", "to": "navigate"},
+    {"from": "navigate", "to": "login"},
+    {"from": "login", "to": "select"},
+    {"from": "select", "to": "play"}
+  ],
+  "estimated_duration_seconds": 35,
+  "validation_status": "passed"
 }
 ```
 
----
+### POST /workflows/validate
 
-### 6. Health Check
+Validate workflow specification for correctness and completeness.
 
-**Endpoint**: `GET /health`
+**Request**:
+```json
+{
+  "spec": "Click button with selector #play-btn, then wait 60 seconds"
+}
+```
+
+**Response** (200 OK):
+```json
+{
+  "valid": true,
+  "errors": [],
+  "warnings": [
+    "No video element selection found; ensure video loads before wait"
+  ],
+  "estimated_duration_seconds": 62,
+  "state_count": 3
+}
+```
+
+### GET /workflows/{id}
+
+Retrieve workflow result by execution ID.
+
+**Response** (200 OK):
+```json
+{
+  "workflow_id": "wf-uuid-001",
+  "status": "completed",
+  "states_executed": ["init", "navigate", "search", "play", "watch", "close"],
+  "duration": 65.2,
+  "nfa": {
+    "states": 6,
+    "transitions": 5,
+    "initial_state": "init",
+    "accepting_states": ["close"]
+  },
+  "artifacts": {
+    "har_file": "s3://artifacts/wf-uuid-001.har",
+    "console_log": "s3://artifacts/wf-uuid-001.log",
+    "screenshots": ["s3://artifacts/wf-uuid-001-state1.png"]
+  },
+  "qoe_metrics": {
+    "video_startup_time_ms": 2500,
+    "mean_bitrate_mbps": 8.5,
+    "rebuffer_events": 1,
+    "rebuffer_duration_ms": 2000,
+    "bitrate_changes": 3,
+    "max_bitrate_mbps": 9.5,
+    "min_bitrate_mbps": 4.2
+  },
+  "errors": []
+}
+```
+
+### GET /health
+
+Health check endpoint.
 
 **Response** (200 OK):
 ```json
 {
   "status": "healthy",
   "checks": {
-    "browser_chromedriver": "available",
-    "browser_firefox": "available",
-    "selenium_running": true,
-    "workflow_engine": "operational"
-  }
+    "browser_driver": "available",
+    "llm_service": "responsive",
+    "workflow_engine": "operational",
+    "storage_service": "connected"
+  },
+  "uptime_seconds": 3600
 }
 ```
 
-## Dataclass Contracts
+---
+
+## Supported Applications
+
+| Application | NFA Support | QoE Metrics | Notes |
+|-------------|-------------|------------|-------|
+| YouTube | Full | Startup, bitrate, rebuffers | Login-free |
+| Netflix | Full | Startup, resolution, rebuffers | Requires credentials |
+| Zoom | Full | Video quality, audio quality, packet loss | Requires URL/token |
+| Twitch | Full | Startup, bitrate, chat interaction | Live & VOD support |
+| NDT speedtest | Full | Upload, download, latency, loss | No UI interaction |
+| Puffer | Full | Bitrate, ABR decisions, QoE | Research platform |
+| Google Meet | Full | Video quality, connection state | Real-time metrics |
+| Discord | Partial | Voice quality, connection state | Limited video QoE |
+
+---
+
+## NetGentAPI Class
+
+Core API for programmatic workflow management.
 
 ```python
-from dataclasses import dataclass, field
-from typing import List, Dict, Optional, Any
-from enum import Enum
+class NetGentAPI:
+    def execute_workflow(
+        self,
+        spec: str,
+        timeout: int = 120,
+        llm: Optional[BaseChatModel] = None
+    ) -> WorkflowResult:
+        """Execute workflow from NL spec with optional LLM override."""
 
-@dataclass
-class WorkflowResult:
-    """Complete workflow execution result."""
-    workflow_execution_id: str
-    workflow_id: str
-    experiment_id: str
-    application: str
-    status: str  # executing, completed, failed, timeout
-    start_time: str
-    end_time: Optional[str]
-    duration_seconds: float
-    states_executed: List[str]
-    artifacts_collected: Dict[str, Any]
-    error: Optional[str] = None
+    def compile_nfa(self, spec: str) -> NFA:
+        """Compile spec to NFA state machine."""
 
-@dataclass
-class QoEMetrics:
-    """Quality of Experience metrics."""
-    video_startup_time_ms: float
-    mean_bitrate_mbps: float
-    bitrate_changes: int
-    rebuffer_events: int
-    rebuffer_duration_ms: float
-    stall_duration_ms: float = 0.0
-    mean_watched_bitrate_mbps: Optional[float] = None
-    max_bitrate_mbps: Optional[float] = None
-    min_bitrate_mbps: Optional[float] = None
+    def validate_workflow(self, spec: str) -> ValidationResult:
+        """Validate spec without execution."""
 
-@dataclass
-class WorkflowSpecification:
-    """NFA-based workflow definition."""
-    workflow_id: str
-    application: str
-    description: str
-    states: List[Dict[str, Any]]
-    transitions: List[Dict[str, str]]
-    expected_duration_seconds: int
-    qoe_metric_types: List[str] = field(default_factory=list)
+    def health_check(self) -> HealthStatus:
+        """Return service health."""
+
+    def detect_interface_changes(self, url: str) -> List[InterfaceChange]:
+        """Detect DOM changes to improve selector robustness."""
 ```
 
-## Service Dependencies
+### LLM Injection (Per-Call)
 
-| Service | Endpoint | Purpose |
-|---------|----------|---------|
-| Substrate Worker | GET /workers/metrics | Monitor network conditions during workflow |
-| Storage Service | POST /artifacts | Store workflow artifacts (har, logs, screenshots) |
+**Feature**: Pass LLM instance per-call for OpenClaw integration.
 
-## Testing Criteria
+```python
+# Use default LLM
+result = api.execute_workflow("Watch YouTube for 60s")
+
+# Override with custom LLM
+from langchain.chat_models import ChatOpenAI
+custom_llm = ChatOpenAI(model="gpt-4-turbo")
+result = api.execute_workflow("Watch YouTube for 60s", llm=custom_llm)
+```
+
+### Interface Change Detection
+
+**Feature**: Detect DOM mutations to handle dynamic interfaces.
+
+```python
+changes = api.detect_interface_changes("https://youtube.com")
+# Returns: [
+#   InterfaceChange(selector="#search", change_type="added"),
+#   InterfaceChange(selector=".video-player", change_type="modified")
+# ]
+```
+
+---
+
+## Data Structures
+
+### WorkflowResult
+
+Complete execution outcome.
+
+```python
+@dataclass
+class WorkflowResult:
+    workflow_id: str
+    status: str  # "executing" | "completed" | "failed" | "timeout"
+    states_executed: List[str]
+    artifacts: Dict[str, str]  # Keys: "har_file", "console_log", "screenshots"
+    duration: float
+    errors: List[str]
+    nfa: Optional[Dict[str, Any]] = None
+    qoe_metrics: Optional[Dict[str, float]] = None
+```
+
+### NFA
+
+Nondeterministic finite automaton structure.
+
+```python
+@dataclass
+class NFA:
+    states: List[State]
+    transitions: List[Transition]
+    initial_state: str
+    accepting_states: List[str]
+
+@dataclass
+class State:
+    id: str
+    action: str  # "navigate", "click", "wait", "screenshot", etc.
+    parameters: Dict[str, Any]
+
+@dataclass
+class Transition:
+    from_state: str
+    to_state: str
+    condition: Optional[str] = None
+```
+
+### ValidationResult
+
+Result of spec validation.
+
+```python
+@dataclass
+class ValidationResult:
+    valid: bool
+    errors: List[str]
+    warnings: List[str]
+    state_count: int
+    estimated_duration_seconds: float
+```
+
+---
+
+## Architecture
+
+```
+┌─────────────────────────────────────────┐
+│     User / Orchestrator (Port 8000)     │
+└──────────────────┬──────────────────────┘
+                   │ POST /workflows/execute
+                   ▼
+┌─────────────────────────────────────────┐
+│      NetGent Service (Port 8003)        │
+│  ┌───────────────────────────────────┐  │
+│  │  API Layer                        │  │
+│  │  - execute_workflow()             │  │
+│  │  - compile_nfa()                  │  │
+│  │  - validate_workflow()            │  │
+│  │  - health_check()                 │  │
+│  └───────────────────────────────────┘  │
+│  ┌───────────────────────────────────┐  │
+│  │  LangGraph StateGraph (4 nodes)   │  │
+│  │  1. Compile: NL → NFA             │  │
+│  │  2. Validate: Check NFA           │  │
+│  │  3. Execute: Run Selenium/CDP     │  │
+│  │  4. Collect: Metrics + Artifacts  │  │
+│  └───────────────────────────────────┘  │
+│  ┌───────────────────────────────────┐  │
+│  │  Execution Engine                 │  │
+│  │  - Selenium/Puppeteer             │  │
+│  │  - Browser pool management        │  │
+│  │  - Screenshot capture             │  │
+│  │  - Interface change detection     │  │
+│  └───────────────────────────────────┘  │
+└──────────────────┬──────────────────────┘
+         ┌─────────┴──────────┬──────────────┐
+         ▼                    ▼              ▼
+    ┌─────────┐         ┌─────────┐   ┌──────────┐
+    │ Browser │         │  LLM    │   │ Storage  │
+    │ Drivers │         │ Service │   │ Service  │
+    │Chrome   │         │ (OpenAI)│   │ (S3/GCS) │
+    │Firefox  │         └─────────┘   └──────────┘
+    └─────────┘
+```
+
+---
+
+## Implementation Notes
+
+### Four-Node LangGraph StateGraph
+
+The execution pipeline uses LangGraph's StateGraph with four sequential nodes:
+
+1. **Compile Node**: Invoke LLM to parse NL spec into NFA
+2. **Validate Node**: Check NFA for completeness, cycles, and coverage
+3. **Execute Node**: Run NFA states via Selenium/CDP, collect artifacts
+4. **Collect Node**: Extract QoE metrics, store results, generate reports
+
+### Per-Call LLM Injection
+
+```python
+def execute_workflow(spec: str, llm: Optional[BaseChatModel] = None):
+    llm = llm or self.default_llm
+    # Pass llm to Compile node
+    graph.invoke({"spec": spec, "llm": llm})
+```
+
+### Browser Pool
+
+Maintains reusable Chrome/Firefox instances to avoid overhead:
+- Preallocate 5 browsers at startup
+- Reuse browsers across workflows
+- Clean cookies/cache between runs
+- Graceful shutdown on timeout
+
+### QoE Metric Extraction
+
+HAR file analysis extracts:
+- **Startup time**: Time from request to first video frame
+- **Bitrate**: Analyze video segment sizes and duration
+- **Rebuffers**: Gaps between video segment completions
+- **Resolution**: Parse manifest files or CDP protocol
+
+---
+
+## Testing Strategy
 
 ### Unit Tests
-- Workflow compilation produces valid NFA state machine
-- QoE metric extraction from HAR/DevTools
-- Application selector matching
+- NFA compilation from NL specs
+- State transition validation
+- Selector robustness
 - Timeout handling
 
 ### Integration Tests
-- YouTube workflow produces consistent QoE metrics
-- Zoom meeting workflow captures audio/video quality
-- Netflix workflow handles login and playback
-- Workflow execution under various network conditions (10, 25, 50 Mbps)
-- Artifacts (HAR, logs) stored correctly
-- Concurrent workflows don't interfere with each other
+- End-to-end YouTube workflow (60s, 70s execution)
+- Netflix login + playback
+- Zoom meeting join
+- Multi-app concurrent execution
+- Artifact storage verification
 
 ### Performance Tests
-- Workflow compilation < 1s
-- YouTube workflow execution completes in ~70s
-- QoE metric extraction < 5s
-- Artifact upload < 10s
+- Compilation < 1s per spec
+- Execution within 10% of target duration
+- QoE extraction < 5s
+- Browser startup < 3s
 
-## Implementation Guide
+---
 
-### Step 1: Project Structure
+## Configuration
+
+**Environment Variables**:
 ```bash
-services/netgent-service/
-├── Dockerfile
-├── requirements.txt
-├── app/
-│   ├── __init__.py
-│   ├── main.py
-│   ├── api/
-│   │   ├── __init__.py
-│   │   └── workflows.py
-│   ├── engine/
-│   │   ├── __init__.py
-│   │   ├── nfa_compiler.py     # Compile NFA to Selenium
-│   │   ├── workflow_executor.py # Run workflows
-│   │   ├── qoe_extractor.py    # Extract QoE metrics
-│   │   └── browser_pool.py     # Manage browser instances
-│   ├── applications/
-│   │   ├── __init__.py
-│   │   ├── youtube.py          # YouTube workflow
-│   │   ├── netflix.py
-│   │   ├── zoom.py
-│   │   └── common.py           # Shared utilities
-│   ├── models/
-│   │   └── __init__.py
-│   └── utils/
-│       ├── __init__.py
-│       └── logging.py
-└── tests/
-    ├── __init__.py
-    └── test_*.py
+NETGENT_PORT=8003
+NETGENT_TIMEOUT_DEFAULT=120
+LLM_API_KEY=<OpenAI API key>
+LLM_MODEL=gpt-4-turbo
+STORAGE_BUCKET=gs://netgent-artifacts
+BROWSER_POOL_SIZE=5
 ```
 
-### Step 2: NFA Compiler
-```python
-# app/engine/nfa_compiler.py
-class NFACompiler:
-    def compile(self, nfa_spec: WorkflowSpecification):
-        """Convert NFA to executable workflow."""
-        # Build state machine graph
-        states = {s['id']: s for s in nfa_spec.states}
-        transitions = nfa_spec.transitions
-
-        # Validate NFA properties
-        # Return compiled workflow object
-```
-
-### Step 3: Workflow Executor
-```python
-# app/engine/workflow_executor.py
-from selenium import webdriver
-
-class WorkflowExecutor:
-    def execute(self, workflow: CompiledWorkflow) -> WorkflowResult:
-        """Execute workflow and collect metrics."""
-        driver = webdriver.Chrome()
-        try:
-            # Execute each state in order
-            for state_id in workflow.state_order:
-                self._execute_state(driver, workflow.states[state_id])
-
-            # Extract QoE metrics
-            har = self._get_har(driver)
-            metrics = self._extract_qoe(har)
-
-            return WorkflowResult(
-                status="completed",
-                qoe_metrics=metrics,
-                artifacts={"har": har}
-            )
-        finally:
-            driver.quit()
-```
-
-### Step 4: QoE Metric Extraction
-```python
-# app/engine/qoe_extractor.py
-class QoEExtractor:
-    def extract_from_har(self, har: dict) -> QoEMetrics:
-        """Extract QoE metrics from HAR file."""
-        # Find video stream entries
-        # Calculate startup time (first video response)
-        # Analyze bitrate changes
-        # Count rebuffer events
-```
-
-### Step 5: Application-Specific Workflows
-```python
-# app/applications/youtube.py
-def youtube_watch_60s_workflow(driver) -> WorkflowResult:
-    """Watch YouTube video for 60 seconds."""
-    driver.get("https://www.youtube.com")
-
-    # Click search
-    driver.find_element("id", "search").click()
-    driver.find_element("id", "search-input").send_keys("big buck bunny")
-
-    # Press Enter
-    driver.find_element("id", "search-input").submit()
-
-    # Click first video
-    driver.find_element("css selector", "a#thumbnail[href*='watch?v=']").click()
-
-    # Wait 60 seconds
-    time.sleep(60)
-
-    # Return metrics...
-```
+---
 
 ## References
 
-- NetGent NFA workflows: Private SNL-UCSB repo
+- BQT+ Documentation: ISP interface NFA modeling
+- LangGraph: https://github.com/langchain-ai/langgraph
 - Selenium WebDriver: https://www.selenium.dev/documentation/
-- Puppeteer: https://pptr.dev/
-- HAR specification: http://www.softwareishard.com/blog/har-12-spec/
 - Chrome DevTools Protocol: https://chromedevtools.github.io/devtools-protocol/
+- HAR Spec: http://www.softwareishard.com/blog/har-12-spec/
 
 ---
 
 **Last Updated**: 2026-03-04
 **Status**: Specification Ready
-**Next Milestone**: Integration with existing NetGent (Week 3)
+**Next Phase**: Integration with BQT+ orchestrator, OpenClaw LLM routing

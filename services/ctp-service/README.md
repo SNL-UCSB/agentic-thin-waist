@@ -1,303 +1,308 @@
-# CTP Service
+# CTP Service — Representation Plane of the Bottleneck
 
 **Port**: 8001
-**Deliverable**: D1 (Network Virtualization Substrate - Representation Plane)
-**Priority**: CRITICAL
-**Status**: To be implemented
+**Deliverable**: D1 (Agentic Thin Waist - Representation Plane)
+**Team**: PI: Prof. Arpit Gupta | Lead: Jaber
+**Status**: Active Development
 
-## Purpose
+## Overview
 
-The CTP (Capacity-Throughput Profile) Service is the network representation layer that translates high-level network conditions (capacity, latency, loss rate, AQM policy) into Linux kernel `tc` (traffic control) commands. It serves as a bridge between abstract research intents and concrete network configurations.
+The CTP (Cross-Traffic Profile) Service is the **Representation Plane** of the bottleneck in the Agentic Thin Waist architecture. It transforms passive packet traces from production networks into reusable, composable representations of dynamic congestion pressure—enabling systematic experimentation with realistic traffic conditions without binding to specific paths, applications, or users.
 
-A CTP is a tuple: `(capacity_mbps, latency_ms, loss_rate, aqm_policy)` that completely specifies a network condition. The CTP Service:
+A **CTP is a reusable representation of dynamic congestion pressure applied at a bottleneck**. It encodes the temporal structure of aggregate demand observed at a bottleneck—intensity, burstiness, heterogeneity, and temporal correlations—without binding to the particular path, applications, or users that produced it.
 
-1. **Validates CTPs** — Ensure parameters are physically feasible
-2. **Compiles CTPs** — Translate to `tc qdisc` commands
-3. **Manages presets** — Store and retrieve common network profiles
-4. **Verifies state** — Confirm network matches configured CTP
-5. **Supports algebra** — Compose, scale, and normalize CTPs
+The CTP Service implements the **TRACE–CONTEXT DISAGGREGATION** from the NetForge paper (Section 3.4), transforming passive packet traces into composable, transformable representations of network traffic.
 
-This service is infrastructure-agnostic but assumes Linux `tc` is available on the data plane.
+## Core Concepts
+
+### Cross-Traffic Profile (CTP)
+
+A CTP is an extracted, indexed representation of demand pressure that:
+- **Captures temporal structure** of aggregate traffic (intensity, burstiness, heterogeneity, temporal correlation)
+- **Encodes contributor composition** (host-level aggregates, prefix-based hierarchy, upload-download asymmetry)
+- **Operates independently** of the specific paths, applications, or users that generated it
+- **Enables systematic experimentation** with realistic, reproducible network conditions
+
+### CTP Indexing
+
+NetForge indexes CTPs using multi-dimensional statistical descriptors:
+
+**Temporal Attributes**:
+- Intensity: Mean traffic rate (packets/sec or bytes/sec)
+- Burstiness: Peak-to-Mean Ratio (PMR) and Coefficient of Variation (CoV)
+- Temporal Correlation: Autocorrelation at multiple lags
+
+**Structural Attributes**:
+- Contributor Count: Number of unique host pairs generating demand
+- Upload-Download Asymmetry: Ratio of upstream to downstream traffic volume
+- Prefix Diversity: Spatial heterogeneity via prefix-based aggregation trees
+
+All CTPs are indexed in PostgreSQL to enable multi-dimensional queries for selection and retrieval.
+
+### CTP Corpus
+
+The NetForge prototype ingests packet traces from production vantage points. For the campus gateway (48k users, 8.2 Gbps peak), 15-minute intervals yielded approximately 230k CTPs after filtering. Each CTP groups packets into bidirectional host-level contributors, aggregated into prefix-based trees that preserve spatial locality, heterogeneity, asymmetry, and traffic composition.
 
 ## Architecture
 
 ```
-┌──────────────────────────────┐
-│   Experiment API (8000)      │
-│   or External Client         │
-└────────────┬─────────────────┘
-             │ POST /ctps/validate
-             │ POST /ctps/compile
+┌────────────────────────────────────┐
+│   Experiment Controller (Port 8000) │
+│   or External Research Client       │
+└────────────┬─────────────────────────┘
+             │
+             │ Orchestrates CTP operations
+             │
              ▼
-┌──────────────────────────────┐
-│   CTP SERVICE (8001)         │
-│  ┌────────────────────────┐  │
-│  │ CTP Algebra Engine     │  │
-│  │ - Validation           │  │
-│  │ - Compilation          │  │
-│  │ - Verification         │  │
-│  └────────────────────────┘  │
-└──────────────┬────────────────┘
-               │ tc commands
-               │ iperf3, ping for verification
-               ▼
-        ┌──────────────────┐
-        │ Linux Kernel     │
-        │ tc/qdisc         │
-        │ network stack    │
-        └──────────────────┘
+┌────────────────────────────────────┐
+│   CTP SERVICE (Port 8001)           │
+│  ┌──────────────────────────────┐  │
+│  │ CTP Operations Engine        │  │
+│  │                              │  │
+│  │ • extract() — traces → CTPs  │  │
+│  │ • select() — query by attrs  │  │
+│  │ • transform() — adapt CTP    │  │
+│  │ • merge() — compose CTPs     │  │
+│  │ • replay() — apply at link   │  │
+│  │                              │  │
+│  └──────────────────────────────┘  │
+│                                     │
+│  ┌──────────────────────────────┐  │
+│  │ CTP Index & Storage          │  │
+│  │ PostgreSQL with statistical  │  │
+│  │ descriptors & metadata       │  │
+│  └──────────────────────────────┘  │
+└────────────┬─────────────────────────┘
+             │
+             │ tcpreplay commands
+             │ Hybrid replay model:
+             │ • background: open-loop
+             │ • target app: fully reactive
+             │
+             ▼
+        ┌────────────────────┐
+        │ Linux Bottleneck   │
+        │ tc/qdisc (applied) │
+        │ Network Interface  │
+        └────────────────────┘
 ```
 
-## API Specification
+## CTP Operations
 
-### 1. Validate CTP
+The CTP Service provides five core operations (from NetForge paper):
 
-**Endpoint**: `POST /ctps/validate`
+### 1. extract() — Process Packet Traces into CTPs
+
+Ingests raw PCAP/packet traces and extracts reusable CTP representations.
+
+**Endpoint**: `POST /ctps/extract`
 
 **Request**:
 ```json
 {
-  "capacity_mbps": 10.0,
-  "latency_ms": 50,
-  "loss_rate": 0.0,
-  "aqm_policy": "fifo"
+  "trace_file": "gateway-2026-03-04-14h-15m.pcap",
+  "interval_seconds": 60,
+  "filter_min_packets": 100,
+  "aggregation_level": "host"
 }
 ```
 
 **Response** (200 OK):
 ```json
 {
-  "valid": true,
-  "ctp_id": "ctp-001",
-  "warnings": [],
-  "compiled_commands": [
-    "tc qdisc replace dev eth0 root handle 1: tbf rate 10mbit burst 15k latency 50ms",
-    "tc qdisc add dev eth0 parent 1: handle 10: fifo limit 1000"
+  "ctp_count": 15,
+  "extraction_status": "success",
+  "ctps": [
+    {
+      "ctp_id": "ctp-20260304-001",
+      "start_time": "2026-03-04T14:00:00Z",
+      "duration_seconds": 60,
+      "intensity": {
+        "mean_pps": 45230,
+        "mean_bps": 2.7e9
+      },
+      "burstiness": {
+        "peak_to_mean_ratio": 3.2,
+        "coefficient_of_variation": 0.84
+      },
+      "temporal_correlation": {
+        "lag_1_autocorr": 0.62,
+        "lag_5_autocorr": 0.41
+      },
+      "structure": {
+        "contributor_count": 847,
+        "upload_download_ratio": 0.23,
+        "prefix_diversity": 0.78
+      },
+      "stored_at": "postgresql:ctp_corpus"
+    }
+  ],
+  "filtering_notes": "Removed 3 intervals with < 100 packets"
+}
+```
+
+### 2. select() — Query CTPs by Statistical Descriptors
+
+Retrieve CTPs from the corpus matching specific congestion profiles.
+
+**Endpoint**: `POST /ctps/select`
+
+**Request**:
+```json
+{
+  "query": {
+    "intensity_range_mbps": [1000, 3000],
+    "burstiness_pmr_range": [2.0, 4.0],
+    "temporal_correlation_min": 0.4,
+    "contributor_count_min": 500,
+    "upload_download_ratio_max": 0.5
+  },
+  "limit": 10,
+  "order_by": "intensity"
+}
+```
+
+**Response** (200 OK):
+```json
+{
+  "query_matched": 347,
+  "results_returned": 10,
+  "ctps": [
+    {
+      "ctp_id": "ctp-20260304-042",
+      "intensity_mbps": 2150,
+      "burstiness_pmr": 3.1,
+      "temporal_correlation": 0.52,
+      "contributor_count": 612,
+      "upload_download_ratio": 0.31
+    }
   ]
 }
 ```
 
-**Validation Rules**:
-- `0 < capacity_mbps <= 10000` (Mbps)
-- `0 <= latency_ms <= 10000` (ms)
-- `0 <= loss_rate <= 1.0`
-- `aqm_policy` in ["fifo", "codel", "pie", "fq_codel", "sfq"]
+### 3. transform() — Rescale CTP to Target Bottleneck
 
-**Error Codes**:
-- 200 OK + valid: false — warnings but no hard errors
-- 400 Bad Request — invalid parameters
+Adapt a CTP's amplitude to match target capacity while preserving burst timing and structure.
 
----
-
-### 2. Compile CTP to tc Commands
-
-**Endpoint**: `POST /ctps/compile`
+**Endpoint**: `POST /ctps/transform`
 
 **Request**:
 ```json
 {
-  "capacity_mbps": 25.0,
-  "latency_ms": 30,
-  "loss_rate": 0.001,
-  "aqm_policy": "codel",
-  "interface": "eth0"
+  "ctp_id": "ctp-20260304-042",
+  "target_capacity_mbps": 1000,
+  "preserve_structure": true
 }
 ```
 
 **Response** (200 OK):
 ```json
 {
-  "interface": "eth0",
-  "tc_commands": [
-    "tc qdisc replace dev eth0 root handle 1: tbf rate 25mbit burst 31250b latency 30ms",
-    "tc qdisc add dev eth0 parent 1: handle 10: codel target 5ms interval 100ms",
-    "tc filter add dev eth0 parent 1: protocol ip prio 1 u32 match ip src 0.0.0.0/0 action netem loss 0.1%"
-  ],
-  "cleanup_commands": [
-    "tc qdisc del dev eth0 root"
-  ],
-  "estimated_buffer_packets": 1024,
-  "notes": "CoDel AQM requires kernel 3.5+. Verify with 'tc qdisc show dev eth0'"
-}
-```
-
-**AQM Implementations**:
-
-| AQM | tc qdisc | Description | Kernel Version |
-|-----|----------|-------------|-----------------|
-| fifo | fifo | FIFO queue, no active queue management | All |
-| codel | codel | Controlled Delay, targets low latency | 3.5+ |
-| pie | pie | Proportional Integral controller Enhanced | 4.0+ |
-| fq_codel | fq_codel | Fair Queue + CoDel, per-flow queue | 3.11+ |
-| sfq | sfq | Stochastic Fairness Queueing | 2.2+ |
-
----
-
-### 3. Get CTP Presets
-
-**Endpoint**: `GET /ctps/presets`
-
-**Response** (200 OK):
-```json
-{
-  "presets": [
-    {
-      "name": "broadband-50mbps",
-      "capacity_mbps": 50,
-      "latency_ms": 20,
-      "loss_rate": 0.0,
-      "aqm_policy": "codel",
-      "description": "Typical home broadband (cable/fiber)"
-    },
-    {
-      "name": "mobile-lte",
-      "capacity_mbps": 15,
-      "latency_ms": 100,
-      "loss_rate": 0.001,
-      "aqm_policy": "pie",
-      "description": "LTE mobile network"
-    },
-    {
-      "name": "mobile-5g",
-      "capacity_mbps": 100,
-      "latency_ms": 30,
-      "loss_rate": 0.0,
-      "aqm_policy": "codel",
-      "description": "5G network"
-    },
-    {
-      "name": "satellite",
-      "capacity_mbps": 20,
-      "latency_ms": 600,
-      "loss_rate": 0.01,
-      "aqm_policy": "fifo",
-      "description": "Satellite internet (GEO)"
-    },
-    {
-      "name": "dial-up",
-      "capacity_mbps": 0.056,
-      "latency_ms": 150,
-      "loss_rate": 0.05,
-      "aqm_policy": "fifo",
-      "description": "Dial-up modem (for historical testing)"
-    }
-  ],
-  "total": 5
-}
-```
-
----
-
-### 4. Create CTP Preset
-
-**Endpoint**: `POST /ctps/presets`
-
-**Request**:
-```json
-{
-  "name": "custom-profile",
-  "capacity_mbps": 30,
-  "latency_ms": 40,
-  "loss_rate": 0.002,
-  "aqm_policy": "codel",
-  "description": "Custom research profile"
-}
-```
-
-**Response** (201 Created):
-```json
-{
-  "preset_id": "ctp-custom-001",
-  "created_at": "2026-03-04T10:00:00Z"
-}
-```
-
----
-
-### 5. Verify Network State
-
-**Endpoint**: `POST /ctps/verify`
-
-**Request**:
-```json
-{
-  "interface": "eth0",
-  "expected_capacity_mbps": 10.0,
-  "expected_latency_ms": 50,
-  "measurement_duration_seconds": 5,
-  "tolerance_percent": 5
-}
-```
-
-**Response** (200 OK):
-```json
-{
-  "verification_passed": true,
-  "measurements": {
-    "throughput_mbps": 9.8,
-    "throughput_error_percent": 2.0,
-    "rtt_ms": 51.2,
-    "rtt_error_percent": 2.4,
-    "packet_loss_percent": 0.0,
-    "jitter_ms": 1.5
+  "original_ctp_id": "ctp-20260304-042",
+  "transformed_ctp_id": "ctp-transform-20260304-042-1000mbps",
+  "original_intensity_mbps": 2150,
+  "target_capacity_mbps": 1000,
+  "scale_factor": 0.465,
+  "preserved_attributes": {
+    "burstiness_pmr": 3.1,
+    "temporal_correlation": 0.52,
+    "contributor_structure": "unchanged"
   },
-  "details": {
-    "measured_via": "iperf3 + ping",
-    "sample_count": 60,
-    "measurement_start": "2026-03-04T10:00:00Z",
-    "measurement_end": "2026-03-04T10:00:05Z"
+  "notes": "Intensity rescaled; temporal structure and asymmetry preserved"
+}
+```
+
+### 4. merge() — Compose Multiple CTPs
+
+Systematically combine multiple CTPs to control dynamic pressure, creating synthetic workload compositions.
+
+**Endpoint**: `POST /ctps/merge`
+
+**Request**:
+```json
+{
+  "ctp_ids": [
+    "ctp-20260304-042",
+    "ctp-20260304-127",
+    "ctp-20260304-089"
+  ],
+  "weights": [0.5, 0.3, 0.2],
+  "merge_strategy": "weighted_sum"
+}
+```
+
+**Response** (200 OK):
+```json
+{
+  "merged_ctp_id": "ctp-merge-20260304-composite-001",
+  "source_ctps": 3,
+  "weights": [0.5, 0.3, 0.2],
+  "merged_properties": {
+    "intensity_mbps": 1845,
+    "burstiness_pmr": 3.0,
+    "temporal_correlation": 0.48,
+    "contributor_count_effective": 1120
+  },
+  "notes": "Merged CTP suitable for multi-tenant scenarios"
+}
+```
+
+### 5. replay() — Apply CTP at Bottleneck via tcpreplay
+
+Apply a CTP at the bottleneck using hybrid replay: background traffic open-loop, target application fully reactive.
+
+**Endpoint**: `POST /ctps/replay`
+
+**Request**:
+```json
+{
+  "ctp_id": "ctp-20260304-042",
+  "interface": "eth0",
+  "duration_seconds": 300,
+  "target_app_port": 5000,
+  "replay_mode": "hybrid"
+}
+```
+
+**Response** (200 OK):
+```json
+{
+  "replay_session_id": "replay-20260304-042-eth0-001",
+  "ctp_applied": "ctp-20260304-042",
+  "interface": "eth0",
+  "replay_mode": "hybrid",
+  "background_traffic": "open_loop_via_tcpreplay",
+  "target_app_traffic": "fully_reactive",
+  "replay_status": "running",
+  "estimated_completion": "2026-03-04T14:05:30Z",
+  "metrics_endpoint": "/ctps/replay/replay-20260304-042-eth0-001/metrics"
+}
+```
+
+**Replay Results** (GET after completion):
+```json
+{
+  "replay_session_id": "replay-20260304-042-eth0-001",
+  "status": "completed",
+  "duration_seconds": 300,
+  "replay_fidelity": {
+    "ctp_target_intensity_mbps": 2150,
+    "replayed_intensity_mbps": 2128,
+    "fidelity_percent": 98.9,
+    "burstiness_preserved": true
+  },
+  "target_app_metrics": {
+    "request_count": 15847,
+    "p50_latency_ms": 142,
+    "p99_latency_ms": 1250,
+    "error_rate": 0.02
   }
 }
 ```
 
-**Error Cases**:
-- 400 Bad Request — interface doesn't exist
-- 408 Request Timeout — measurement taking too long
-- 422 Unprocessable Entity — network state doesn't match tolerance
-- 503 Service Unavailable — iperf3 or ping unavailable
+## API Reference
 
----
-
-### 6. CTP Algebra Operations
-
-**Endpoint**: `POST /ctps/algebra`
-
-**Request** (scale operation):
-```json
-{
-  "operation": "scale",
-  "ctp": {
-    "capacity_mbps": 10,
-    "latency_ms": 50,
-    "loss_rate": 0.0,
-    "aqm_policy": "fifo"
-  },
-  "scale_factor": 2.5
-}
-```
-
-**Response** (200 OK):
-```json
-{
-  "result": {
-    "capacity_mbps": 25.0,
-    "latency_ms": 50,
-    "loss_rate": 0.0,
-    "aqm_policy": "fifo"
-  },
-  "operation": "scale",
-  "note": "Only capacity scaled; latency and loss unchanged"
-}
-```
-
-**Supported Operations**:
-- `scale` — multiply capacity by factor (e.g., 2x slower = 0.5x capacity)
-- `compose` — combine two CTPs (takes minimum capacity, maximum latency)
-- `normalize` — ensure parameters are within bounds
-
----
-
-### 7. Health Check
+### General Health Check
 
 **Endpoint**: `GET /health`
 
@@ -305,234 +310,555 @@ This service is infrastructure-agnostic but assumes Linux `tc` is available on t
 ```json
 {
   "status": "healthy",
-  "kernel_version": "6.8.0-94-generic",
-  "tc_available": true,
-  "iperf3_available": true,
-  "ping_available": true
+  "service_version": "1.0.0",
+  "postgresql_connected": true,
+  "tcpreplay_available": true,
+  "kernel_version": "6.8.0-94-generic"
 }
 ```
 
-## Dataclass Contracts
+### List CTPs (Query Corpus)
+
+**Endpoint**: `GET /ctps`
+
+**Query Parameters**:
+- `limit`: Max results (default: 50)
+- `offset`: Pagination offset (default: 0)
+- `order_by`: intensity, burstiness, contributor_count (default: intensity)
+
+**Response** (200 OK):
+```json
+{
+  "total": 230000,
+  "returned": 50,
+  "ctps": [
+    {
+      "ctp_id": "ctp-20260304-001",
+      "intensity_mbps": 2150,
+      "burstiness_pmr": 3.1,
+      "temporal_correlation": 0.52,
+      "contributor_count": 612,
+      "upload_download_ratio": 0.31,
+      "created_at": "2026-03-04T14:00:00Z"
+    }
+  ]
+}
+```
+
+### Get CTP Details
+
+**Endpoint**: `GET /ctps/{ctp_id}`
+
+**Response** (200 OK):
+```json
+{
+  "ctp_id": "ctp-20260304-042",
+  "metadata": {
+    "extracted_from": "gateway-2026-03-04-14h-15m.pcap",
+    "start_time": "2026-03-04T14:00:00Z",
+    "duration_seconds": 60,
+    "interval_index": 3
+  },
+  "intensity": {
+    "mean_pps": 45230,
+    "mean_bps": 2.7e9,
+    "mean_mbps": 2150
+  },
+  "burstiness": {
+    "peak_pps": 144380,
+    "peak_to_mean_ratio": 3.2,
+    "coefficient_of_variation": 0.84
+  },
+  "temporal_correlation": {
+    "lag_1": 0.62,
+    "lag_5": 0.41,
+    "lag_10": 0.28
+  },
+  "structure": {
+    "contributor_count": 847,
+    "unique_src_ip": 412,
+    "unique_dst_ip": 835,
+    "upload_download_ratio": 0.23,
+    "prefix_diversity": 0.78
+  },
+  "distribution": {
+    "packet_size_mean": 612,
+    "packet_size_stdev": 284
+  }
+}
+```
+
+## Data Models
 
 ```python
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
-from enum import Enum
-
-class AQMPolicy(str, Enum):
-    FIFO = "fifo"
-    CODEL = "codel"
-    PIE = "pie"
-    FQ_CODEL = "fq_codel"
-    SFQ = "sfq"
+from typing import List, Dict, Optional
+from datetime import datetime
 
 @dataclass
-class NetReplicaConfig:
-    """Network emulation configuration."""
-    capacity_mbps: float
-    latency_ms: float
-    loss_rate: float = 0.0
-    aqm_policy: AQMPolicy = AQMPolicy.FIFO
-    buffer_size: Optional[int] = None  # bytes
-    jitter_ms: float = 0.0
+class CTPIntensity:
+    """Traffic intensity metrics."""
+    mean_pps: float          # packets per second
+    mean_bps: float          # bits per second
+    peak_pps: float          # peak rate
+    peak_bps: float
 
 @dataclass
-class BottleneckState:
-    """Measured network state for verification."""
-    configured_capacity: float
-    configured_latency: float
-    measured_throughput: float
-    measured_rtt: float
-    packet_loss_percent: float = 0.0
-    jitter_ms: float = 0.0
-    verification_passed: bool = True
+class CTPBurstiness:
+    """Burstiness metrics."""
+    peak_to_mean_ratio: float      # PMR
+    coefficient_of_variation: float # CoV
+    max_burst_size_packets: int
 
 @dataclass
-class TCCommand:
-    """Compiled tc qdisc command."""
-    command: str
-    description: str
-    requires_root: bool = True
+class CTPTemporalCorrelation:
+    """Temporal correlation at multiple lags."""
+    lag_1: float
+    lag_5: float
+    lag_10: float
+    lag_60: Optional[float] = None
 
 @dataclass
-class CTPPreset:
-    """Pre-defined network profile."""
-    name: str
-    capacity_mbps: float
-    latency_ms: float
-    loss_rate: float
-    aqm_policy: AQMPolicy
-    description: str
-    created_at: Optional[str] = None
+class CTPStructure:
+    """Structural properties of contributor composition."""
+    contributor_count: int
+    unique_source_ips: int
+    unique_dest_ips: int
+    upload_download_ratio: float    # asymmetry metric
+    prefix_diversity: float         # spatial locality
+
+@dataclass
+class CrossTrafficProfile:
+    """Complete CTP representation."""
+    ctp_id: str
+    extracted_from: str              # PCAP source
+    start_time: datetime
+    duration_seconds: int
+    intensity: CTPIntensity
+    burstiness: CTPBurstiness
+    temporal_correlation: CTPTemporalCorrelation
+    structure: CTPStructure
+    created_at: datetime
+
+    def to_replay_format(self) -> Dict:
+        """Convert CTP for tcpreplay input."""
+        pass
+
+@dataclass
+class ReplaySession:
+    """Active or completed CTP replay."""
+    session_id: str
+    ctp_id: str
+    interface: str
+    duration_seconds: int
+    replay_mode: str                 # "hybrid", "open-loop"
+    status: str                      # "running", "completed", "failed"
+    start_time: datetime
+    end_time: Optional[datetime]
+    fidelity_percent: Optional[float]
+    target_app_metrics: Optional[Dict]
 ```
 
 ## Service Dependencies
 
-None - this service is independent and doesn't call other services.
+**External Dependencies**:
+- **PostgreSQL**: CTP corpus storage and multi-dimensional indexing (must support JSON queries on statistical descriptors)
+- **tcpreplay**: Packet replay at bottleneck for replay() operations
+- **Linux kernel**: tc/qdisc support for traffic control (kernel 3.5+)
+
+**Other Services**:
+- Experiment Controller (Port 8000): Orchestrates CTP selections and replay sessions
+- No internal dependencies on other D1 services (standalone representation plane)
 
 ## Testing Criteria
 
 ### Unit Tests
-- Validation passes/fails correctly for boundary values
-- tc command generation produces correct qdisc syntax
-- Preset loading and creation work
-- Algebra operations (scale, compose) are correct
-- AQM policy translation works for all policies
+- **Extraction**: Verify PCAP parsing, packet aggregation into CTPs, statistical computation
+- **Selection**: Query by all descriptor types (intensity, burstiness, temporal_correlation, structure)
+- **Transform**: Validate amplitude scaling while preserving temporal structure and asymmetry
+- **Merge**: Weighted CTP composition produces correct aggregate descriptors
+- **Replay**: tcpreplay command generation for hybrid mode (open-loop background, reactive target)
+- **Indexing**: PostgreSQL schema, multi-dimensional range queries, JSON descriptor storage
 
 ### Integration Tests
-- Compiled tc commands successfully apply to test interface (requires root)
-- Network verification detects applied configuration
-- Throughput and RTT measurements match configured CTP (±5%)
-- Verification fails gracefully when network not configured
+- **End-to-end extraction**: PCAP ingestion → CTP storage → query retrieval (realistic 48k-user traces)
+- **Transform fidelity**: Scale CTP to different bottleneck capacities; verify burst timing preserved
+- **Replay accuracy**: Apply replay session, measure actual vs. target intensity (within 5% tolerance)
+- **Hybrid mode**: Validate background traffic open-loop while target app remains reactive
+- **Corpus scale**: Performance with 230k CTPs (campus gateway corpus size)
 
 ### Performance Tests
-- CTP validation < 10ms
-- tc command compilation < 50ms
-- Preset list retrieval < 100ms
-- Network verification takes ~5s (measurement time)
+- CTP extraction: < 5 seconds per 15-minute interval (48k users)
+- Selection query: < 100ms for range queries on 230k CTPs (PostgreSQL B-tree)
+- Transform: < 50ms amplitude rescaling
+- Merge: < 100ms for 3-CTP weighted composition
+- Replay initialization: < 1 second to start tcpreplay on interface
+- Corpus query: < 500ms for multi-dimensional descriptor queries
 
-## Implementation Guide
+## Implementation Architecture
 
-### Step 1: Project Structure
+### Directory Structure
 ```bash
 services/ctp-service/
 ├── Dockerfile
 ├── requirements.txt
+├── README.md
 ├── app/
 │   ├── __init__.py
-│   ├── main.py              # Flask app
-│   ├── api/
-│   │   ├── __init__.py
-│   │   └── ctps.py          # Route handlers
-│   ├── engine/
-│   │   ├── __init__.py
-│   │   ├── validator.py     # CTP validation logic
-│   │   ├── compiler.py      # tc command generation
-│   │   ├── verifier.py      # Network state measurement
-│   │   └── algebra.py       # CTP algebra operations
+│   ├── main.py                    # FastAPI app + endpoints
 │   ├── models/
 │   │   ├── __init__.py
-│   │   └── ctp.py           # Dataclass definitions
+│   │   ├── ctp.py                 # CTP dataclasses
+│   │   └── descriptors.py         # Statistical descriptors
+│   ├── database/
+│   │   ├── __init__.py
+│   │   ├── postgres.py            # PostgreSQL connection
+│   │   └── migrations/            # Alembic schema migrations
+│   ├── operations/
+│   │   ├── __init__.py
+│   │   ├── extract.py             # PCAP → CTP extraction
+│   │   ├── select.py              # Multi-dimensional query
+│   │   ├── transform.py           # CTP amplitude scaling
+│   │   ├── merge.py               # CTP composition
+│   │   └── replay.py              # tcpreplay orchestration
+│   ├── api/
+│   │   ├── __init__.py
+│   │   └── routes.py              # Endpoint handlers
 │   └── utils/
 │       ├── __init__.py
-│       ├── subprocess.py    # Safe subprocess execution
-│       └── logging.py
+│       ├── logging.py
+│       └── subprocess.py           # Safe tcpreplay execution
 └── tests/
     ├── __init__.py
-    ├── test_api.py
-    ├── test_validator.py
-    ├── test_compiler.py
-    └── test_verifier.py
+    ├── conftest.py                # pytest fixtures
+    ├── test_extract.py
+    ├── test_select.py
+    ├── test_transform.py
+    ├── test_merge.py
+    ├── test_replay.py
+    └── data/                       # Test PCAP files
 ```
 
-### Step 2: Validation Engine
+### Key Modules
+
+#### 1. Extract Operation (app/operations/extract.py)
 ```python
-# app/engine/validator.py
-class CTCValidator:
-    CAPACITY_RANGE = (0, 10000)  # Mbps
-    LATENCY_RANGE = (0, 10000)   # ms
-    LOSS_RANGE = (0, 1.0)
+class CTPExtractor:
+    """Transform PCAP traces into CTP representations."""
 
-    def validate_ctp(self, ctp: NetReplicaConfig) -> Tuple[bool, List[str]]:
-        """Returns (valid, warnings)"""
-        warnings = []
+    def extract_from_pcap(
+        self,
+        pcap_file: str,
+        interval_seconds: int = 60,
+        min_packets: int = 100
+    ) -> List[CrossTrafficProfile]:
+        """
+        1. Read PCAP packets
+        2. Aggregate into bidirectional host-level contributors
+        3. Build prefix-based hierarchical trees
+        4. Compute statistical descriptors:
+           - Intensity: mean_pps, mean_bps, peak rates
+           - Burstiness: PMR, CoV at multiple timescales
+           - Temporal correlation: lag-1, lag-5, lag-10 autocorrelation
+           - Structure: contributor count, asymmetry, prefix diversity
+        5. Store in PostgreSQL
+        6. Return CTP list
+        """
+        pass
 
-        # Check bounds
-        if not self.CAPACITY_RANGE[0] < ctp.capacity_mbps <= self.CAPACITY_RANGE[1]:
-            return False, ["Capacity out of range"]
+    def _compute_intensity(self, packets: List[Packet]) -> CTPIntensity:
+        """Calculate mean/peak packet and bit rates."""
+        pass
 
-        if ctp.latency_ms < self.LATENCY_RANGE[0]:
-            return False, ["Latency must be non-negative"]
+    def _compute_burstiness(self, timeseries: np.ndarray) -> CTPBurstiness:
+        """PMR and CoV at 10ms, 100ms, 1s windows."""
+        pass
 
-        # Warning for extreme values
-        if ctp.capacity_mbps < 0.1:
-            warnings.append("Very low capacity may be difficult to emulate")
+    def _compute_temporal_correlation(self, timeseries: np.ndarray) -> CTPTemporalCorrelation:
+        """Autocorrelation at lags 1, 5, 10, 60."""
+        pass
 
-        return True, warnings
+    def _compute_structure(self, contributors: Dict) -> CTPStructure:
+        """Contributor composition metrics."""
+        pass
 ```
 
-### Step 3: tc Command Compiler
+#### 2. Select Operation (app/operations/select.py)
 ```python
-# app/engine/compiler.py
-class TCCompiler:
-    def compile(self, ctp: NetReplicaConfig, interface: str) -> List[str]:
-        """Compile CTP to tc commands."""
-        commands = []
+class CTPSelector:
+    """Query CTP corpus by multi-dimensional descriptors."""
 
-        # TBF (Token Bucket Filter) for capacity limiting
-        commands.append(self._compile_capacity(ctp, interface))
+    def select(self, query: Dict) -> List[CrossTrafficProfile]:
+        """
+        Multi-dimensional range queries on:
+        - intensity_range_mbps: [min, max]
+        - burstiness_pmr_range: [min, max]
+        - temporal_correlation_min: threshold
+        - contributor_count_min/max: range
+        - upload_download_ratio_max: threshold
 
-        # AQM qdisc for active queue management
-        commands.append(self._compile_aqm(ctp, interface))
+        Uses PostgreSQL B-tree indexes on JSON descriptor columns.
+        """
+        sql = self._build_query(query)
+        results = self.db.execute(sql)
+        return [CrossTrafficProfile.from_db(row) for row in results]
 
-        # Packet loss via netem if needed
-        if ctp.loss_rate > 0:
-            commands.append(self._compile_loss(ctp, interface))
+    def _build_query(self, query: Dict) -> str:
+        """Construct parameterized SQL with bounds checking."""
+        pass
+```
 
-        return commands
+#### 3. Transform Operation (app/operations/transform.py)
+```python
+class CTPTransformer:
+    """Rescale CTP amplitude while preserving temporal structure."""
 
-    def _compile_capacity(self, ctp, interface):
-        # Calculate burst size: ~100ms worth of tokens
-        burst = int(ctp.capacity_mbps * 1e6 / 8 * 0.1 / 1500)
-        return (
-            f"tc qdisc replace dev {interface} root handle 1: "
-            f"tbf rate {int(ctp.capacity_mbps)}mbit burst {burst}b "
-            f"latency {int(ctp.latency_ms)}ms"
+    def transform(
+        self,
+        ctp_id: str,
+        target_capacity_mbps: float
+    ) -> CrossTrafficProfile:
+        """
+        1. Load original CTP
+        2. Calculate scale factor: target / original intensity
+        3. Rescale packet rates (intensity)
+        4. Preserve:
+           - Burst timing and shape (burstiness PMR, CoV)
+           - Temporal correlations
+           - Contributor structure and asymmetry
+        5. Store transformed CTP
+        6. Return new CTP
+        """
+        original = self.db.get_ctp(ctp_id)
+        scale = target_capacity_mbps / original.intensity.mean_mbps
+
+        transformed = CrossTrafficProfile(
+            ctp_id=f"ctp-transform-{ctp_id}-{target_capacity_mbps}mbps",
+            intensity=CTPIntensity(
+                mean_pps=original.intensity.mean_pps * scale,
+                mean_bps=original.intensity.mean_bps * scale,
+                peak_pps=original.intensity.peak_pps * scale,
+                peak_bps=original.intensity.peak_bps * scale
+            ),
+            # Preserve other attributes
+            burstiness=original.burstiness,
+            temporal_correlation=original.temporal_correlation,
+            structure=original.structure
         )
+        self.db.store_ctp(transformed)
+        return transformed
 ```
 
-### Step 4: Network Verifier
+#### 4. Merge Operation (app/operations/merge.py)
 ```python
-# app/engine/verifier.py
-import subprocess
-import time
+class CTPMerger:
+    """Compose multiple CTPs with weights."""
 
-class NetworkVerifier:
-    def verify(self, interface: str, expected_ctp: NetReplicaConfig) -> BottleneckState:
-        """Measure actual network state."""
+    def merge(
+        self,
+        ctp_ids: List[str],
+        weights: List[float]
+    ) -> CrossTrafficProfile:
+        """
+        Weighted CTP composition:
+        1. Load all CTPs
+        2. Normalize weights
+        3. Compute weighted aggregate:
+           - Intensity: sum(weight_i * intensity_i)
+           - Burstiness: weighted blend (preserve shape)
+           - Structure: effective contributor count
+        4. Store merged CTP
+        5. Return composite CTP
+        """
+        ctps = [self.db.get_ctp(cid) for cid in ctp_ids]
+        assert len(weights) == len(ctps)
+        assert abs(sum(weights) - 1.0) < 1e-6
 
-        # Run iperf3 server on interface
-        # Start iperf3 client, measure throughput
-        throughput = self._measure_throughput(interface)
+        merged_intensity = sum(w * ctp.intensity.mean_mbps for w, ctp in zip(weights, ctps))
+        # ... compute other attributes
 
-        # Use ping to measure RTT
-        rtt = self._measure_rtt(interface)
-
-        # Compare to expected
-        state = BottleneckState(
-            configured_capacity=expected_ctp.capacity_mbps,
-            configured_latency=expected_ctp.latency_ms,
-            measured_throughput=throughput,
-            measured_rtt=rtt,
-            verification_passed=(
-                abs(throughput - expected_ctp.capacity_mbps) /
-                expected_ctp.capacity_mbps < 0.05
-            )
+        merged = CrossTrafficProfile(
+            ctp_id=f"ctp-merge-{timestamp}-composite",
+            intensity=CTPIntensity(mean_mbps=merged_intensity, ...),
+            # ...
         )
-        return state
+        self.db.store_ctp(merged)
+        return merged
 ```
 
-### Step 5: Tests
+#### 5. Replay Operation (app/operations/replay.py)
 ```python
-# tests/test_compiler.py
-def test_compile_capacity():
-    compiler = TCCompiler()
-    ctp = NetReplicaConfig(capacity_mbps=10, latency_ms=50)
-    cmds = compiler.compile(ctp, "eth0")
-    assert any("tbf" in cmd for cmd in cmds)
-    assert any("10mbit" in cmd for cmd in cmds)
+class CTPReplayer:
+    """Apply CTP at bottleneck via tcpreplay (hybrid mode)."""
+
+    def start_replay(
+        self,
+        ctp_id: str,
+        interface: str,
+        duration_seconds: int,
+        target_app_port: int = None
+    ) -> ReplaySession:
+        """
+        Hybrid replay model:
+        - Background traffic: open-loop via tcpreplay from CTP packets
+        - Target application: fully reactive (normal TCP congestion control)
+
+        1. Generate tcpreplay commands from CTP
+        2. Start tcpreplay on background traffic
+        3. If target_app_port provided, monitor reactive traffic separately
+        4. Track fidelity: actual vs. target intensity
+        5. Return session object
+        """
+        ctp = self.db.get_ctp(ctp_id)
+        replay_pcap = self._generate_pcap_from_ctp(ctp)
+
+        # Start tcpreplay in background
+        session = ReplaySession(
+            session_id=f"replay-{timestamp}",
+            ctp_id=ctp_id,
+            interface=interface,
+            duration_seconds=duration_seconds,
+            replay_mode="hybrid",
+            status="running"
+        )
+
+        # Execute: tcpreplay -i {interface} --duration {duration} {replay_pcap}
+        proc = self._start_tcpreplay(replay_pcap, interface, duration_seconds)
+        self.db.store_replay_session(session)
+
+        return session
+
+    def _generate_pcap_from_ctp(self, ctp: CrossTrafficProfile) -> str:
+        """Reconstruct synthetic PCAP from CTP descriptors."""
+        pass
+
+    def get_replay_metrics(self, session_id: str) -> Dict:
+        """Measure actual vs. expected intensity during/after replay."""
+        pass
 ```
+
+### PostgreSQL Schema (Simplified)
+```sql
+CREATE TABLE ctps (
+    ctp_id TEXT PRIMARY KEY,
+    extracted_from TEXT,
+    start_time TIMESTAMP,
+    duration_seconds INT,
+
+    -- Statistical descriptors (JSON for flexibility)
+    intensity JSONB,              -- {mean_pps, mean_bps, peak_pps, peak_bps}
+    burstiness JSONB,             -- {pmr, cov, max_burst}
+    temporal_correlation JSONB,   -- {lag_1, lag_5, lag_10, lag_60}
+    structure JSONB,              -- {contributors, src_ips, dst_ips, asymmetry, diversity}
+
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Indexes for efficient multi-dimensional queries
+CREATE INDEX idx_ctps_intensity_mean ON ctps USING BTREE ((intensity->>'mean_mbps')::FLOAT);
+CREATE INDEX idx_ctps_burstiness_pmr ON ctps USING BTREE ((burstiness->>'pmr')::FLOAT);
+CREATE INDEX idx_ctps_contributors ON ctps USING BTREE ((structure->>'contributor_count')::INT);
+CREATE INDEX idx_ctps_temporal_corr ON ctps USING BTREE ((temporal_correlation->>'lag_1')::FLOAT);
+
+CREATE TABLE replay_sessions (
+    session_id TEXT PRIMARY KEY,
+    ctp_id TEXT REFERENCES ctps,
+    interface TEXT,
+    duration_seconds INT,
+    replay_mode TEXT,
+    status TEXT,
+    start_time TIMESTAMP,
+    end_time TIMESTAMP,
+    fidelity_percent FLOAT,
+    target_app_metrics JSONB,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+```
+
+### Example Test: Transform Preserves Structure
+```python
+def test_transform_preserves_structure():
+    """Verify amplitude scaling doesn't change temporal properties."""
+    extractor = CTPExtractor()
+    original = extractor.extract_from_pcap("test.pcap")[0]
+
+    transformer = CTPTransformer()
+    transformed = transformer.transform(original.ctp_id, 1000)
+
+    # Intensity scales proportionally
+    assert abs(transformed.intensity.mean_mbps / original.intensity.mean_mbps - 2.0) < 0.01
+
+    # Burstiness metrics preserved
+    assert transformed.burstiness.peak_to_mean_ratio == original.burstiness.peak_to_mean_ratio
+    assert transformed.burstiness.coefficient_of_variation == original.burstiness.coefficient_of_variation
+
+    # Structure unchanged
+    assert transformed.structure.contributor_count == original.structure.contributor_count
+    assert transformed.structure.upload_download_ratio == original.structure.upload_download_ratio
+```
+
+## Deployment & Operations
+
+### Environment Variables
+```bash
+CTP_DATABASE_URL=postgresql://user:pass@localhost:5432/ctp_corpus
+CTP_PORT=8001
+CTP_HOST=0.0.0.0
+CTP_LOG_LEVEL=INFO
+CTP_CORPUS_SIZE=230000        # Expected corpus size (campus gateway)
+CTP_TCPREPLAY_TIMEOUT=600     # Max seconds for replay session
+CTP_EXTRACT_BATCH_SIZE=1000   # PCAP processing batch size
+```
+
+### Running the Service
+```bash
+# Start with dependencies
+docker-compose up postgres ctp-service
+
+# Manual startup
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8001
+
+# Load CTP corpus (one-time)
+python scripts/ingest_corpus.py /path/to/pcap/traces/
+
+# Query examples
+curl -X POST http://localhost:8001/ctps/select \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": {
+      "intensity_range_mbps": [1000, 3000],
+      "burstiness_pmr_range": [2.0, 4.0]
+    },
+    "limit": 20
+  }'
+```
+
+### Monitoring
+- Prometheus metrics: `/metrics` (operation latencies, query counts, PostgreSQL connection pool)
+- Structured logs: JSON format with trace IDs for correlating requests
+- Health check: `GET /health` returns database connectivity, tcpreplay availability, corpus stats
 
 ## References
 
-- Linux tc qdisc documentation: https://man7.org/linux/man-pages/man8/tc.8.html
-- NetReplica controller.py: https://github.com/SNL-UCSB/netReplica/blob/main/controller.py
-- Linux AQM algorithms: https://tools.ietf.org/html/rfc7567
-- iperf3 documentation: https://software.es.net/iperf/
-- netem (network emulation) man page: https://man7.org/linux/man-pages/man8/tc-netem.8.html
+**NetForge Paper** (Section 3.4 - TRACE–CONTEXT DISAGGREGATION):
+- Describes CTP extraction, indexing, and composition model
+- Campus gateway corpus: 48k users, 8.2 Gbps peak, 230k CTPs from 15-min intervals
+- Hierarchical demand representation with prefix-based trees
+
+**Linux Network Tools**:
+- tcpreplay: https://www.tcpreplay.appneta.com/
+- Linux tc qdisc: https://man7.org/linux/man-pages/man8/tc.8.html
+- netem (network emulation): https://man7.org/linux/man-pages/man8/tc-netem.8.html
+
+**Related Systems**:
+- NetReplica: https://github.com/SNL-UCSB/netReplica
+- Containernet: Network emulation with containers
+- TEACUP: Traffic emulation framework
 
 ---
 
 **Last Updated**: 2026-03-04
-**Status**: Specification Ready
-**Next Milestone**: Implementation (Week 1)
+**Status**: Active Development
+**Team Lead**: Jaber
+**PI**: Prof. Arpit Gupta
+**Repository**: agentic-thin-waist/services/ctp-service

@@ -2,497 +2,315 @@
 
 **Port**: 8002
 **Deliverable**: D1 (Network Virtualization Substrate - Execution Plane)
-**Priority**: CRITICAL
-**Status**: To be implemented
+**Lead**: Jaber
+**PI**: Prof. Arpit Gupta
+**Status**: Active Development
 
-## Purpose
+## Overview
 
-The Substrate Worker is the execution layer that applies network conditions to the data plane using Linux kernel capabilities. It operates with elevated privileges (CAP_NET_ADMIN, privileged mode) to use `tc` for traffic control and `tshark`/`tcpdump` for packet capture. The Substrate Worker:
+The Substrate Worker is the **Execution Plane** of the Bottleneck Service. It instantiates bottleneck-regime specifications on concrete infrastructure, translating high-level network constraints into operational Linux traffic control (tc) configurations, packet capture (tshark), and traffic replay (tcpreplay) operations.
 
-1. **Applies network configurations** — Execute tc qdisc commands from CTP Service
-2. **Captures network traffic** — Collect pcap files via tshark
-3. **Measures bottleneck state** — Verify applied network conditions match configuration
-4. **Manages interface state** — Reset and clean up after experiments
-5. **Provides real-time telemetry** — Report throughput, RTT, packet loss metrics
+## Core Concepts
 
-This service runs in the data plane (could be the same machine or remote infrastructure) and has privileged access to network interfaces.
+**Bottleneck Regime**: A complete network condition specification with two components:
+
+1. **Static Attributes** (configured via tc):
+   - Capacity (bandwidth shaping)
+   - Base latency (propagation delay)
+   - Buffering (queue depth)
+   - Queue management policy (AQM: FIFO, fq_codel, prio, etc.)
+
+2. **Dynamic Pressure** (replayed via tcpreplay):
+   - CTP (Common Traffic Pattern) background traffic
+   - Hybrid replay model: background traffic open-loop, target application fully reactive
+   - Captures contention and packet interaction effects
+
+The worker must verify that configured shaping matches the intended specification via `BottleneckState.verified`.
+
+## Deployment Modes
+
+**Standalone**: Single host using Linux namespaces, bridges, and traffic control.
+
+**Distributed** (three-server topology):
+- **Server A**: Client applications and traffic sources
+- **Server B**: Bottleneck with tc/LibreQoS enforcement (packet shaping layer)
+- **Server C**: Application endpoints and NAT
+
+NetForge provides `NAT()` and `Tunnel()` abstractions for connectivity beyond the testbed.
 
 ## Architecture
 
 ```
-┌──────────────────────────────┐
-│  Experiment API (8000)       │
-│  or CTP Service (8001)       │
-└────────────┬─────────────────┘
-             │ POST /workers/configure
-             │ POST /workers/capture/start
+┌──────────────────────────────────┐
+│  Bottleneck Service              │
+│  (CTP Orchestration Layer)       │
+└────────────┬──────────────────────┘
+             │
+             │ POST /shape (BottleneckState)
+             │ POST /capture
+             │ POST /replay
+             │ GET /state, /health
              ▼
-┌──────────────────────────────┐
-│  SUBSTRATE WORKER (8002)     │
-│  Privileged Process (root)   │
-│  ┌────────────────────────┐  │
-│  │ tc Executor            │  │
-│  │ tshark/tcpdump         │  │
-│  │ iperf3 / ping client   │  │
-│  │ telemetry collector    │  │
-│  └────────────────────────┘  │
-└──────────────┬────────────────┘
-               │ tc commands
-               │ pcap files
-               ▼
-        ┌──────────────────┐
-        │ Linux Kernel     │
-        │ eth0/eth1/...    │
-        │ tc qdisc         │
-        └──────────────────┘
+┌──────────────────────────────────┐
+│  SUBSTRATE WORKER (8002)         │
+│  EXECUTION PLANE                 │
+│  ┌──────────────────────────┐    │
+│  │ TC Executor              │    │
+│  │ (qdisc, filter, class)   │    │
+│  ├──────────────────────────┤    │
+│  │ Packet Capture (tshark)  │    │
+│  ├──────────────────────────┤    │
+│  │ CTP Replay (tcpreplay)   │    │
+│  ├──────────────────────────┤    │
+│  │ State Verification       │    │
+│  │ (verified bool)          │    │
+│  └──────────────────────────┘    │
+└────────────┬─────────────────────┘
+             │
+             │ tc commands
+             │ tshark capture
+             │ tcpreplay stream
+             ▼
+        ┌─────────────────┐
+        │ Linux Kernel    │
+        │ tc qdisc stack  │
+        │ LibreQoS/XDP    │
+        └─────────────────┘
 ```
+
+## Configuration Requirements
+
+The worker requires a `NetReplicaConfig` object with the following fields:
+
+- `capture_dir`: Directory for pcap files (replaces hardcoded `/home/jaber/captures/`)
+- `upstream_iface`: Ingress interface (e.g., `eth0`)
+- `downstream_iface`: Egress interface (e.g., `eth1`)
+- `delay_iface`: Interface for delay application (optional)
+- `namespace`: Network namespace name (for isolated testbeds)
+- `ctp_dir`: Directory containing CTP traffic patterns for tcpreplay
+
+**Critical Security Notes**:
+- Remove hardcoded passwords and paths from the codebase
+- Use sudoers configuration for tc/tshark privilege elevation
+- Run as a privileged Docker container with `CAP_NET_ADMIN` capability
+- Never commit credentials to version control
 
 ## API Specification
 
-### 1. Configure Network Interface
+### 1. Shape Network (POST /shape)
 
-**Endpoint**: `POST /workers/configure`
+Configure bottleneck regime on target interfaces.
 
 **Request**:
 ```json
 {
-  "interface": "eth0",
-  "tc_commands": [
+  "upstream_iface": "eth0",
+  "downstream_iface": "eth1",
+  "download_mbps": 10.0,
+  "upload_mbps": 5.0,
+  "latency_ms": 50,
+  "qdisc": "fq_codel",
+  "buffer_packets": 1000
+}
+```
+
+**Response** (200 OK):
+```json
+{
+  "status": "shaped",
+  "bottleneck_state": {
+    "download_mbps": 10.0,
+    "upload_mbps": 5.0,
+    "latency_ms": 50,
+    "qdisc": "fq_codel",
+    "verified": true
+  },
+  "applied_commands": [
     "tc qdisc replace dev eth0 root handle 1: tbf rate 10mbit burst 15k latency 50ms",
-    "tc qdisc add dev eth0 parent 1: handle 10: fifo limit 1000"
+    "tc qdisc add dev eth0 parent 1: handle 10: fq_codel limit 1000"
   ]
 }
 ```
 
-**Response** (200 OK):
-```json
-{
-  "interface": "eth0",
-  "configuration_applied": true,
-  "verification": {
-    "configured_capacity": 10.0,
-    "configured_latency": 50,
-    "measured_throughput": 9.8,
-    "measured_rtt": 52,
-    "verification_passed": true
-  },
-  "timestamp": "2026-03-04T10:00:00Z"
-}
-```
-
-**Error Codes**:
-- 400 Bad Request — invalid interface or malformed commands
-- 500 Internal Server Error — tc execution failed
-- 503 Service Unavailable — required tools unavailable
-
 ---
 
-### 2. Get Network Status
+### 2. Packet Capture (POST /capture)
+Start tshark: `{interface, capture_filter, filename}` → `{capture_id, status, pcap_path}`
 
-**Endpoint**: `GET /workers/status`
+### 3. Replay CTP (POST /replay)
+Replay traffic: `{ctp_file, interface, rate, loop, duration_seconds}` → `{replay_id, status, packets_replayed}`
 
-**Query Parameters**:
-- `interface` — specific interface (default: eth0)
+### 4. Get State (GET /state)
+Retrieve bottleneck config: `{download_mbps, upload_mbps, latency_ms, qdisc, verified}`
 
-**Response** (200 OK):
-```json
-{
-  "interface": "eth0",
-  "configured": true,
-  "current_config": {
-    "capacity_mbps": 10.0,
-    "latency_ms": 50,
-    "aqm_policy": "fifo"
-  },
-  "current_metrics": {
-    "throughput_mbps": 9.8,
-    "rtt_ms": 52,
-    "packet_loss_percent": 0.0,
-    "jitter_ms": 1.2,
-    "tx_packets": 10245,
-    "rx_packets": 10198,
-    "tx_errors": 0,
-    "rx_errors": 0
-  },
-  "interfaces_available": ["eth0", "eth1", "docker0"]
-}
-```
+### 5. Health Check (GET /health)
+Worker status: `{status, root_privileges, tc_available, tshark_available, tcpreplay_available, interfaces}`
 
----
-
-### 3. Start Packet Capture
-
-**Endpoint**: `POST /workers/capture/start`
-
-**Request**:
-```json
-{
-  "interface": "eth0",
-  "capture_filter": "",
-  "output_format": "pcap",
-  "max_packet_bytes": 0
-}
-```
-
-**Response** (200 OK):
-```json
-{
-  "capture_id": "capture-abc123",
-  "interface": "eth0",
-  "status": "capturing",
-  "start_time": "2026-03-04T10:00:00Z",
-  "pcap_path": "/tmp/captures/capture-abc123.pcap"
-}
-```
-
-**Supported Filters**:
-- Empty string "" → capture all packets
-- "tcp" → TCP packets only
-- "port 80 or port 443" → HTTP/HTTPS
-- "ip src 192.168.1.100" → traffic from specific IP
-
----
-
-### 4. Stop Packet Capture
-
-**Endpoint**: `POST /workers/capture/stop`
-
-**Request**:
-```json
-{
-  "capture_id": "capture-abc123",
-  "move_to": "/data/pcaps/experiment-001.pcap"
-}
-```
-
-**Response** (200 OK):
-```json
-{
-  "capture_id": "capture-abc123",
-  "status": "stopped",
-  "stop_time": "2026-03-04T10:00:30Z",
-  "duration_seconds": 30,
-  "packets_captured": 5240,
-  "bytes_captured": 3567890,
-  "pcap_path": "/data/pcaps/experiment-001.pcap",
-  "file_size_mb": 3.4
-}
-```
-
----
-
-### 5. Get Real-time Metrics
-
-**Endpoint**: `GET /workers/metrics`
-
-**Query Parameters**:
-- `interface` — network interface (default: eth0)
-- `duration_seconds` — measurement duration (default: 10)
-
-**Response** (200 OK):
-```json
-{
-  "interface": "eth0",
-  "measurement_duration": 10,
-  "metrics": {
-    "throughput_mbps": 9.8,
-    "throughput_stddev_mbps": 0.3,
-    "rtt_ms": 51.5,
-    "rtt_stddev_ms": 1.2,
-    "packet_loss_percent": 0.0,
-    "jitter_ms": 1.5,
-    "tx_packets": 10245,
-    "rx_packets": 10198,
-    "tx_errors": 0,
-    "rx_errors": 0,
-    "tx_dropped": 0,
-    "rx_dropped": 0
-  },
-  "measurement_start": "2026-03-04T10:00:00Z",
-  "measurement_end": "2026-03-04T10:00:10Z"
-}
-```
-
----
-
-### 6. Reset Network Configuration
-
-**Endpoint**: `POST /workers/reset`
-
-**Request**:
-```json
-{
-  "interface": "eth0",
-  "force": false
-}
-```
-
-**Response** (200 OK):
-```json
-{
-  "interface": "eth0",
-  "reset_status": "success",
-  "timestamp": "2026-03-04T10:00:35Z"
-}
-```
-
----
-
-### 7. Health Check
-
-**Endpoint**: `GET /health`
-
-**Response** (200 OK):
-```json
-{
-  "status": "healthy",
-  "checks": {
-    "root_privileges": true,
-    "tc_available": true,
-    "tshark_available": true,
-    "iperf3_available": true,
-    "ping_available": true,
-    "docker_socket": true,
-    "kernel_version": "6.8.0-94-generic"
-  }
-}
-```
+**Error Codes**: 400 Bad Request, 403 Forbidden, 500 Internal Server Error, 503 Service Unavailable
 
 ## Dataclass Contracts
 
 ```python
 from dataclasses import dataclass, field
-from typing import List, Dict, Optional
+from typing import List, Optional
 from datetime import datetime
 
 @dataclass
 class BottleneckState:
-    """Measured network configuration state."""
-    configured_capacity: float
-    configured_latency: float
-    measured_throughput: float
-    measured_rtt: float
-    packet_loss_percent: float = 0.0
-    jitter_ms: float = 0.0
-    verification_passed: bool = True
+    """Static and dynamic network configuration with verification."""
+    download_mbps: float          # Downstream capacity (bits/s)
+    upload_mbps: float            # Upstream capacity (bits/s)
+    latency_ms: float             # Base propagation latency
+    qdisc: str                    # Queue discipline (tbf, fq_codel, prio, etc.)
+    verified: bool = False        # Verification passed: config matches measurement
+    buffer_packets: int = 1000    # Queue depth for AQM
+    loss_rate_percent: float = 0.0  # Packet loss injection (optional)
 
 @dataclass
-class TelemetrySnapshot:
-    """Point-in-time network metrics."""
-    timestamp: str
-    interface: str
-    throughput_mbps: float
-    rtt_ms: float
-    packet_loss_percent: float
-    jitter_ms: float
-    tx_packets: int
-    rx_packets: int
-    tx_bytes: int
-    rx_bytes: int
-    tx_errors: int
-    rx_errors: int
+class SubstrateStatus:
+    """Worker health and operational status."""
+    status: str                   # "healthy" or "degraded"
+    root_privileges: bool         # Can execute tc/tshark
+    tc_available: bool            # tc command available
+    tshark_available: bool        # tshark command available
+    tcpreplay_available: bool     # tcpreplay command available
+    qdisc_support: bool           # Kernel supports requested qdisc
+    interfaces: List[str]         # Available network interfaces
+    timestamp: str                # ISO 8601 timestamp
 
 @dataclass
-class CaptureSession:
-    """Packet capture metadata."""
-    capture_id: str
-    interface: str
-    pcap_path: str
-    start_time: str
-    stop_time: Optional[str] = None
-    duration_seconds: Optional[float] = None
-    packets_captured: int = 0
-    bytes_captured: int = 0
-    status: str = "capturing"  # capturing, stopped, archived
+class NetReplicaConfig:
+    """Configuration for substrate worker (replaces hardcoded paths)."""
+    capture_dir: str              # Directory for pcap files
+    upstream_iface: str           # Ingress interface (e.g., eth0)
+    downstream_iface: str         # Egress interface (e.g., eth1)
+    delay_iface: Optional[str]    # Interface for delay application
+    namespace: Optional[str]      # Network namespace (isolated testbed)
+    ctp_dir: str                  # Directory with CTP traffic patterns
 
 @dataclass
-class NetworkConfiguration:
-    """Applied network configuration."""
-    interface: str
-    capacity_mbps: float
-    latency_ms: float
-    loss_rate: float
-    aqm_policy: str
-    applied_at: str
-    tc_commands: List[str] = field(default_factory=list)
+class CTPReplaySession:
+    """Traffic replay metadata."""
+    replay_id: str                # Unique replay identifier
+    ctp_file: str                 # CTP pcap filename
+    interface: str                # Target interface
+    rate: str                     # Replay rate (e.g., "10M", "50K")
+    loop: bool = False            # Repeat indefinitely
+    start_time: str = ""          # ISO 8601 timestamp
+    packets_replayed: int = 0     # Count during active replay
 ```
 
-## Service Dependencies
+## Implementation Notes
 
-| Service | Endpoint | Purpose |
-|---------|----------|---------|
-| Storage Service | POST /artifacts | Store pcap files |
+### Linux Traffic Control (tc)
 
-## Testing Criteria
+The worker translates bottleneck specifications into tc commands:
 
-### Unit Tests
-- Command parsing and validation
-- Interface name validation
-- CTP parameter range checks
+```bash
+# Basic traffic shaping (TBF: Token Bucket Filter)
+tc qdisc replace dev eth0 root handle 1: tbf \
+  rate 10mbit burst 15k latency 50ms
 
-### Integration Tests (requires root and Linux)
-- tc commands successfully apply to test interface
-- Throughput measurements match configured capacity (±5%)
-- RTT measurements match configured latency (±5%)
-- Packet capture starts and stops correctly
-- Captured pcap file is valid (can be opened with Wireshark)
-- Reset clears all qdisc configurations
-- Multiple captures can run sequentially
+# Queue management (fq_codel: Fair Queuing + CoDel AQM)
+tc qdisc add dev eth0 parent 1: handle 10: fq_codel \
+  limit 1000 target 5ms interval 100ms
 
-### Performance Tests
-- Configure interface < 500ms
-- Start capture < 100ms
-- Stop capture and write pcap < 1s
-- Get metrics < 2s (includes 10s measurement)
+# Latency (netem: Network Emulation)
+tc qdisc add dev eth0 root netem delay 50ms
+```
 
-## Implementation Guide
+### Packet Capture and CTP Replay
 
-### Step 1: Docker Setup
-The container must run with:
+- **tshark**: Captures packets with optional filtering for analysis
+- **tcpreplay**: Replays CTPs (background traffic) from pcap files
+- **Hybrid Model**: Background traffic open-loop (replay-based), target application fully reactive (measures real contention effects)
+
+### Privilege Elevation
+
+Configure sudoers to allow the worker process tc and tshark execution:
+
+```
+# /etc/sudoers.d/substrate-worker
+substrate-worker ALL=(ALL) NOPASSWD: /sbin/tc
+substrate-worker ALL=(ALL) NOPASSWD: /usr/bin/tshark
+substrate-worker ALL=(ALL) NOPASSWD: /usr/bin/tcpreplay
+```
+
+Never hardcode passwords in configuration files.
+
+## Testing and Validation
+
+**Unit Tests**: BottleneckState/SubstrateStatus dataclass parsing, parameter range checks, interface validation, CTP path resolution.
+
+**Integration Tests**: tc command execution (±5% capacity/latency tolerance), tshark pcap generation, tcpreplay injection at specified rate, BottleneckState.verified state accuracy.
+
+**Performance Targets**: POST /shape < 500ms, POST /capture < 100ms, POST /replay < 200ms, GET /state < 50ms, GET /health < 100ms.
+
+## Docker Configuration
+
+**Dockerfile**:
 ```dockerfile
 FROM ubuntu:22.04
 
 RUN apt-get update && apt-get install -y \
     iproute2 \
     iputils-ping \
-    iperf3 \
     tshark \
-    tcpdump \
+    tcpreplay \
     python3-flask \
-    python3-requests
+    python3-requests \
+    sudo
 
 WORKDIR /app
+COPY requirements.txt .
+RUN pip3 install -r requirements.txt
+
 COPY . .
-CMD ["python3", "-m", "flask", "run", "--host=0.0.0.0"]
+EXPOSE 8002
+CMD ["python3", "app/main.py"]
 ```
 
-Docker Compose should use:
+**Docker Compose**:
 ```yaml
 substrate-worker:
+  build: ./services/substrate-worker
+  container_name: substrate-worker
   privileged: true
   cap_add:
     - NET_ADMIN
     - SYS_ADMIN
+  ports:
+    - "8002:8002"
   volumes:
-    - /var/run/docker.sock:/var/run/docker.sock
+    - /home/config/captures:/home/config/captures
+    - /home/config/ctp:/home/config/ctp
+  environment:
+    - CAPTURE_DIR=/home/config/captures
+    - CTP_DIR=/home/config/ctp
+    - UPSTREAM_IFACE=eth0
+    - DOWNSTREAM_IFACE=eth1
 ```
 
-### Step 2: Project Structure
-```bash
-services/substrate-worker/
-├── Dockerfile
-├── requirements.txt
-├── app/
-│   ├── __init__.py
-│   ├── main.py
-│   ├── api/
-│   │   ├── __init__.py
-│   │   └── workers.py
-│   ├── executor/
-│   │   ├── __init__.py
-│   │   ├── tc_executor.py      # Run tc commands
-│   │   ├── capture.py          # tshark wrapper
-│   │   ├── metrics.py          # iperf3/ping runner
-│   │   └── subprocess_safe.py  # Safe subprocess execution
-│   ├── models/
-│   │   └── __init__.py
-│   └── utils/
-│       ├── __init__.py
-│       └── logging.py
-└── tests/
-    ├── __init__.py
-    └── test_*.py
-```
+## Key Responsibilities
 
-### Step 3: tc Executor
-```python
-# app/executor/tc_executor.py
-import subprocess
-import logging
-
-class TCExecutor:
-    def execute(self, commands: List[str]) -> Tuple[bool, str]:
-        """Execute tc commands."""
-        try:
-            for cmd in commands:
-                result = subprocess.run(
-                    cmd, shell=True, capture_output=True,
-                    timeout=10, check=True
-                )
-            return True, "OK"
-        except subprocess.CalledProcessError as e:
-            logging.error(f"tc command failed: {e}")
-            return False, str(e)
-```
-
-### Step 4: Packet Capture
-```python
-# app/executor/capture.py
-class PacketCapture:
-    def start(self, interface: str, output_file: str) -> str:
-        """Start tshark capture."""
-        cmd = (
-            f"tshark -i {interface} -w {output_file} "
-            f"-b filesize:100000 -b files:10"
-        )
-        # Start in background, return capture_id
-        proc = subprocess.Popen(
-            cmd, shell=True, stdout=subprocess.PIPE
-        )
-        return capture_id
-
-    def stop(self, capture_id: str) -> dict:
-        """Stop tshark capture."""
-        # Send SIGTERM to process
-        # Wait for graceful shutdown
-        # Return statistics
-```
-
-### Step 5: Metrics Collection
-```python
-# app/executor/metrics.py
-class MetricsCollector:
-    def measure_throughput(self, interface: str, duration: int) -> float:
-        """Measure throughput with iperf3."""
-        # Assumes iperf3 server is running elsewhere
-        cmd = f"iperf3 -c {gateway} -i 1 -t {duration} -R"
-        # Parse output, return throughput in Mbps
-
-    def measure_rtt(self, interface: str, duration: int) -> float:
-        """Measure RTT with ping."""
-        cmd = f"ping -c {duration*10} 8.8.8.8"
-        # Parse output, extract RTT statistics
-```
-
-### Step 6: API Endpoints
-```python
-# app/api/workers.py
-from flask import Blueprint, request, jsonify
-from app.executor.tc_executor import TCExecutor
-
-workers_bp = Blueprint('workers', __name__)
-
-@workers_bp.route('/workers/configure', methods=['POST'])
-def configure():
-    data = request.get_json()
-    executor = TCExecutor()
-    success, msg = executor.execute(data['tc_commands'])
-    if success:
-        return jsonify({"configuration_applied": True}), 200
-    else:
-        return jsonify({"error": msg}), 500
-```
+- **Translate specifications into tc commands**: Convert BottleneckState into operational qdisc configurations
+- **Enforce bottleneck regimes**: Apply both static attributes and dynamic pressure (CTP replay)
+- **Verify configuration state**: Ensure BottleneckState.verified reflects actual network behavior
+- **Capture and replay traffic**: Provide hooks for experiment analysis and load injection
+- **Report health and status**: Enable orchestration layer visibility into execution plane state
 
 ## References
 
-- Linux tc qdisc: https://man7.org/linux/man-pages/man8/tc.8.html
-- tshark: https://www.wireshark.org/docs/man-pages/tshark.html
-- iperf3: https://software.es.net/iperf/
-- Docker privileged mode: https://docs.docker.com/engine/reference/run/#runtime-privilege-and-linux-capabilities
-- NetReplica tc integration: https://github.com/SNL-UCSB/netReplica
+- Linux tc (traffic control): https://man7.org/linux/man-pages/man8/tc.8.html
+- tshark (Wireshark CLI): https://www.wireshark.org/docs/man-pages/tshark.html
+- tcpreplay: https://tcpreplay.appneta.com/
+- Linux queue disciplines: https://tldp.org/HOWTO/Traffic-Control-HOWTO/
+- Docker privileged containers: https://docs.docker.com/engine/reference/run/#runtime-privilege-and-linux-capabilities
 
 ---
 
+**Project**: Agentic Thin Waist (Bottleneck Service)
+**PI**: Prof. Arpit Gupta
+**Lead**: Jaber
 **Last Updated**: 2026-03-04
-**Status**: Specification Ready
-**Next Milestone**: Implementation (Week 1-2)
+**Status**: Specification Complete — Ready for Implementation

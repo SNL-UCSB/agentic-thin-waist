@@ -191,11 +191,9 @@ make logs
 ```
 
 ### Implementation Priority
-1. **Week 1-2**: D1 services (Experiment API, CTP Service, Substrate Worker)
-2. **Week 3**: D2 service (NetGent Service integration)
-3. **Week 4**: D3 service (Storage Service)
-4. **Week 5**: D5 service (Orchestration with Claude)
-5. **Week 6-8**: D4, integration, testing, documentation
+All tracks run in parallel over 4 weeks:
+1. **Weeks 1–2**: Independent development against mocked interfaces (D1: Jaber, D2: Eugene+Jaber, D3: Manni, D5: Haarika after NSDI)
+2. **Weeks 3–4**: Integration across service boundaries, end-to-end demo, testing, documentation
 
 ---
 

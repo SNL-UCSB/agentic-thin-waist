@@ -1,28 +1,33 @@
 # Storage Service
 
 **Port**: 8004
-**Deliverable**: D3 (Telemetry and Results Storage)
+**Deliverable**: D3 (Centralized Telemetry Storage & Results Query)
 **Priority**: HIGH
-**Status**: To be implemented
+**Status**: Specification Ready
+**Lead**: Manni
+**PI**: Prof. Arpit Gupta
 
-## Purpose
+## Overview
 
-The Storage Service is the centralized data persistence layer for the Agentic Thin Waist. It provides:
+The Storage Service is the centralized persistence layer for experiment results and telemetry in the Agentic Thin Waist architecture. It enables rich queries on network experiments by storing results with complete contextual metadata: static network configuration (c_static), dynamic measured state (c_dyn), application context (c_app), and transport protocol details (c_trans). This contextual tagging enables powerful queries like "Show me YouTube QoE under CUBIC across 10-50 Mbps capacity."
 
-1. **Experiment result storage** — Store ExperimentResult objects with full metadata
-2. **Contextual tagging** — Attach ContextualTreeNode to all results
-3. **Query interface** — Filter by experiment_id, application, capacity, latency, date
-4. **Artifact management** — Store pcap files, workflow artifacts, logs
-5. **Data analysis ready** — Export for downstream analysis and visualization
+### Core Responsibilities
 
-The Storage Service uses SQLAlchemy ORM (PostgreSQL in production, SQLite in development) and exposes a REST query API.
+1. **Centralized Result Storage** — Persist ExperimentResult objects with full experiment metadata
+2. **Contextual Tagging** — Attach ContextualTreeNode (four-layer context) to every result for rich filtering
+3. **Time-Series Measurement Storage** — Efficient timestamped storage for continuous measurements
+4. **Query & Export API** — Filter by experiment, application, network condition, time range; export to CSV
+5. **Artifact Management** — Store pcap files, HAR files, logs, and workflow artifacts
+6. **Data Pipeline Ready** — Enable downstream analysis, visualization, and model training
+
+The service uses SQLAlchemy ORM with PostgreSQL (production) or SQLite (development) as the backing database.
 
 ## Architecture
 
 ```
 ┌──────────────────────────────────────┐
-│  Experiment API / NetGent / Substrate│
-│         Results Input                │
+│  Experiment API / NetGent / NetReplica│
+│      Experiment Results (D2 / D4)    │
 └────────────┬────────────────────────┘
              │ POST /results
              │ POST /artifacts
@@ -30,26 +35,39 @@ The Storage Service uses SQLAlchemy ORM (PostgreSQL in production, SQLite in dev
 ┌────────────────────────────────────┐
 │   STORAGE SERVICE (8004)           │
 │  ┌──────────────────────────────┐  │
-│  │ SQLAlchemy ORM               │  │
-│  │ - ExperimentResult table     │  │
+│  │ SQLAlchemy ORM + Query Engine│  │
+│  │ - Result table               │  │
 │  │ - Artifact table             │  │
-│  │ - ContextualTree table       │  │
+│  │ - ContextualTree JSONB       │  │
 │  └──────────────────────────────┘  │
 └────────────┬──────────────────────┘
              │
       ┌──────┴───────┬──────────┐
       ▼              ▼          ▼
   ┌────────┐  ┌──────────┐  ┌────────────┐
-  │SQLite  │  │PostgreSQL│  │File Storage│
+  │SQLite  │  │PostgreSQL│  │S3 / Local  │
   │:memory │  │:5432     │  │/data/      │
   └────────┘  └──────────┘  └────────────┘
 ```
+
+### Four-Layer Contextual Tagging (ContextualTreeNode)
+
+Every result is tagged with four layers of context:
+
+- **c_static**: Network configuration (capacity, latency, buffer size, AQM policy) — configured at experiment setup
+- **c_dyn**: Dynamic measured state (CTP cluster ID, actual throughput, actual RTT) — measured during execution
+- **c_app**: Application context (application name, workflow specification) — what is being tested
+- **c_trans**: Transport details (protocol, congestion control algorithm) — how data is sent
+
+This enables queries like: "Show YouTube startup time under CUBIC congestion control across 10-50 Mbps capacity at 50ms latency."
 
 ## API Specification
 
 ### 1. Store Experiment Result
 
 **Endpoint**: `POST /results`
+
+Accepts a completed experiment result with full metadata and contextual tree. The Storage Service assigns a unique `result_id` and persists all fields including the four-layer context.
 
 **Request**:
 ```json
@@ -118,11 +136,14 @@ The Storage Service uses SQLAlchemy ORM (PostgreSQL in production, SQLite in dev
 
 **Endpoint**: `GET /results`
 
+Rich filtering by experiment metadata and contextual tree. All contextual layers (c_static, c_dyn, c_app, c_trans) are searchable for precise queries.
+
 **Query Parameters**:
 - `experiment_id` — Filter by experiment ID (exact match)
-- `application` — Filter by application (youtube, netflix, zoom)
-- `capacity_min`, `capacity_max` — Filter by capacity range (Mbps)
-- `latency_min`, `latency_max` — Filter by latency range (ms)
+- `application` — Filter by application name (youtube, netflix, zoom, etc.)
+- `capacity_min`, `capacity_max` — Filter by c_static capacity_mbps range
+- `latency_min`, `latency_max` — Filter by c_static latency_ms range
+- `congestion_control` — Filter by c_trans congestion_control (cubic, reno, bbr, etc.)
 - `created_after`, `created_before` — Filter by date (ISO 8601)
 - `tags` — Filter by comma-separated tags
 - `limit` — Max results (default: 50, max: 500)
@@ -132,7 +153,7 @@ The Storage Service uses SQLAlchemy ORM (PostgreSQL in production, SQLite in dev
 
 **Example Request**:
 ```
-GET /results?application=youtube&capacity_min=10&capacity_max=25&latency_max=100&limit=20
+GET /results?application=youtube&capacity_min=10&capacity_max=50&congestion_control=cubic&latency_max=100&limit=20
 ```
 
 **Response** (200 OK):
@@ -156,7 +177,8 @@ GET /results?application=youtube&capacity_min=10&capacity_max=25&latency_max=100
         "mean_bitrate_mbps": 8.5
       },
       "contextual_tree": {
-        "c_static": {"capacity_mbps": 10.0, "latency_ms": 50}
+        "c_static": {"capacity_mbps": 10.0, "latency_ms": 50},
+        "c_trans": {"congestion_control": "cubic"}
       }
     }
   ],
@@ -380,7 +402,11 @@ class QueryFilter:
 
 ## Service Dependencies
 
-None - independent data layer service.
+- **PostgreSQL/TimescaleDB**: For time-series queries and JSONB filtering (production)
+- **SQLite**: Development and testing
+- **S3 or local filesystem**: Artifact storage (pcap files, logs, HAR files)
+
+The Storage Service is independent — it receives results from the Experiment API (D2/D4) and serves queries to the Orchestration Service (D5) and analysis tools.
 
 ## Database Schema
 
@@ -433,23 +459,30 @@ CREATE TABLE artifacts (
 ## Testing Criteria
 
 ### Unit Tests
-- Result creation with valid dataclasses
-- Query filter building (date ranges, capacity ranges)
-- Result serialization/deserialization
+- Result creation and validation with all four contextual layers
+- ContextualTreeNode tagging and extraction
+- Query filter building (capacity ranges, date ranges, contextual filters)
+- Result serialization/deserialization to/from JSON
+- CSV export format correctness
 
 ### Integration Tests
-- Results stored and retrieved correctly
-- Query filters return correct subsets
-- Artifacts uploaded and downloaded
-- Tag operations work
+- Results with contextual trees stored and retrieved unchanged
+- Query filters on c_static (capacity, latency) return correct subsets
+- Query filters on c_trans (congestion_control) work correctly
+- Application name filtering across c_app layer
+- Artifacts uploaded and downloaded with correct associations
+- Tag operations on results work
 - Concurrent result uploads don't cause conflicts
-- CSV export produces valid files
+- CSV export produces valid format with all relevant columns
+- Date range filters return correct time windows
+- Pagination (limit/offset) works correctly
 
 ### Performance Tests
 - Store result < 100ms
-- Query 1000 results with filters < 500ms
-- List artifacts < 200ms
+- Query 1000 results with contextual filters < 500ms
+- List artifacts for a result < 200ms
 - Artifact upload < 5s (depends on file size)
+- CSV export of 10k results < 2s
 
 ## Implementation Guide
 

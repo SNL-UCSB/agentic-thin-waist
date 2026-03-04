@@ -1,60 +1,81 @@
 # Orchestration Service
 
 **Port**: 8005
-**Deliverable**: D5 (Agentic Orchestration - Claude + OpenClaw)
-**Priority**: MEDIUM
-**Status**: To be implemented
+**Deliverable**: D5 (Agentic Orchestration — Natural Language Intent → Experiment Specs)
+**Priority**: CRITICAL
+**Status**: Specification Ready
+**Lead**: Haarika
+**PI**: Prof. Arpit Gupta
 
-## Purpose
+## Overview
 
-The Orchestration Service is the agentic interface that interprets natural language research intents and translates them into concrete experiment specifications. It uses Claude (via Anthropic API) and OpenClaw framework to implement multi-step reasoning about network conditions, applications, and experimental design.
+The Orchestration Service is the agentic brain of the Agentic Thin Waist. It interprets natural language research intents and translates them into concrete, executable experiment specifications. Built on Claude (Anthropic API) as the LLM backbone and OpenClaw as the orchestration framework, this service implements multi-step reasoning about network conditions, applications, and experimental design strategies.
 
-The Orchestration Service:
+The core architecture mirrors the Glia paper: Claude acts as the "Researcher" agent (the reasoning backbone), and the Skills & Tools form the "Supervisor" layer (executable actions). The service reason through hypotheses about network bottlenecks, generates parameter sweeps, and orchestrates complex multi-step experiment workflows.
 
-1. **Accepts research intents** — Natural language descriptions of research goals
-2. **Reasons about network conditions** — Translate intent to specific CTPs
-3. **Generates experiment specs** — Create JSON experiment definitions
-4. **Manages tool/skill declarations** — Define available services as Tools (OpenClaw)
-5. **Orchestrates execution** — Dispatch experiments to Experiment API and track results
-6. **Interprets complex queries** — Handle multi-step requests (e.g., parameter sweeps)
+### Core Responsibilities
 
-This service acts as the "smart interface" that bridges researchers and infrastructure.
+1. **Natural Language Intent Parsing** — Interpret researcher intent ("Compare YouTube vs Zoom at 10-50 Mbps")
+2. **Multi-Step Reasoning** — Use Claude to reason about which experiments to run, bottleneck regimes to explore
+3. **Experiment Specification Generation** — Create JSON experiment definitions and parameter sweeps
+4. **Tool & Skill Management** — Expose NetReplica/NetGent functions as OpenClaw tools; declare skills for multi-step workflows
+5. **Execution Orchestration** — Dispatch experiments to Experiment API, track progress, handle failures
+6. **Query & Refinement** — Interpret follow-up queries and refine experimental design iteratively
+
+### Glia Paper Architecture Mapping
+
+- **Glia's Researcher (LLM backbone)** → Claude (via Anthropic API)
+- **Glia's Supervisor (high-level skills)** → SKILLS.md (parameter_sweep, application_comparison, network_characterization, etc.)
+- **Tools in Glia** → TOOLS.md (run_experiment, query_results, validate_ctp, get_available_applications)
+- **Core Loop** → hypothesis → experimentation → analysis → refinement
 
 ## Architecture
 
 ```
 ┌──────────────────────────────────────┐
-│   Researcher (Natural Language)       │
-│   "Compare YouTube vs Zoom at        │
-│    10, 25, 50 Mbps with 50ms latency"│
+│  Researcher / Scientist               │
+│  "Compare YouTube vs Zoom at        │
+│   10, 25, 50 Mbps with 50ms latency" │
 └────────────┬────────────────────────┘
              │ POST /intent
              ▼
 ┌────────────────────────────────────┐
-│  ORCHESTRATION SERVICE (8005)      │
-│  Claude + OpenClaw                 │
-│  ┌──────────────────────────────┐  │
-│  │ Intent Parser                │  │
-│  │ Claude Reasoning Engine      │  │
-│  │ Tool/Skill Declarations      │  │
-│  │ Experiment Generator         │  │
-│  └──────────────────────────────┘  │
+│ ORCHESTRATION SERVICE (8005)       │
+│ Claude LLM + OpenClaw Framework    │
+│ ┌──────────────────────────────┐   │
+│ │ Claude Client                │   │
+│ │ ├─ Intent Parser             │   │
+│ │ ├─ Reasoning Engine          │   │
+│ │ └─ Spec Generator            │   │
+│ ├─ Tool Declarations (TOOLS.md)│   │
+│ ├─ Skill Declarations (SKILLS) │   │
+│ ├─ Health Monitor (HEARTBEAT)  │   │
+│ └─ Agent Routing (AGENTS.md)   │   │
+│ └──────────────────────────────┘   │
 └────────────┬──────────────────────┘
-             │ (through API Gateway)
-      ┌──────┴──────┬─────────┐
-      ▼             ▼         ▼
-  ┌─────────┐ ┌────────┐ ┌──────────┐
-  │Experiment│ │Storage │ │CTP       │
-  │API :8000 │ │:8004   │ │Service   │
-  │          │ │        │ │:8001     │
-  └─────────┘ └────────┘ └──────────┘
+             │ /experiments
+             │ /results
+             │ /ctps/validate
+      ┌──────┼──────┬──────────┐
+      ▼      ▼      ▼          ▼
+  ┌──────┐┌──────┐┌──────┐ ┌──────────┐
+  │Exp   ││CTP   ││Storage│ │Analysis  │
+  │API   ││Svc   ││Svc   │ │Tools     │
+  │:8000 ││:8001 ││:8004 │ │(Future)  │
+  └──────┘└──────┘└──────┘ └──────────┘
 ```
+
+### Key Difference: Specification vs. Execution
+
+The critical insight is that Claude reasonably handles **specification**: translating natural language intent into structured experiment specs. This mirrors how a researcher writes a hypothesis and experimental plan before running it. Claude identifies bottleneck regimes to explore, determines relevant parameter sweeps, and generates the JSON specifications. The downstream Experiment API (D2/D4) and Storage Service (D3) handle **execution and persistence**.
 
 ## API Specification
 
 ### 1. Submit Research Intent
 
 **Endpoint**: `POST /intent`
+
+Submit a natural language research intent. Claude reasons through the intent, generates an experimental design, and returns an orchestration_id for tracking.
 
 **Request**:
 ```json
@@ -67,7 +88,8 @@ This service acts as the "smart interface" that bridges researchers and infrastr
   },
   "preferences": {
     "capture_pcap": true,
-    "run_immediately": true
+    "run_immediately": true,
+    "desired_cc_algorithms": ["cubic", "bbr"]
   }
 }
 ```
@@ -79,17 +101,20 @@ This service acts as the "smart interface" that bridges researchers and infrastr
   "status": "processing",
   "intent": "Compare YouTube vs Zoom at 10, 25, 50 Mbps with 50ms latency",
   "generated_experiments": 6,
-  "estimated_duration_minutes": 10
+  "estimated_duration_minutes": 10,
+  "estimated_completion": "2026-03-04T11:30:00Z",
+  "claude_model": "claude-opus-4-6"
 }
 ```
 
 **Processing Steps**:
-1. Parse intent with Claude
-2. Identify applications (YouTube, Zoom)
-3. Identify capacity values (10, 25, 50)
-4. Identify latency value (50)
-5. Generate 6 experiments (2 apps × 3 capacities)
-6. Return orchestration_id for status tracking
+1. Claude parses intent with language understanding
+2. Claude identifies applications, capacity values, latency values, transport preferences
+3. Claude reasons about parameter sweep (Cartesian product or custom selection)
+4. Claude generates experiment specifications as JSON
+5. Orchestration Service validates specs against CTP Service
+6. Specs queued for execution; return orchestration_id for status tracking
+7. Experiments dispatched asynchronously to Experiment API
 
 ---
 
@@ -393,104 +418,185 @@ class ReasoningStep:
     reasoning: str
 ```
 
-## Configuration Files
+## Configuration Files & Deliverables
 
-### TOOLS.md
+### TOOLS.md — Available Tools for Claude
 
-This file declares all available tools for Claude + OpenClaw:
+Declares all primitive operations available to Claude (via OpenClaw). Each tool wraps a service endpoint.
 
 ```markdown
 # Available Tools for Network Research Orchestration
 
-## run_experiment(experiment_id, capacity_mbps, latency_ms, application, duration_seconds)
+## run_experiment(experiment_id, capacity_mbps, latency_ms, application, duration_seconds, cc_algorithm?)
 Create and run an experiment with specific network conditions.
-- experiment_id (str): Unique ID for the experiment
+- experiment_id (str): Unique ID
 - capacity_mbps (float): Link capacity in Mbps
 - latency_ms (float): RTT latency in milliseconds
-- application (str): "youtube", "netflix", "zoom", etc.
-- duration_seconds (int): Experiment duration
+- application (str): "youtube", "netflix", "zoom", "twitch", "discord", "google-meet"
+- duration_seconds (int): Experiment duration in seconds
+- cc_algorithm (str, optional): "cubic", "bbr", "reno", "htcp", default "cubic"
+Returns: {experiment_id, status, estimated_completion}
 
-## query_results(application, capacity_min, capacity_max, latency_min, latency_max)
+## query_results(application?, capacity_min?, capacity_max?, latency_min?, latency_max?, cc_algorithm?)
 Query stored results by filters.
-Returns: List of ExperimentResult objects with QoE metrics.
+Returns: List of ExperimentResult objects with QoE metrics and contextual trees.
 
 ## validate_ctp(capacity_mbps, latency_ms, loss_rate, aqm_policy)
-Validate that network conditions are feasible.
-Returns: {valid: bool, warnings: List[str]}
+Validate that network conditions are feasible on available CTP nodes.
+Returns: {valid: bool, ctp_cluster_id: str, warnings: List[str]}
 
 ## get_available_applications()
-List supported applications.
-Returns: ["youtube", "netflix", "zoom", "twitch", "discord", "google-meet", ...]
+List supported applications and their workflow specs.
+Returns: {applications: [name, workflow_spec, supported_metrics]}
 
-## list_experiments()
-Get all experiments and their status.
+## get_available_cc_algorithms()
+List supported congestion control algorithms.
+Returns: ["cubic", "bbr", "reno", "htcp", "vegas", "bic"]
+
+## list_experiments(status?, limit?)
+Get experiments and their status. Useful for checking progress before new experiments.
+Returns: List[{experiment_id, status, progress, created_at}]
 ```
 
-### SKILLS.md
+### SKILLS.md — High-Level Multi-Step Workflows
 
-This file declares high-level skills that combine multiple tools:
+Declares composite skills that Claude can use to orchestrate multi-step experiment plans.
 
 ```markdown
 # Available Skills for Multi-Step Workflows
 
 ## parameter_sweep
-Run multiple experiments across a range of parameters.
+Run experiments across ranges of parameters (Cartesian product).
 Input:
   - applications: ["youtube", "zoom"]
   - capacity_range: {min: 10, max: 50, step: 5}
   - latency_range: {min: 20, max: 100, step: 20}
-Generates: (2 apps) × (9 capacities) × (5 latencies) = 90 experiments
+  - cc_algorithms: ["cubic", "bbr"] (optional)
+Behavior: Generates (2 apps) × (9 capacities) × (5 latencies) [× 2 CCs] experiments
 
 ## application_comparison
-Compare applications under identical conditions.
+Compare multiple applications under identical network conditions.
 Input:
-  - applications: ["youtube", "zoom"]
+  - applications: ["youtube", "zoom", "discord"]
   - capacity_mbps: 25
   - latency_ms: 50
-Generates: 2 experiments, same network conditions
+  - cc_algorithm: "cubic" (optional)
+Behavior: Creates one experiment per application, same network config
 
 ## baseline_establishment
-Test with minimal constraints to establish baseline performance.
+Test applications with minimal constraints (ideal network) to establish upper bounds.
 Input:
-  - applications: ["youtube"]
+  - applications: ["youtube", "zoom"]
   - duration_seconds: 120
-Generates: 1 experiment with 100 Mbps, 10ms latency (ideal conditions)
+Behavior: Generates 2 experiments with 1000 Mbps, 5ms latency, FIFO AQM
 
 ## network_characterization
-Sweep both capacity and latency systematically.
+Factorial sweep of capacity and latency to characterize bottleneck regimes.
 Input:
   - applications: ["youtube"]
   - capacity_values: [5, 10, 25, 50, 100]
   - latency_values: [10, 25, 50, 100]
-Generates: 20 experiments in factorial design
+Behavior: Generates 5 × 4 = 20 experiments covering regime space
+
+## replicate_study
+Replicate a published study or prior experiment set.
+Input:
+  - study_name: "name of study to replicate"
+  - num_trials: number of trials per condition
+Behavior: Executes pre-defined experiment matrix from study definition
+```
+
+### AGENTS.md — Agent Routing & Role Distribution
+
+Defines how Claude routes reasoning across the Researcher/Supervisor pattern.
+
+```markdown
+# Agent Routing & Roles
+
+## Researcher Agent (Claude LLM backbone)
+Responsible for:
+- Interpreting natural language intent
+- Reasoning about experimental design
+- Decomposing intent into testable hypotheses
+- Selecting appropriate skills and tools
+- Iterative refinement based on results
+
+## Supervisor Layer (Skills in SKILLS.md)
+Responsible for:
+- Executing multi-step experiment workflows
+- Managing parameter sweeps and combinations
+- Enforcing constraints and validations
+- Tracking experiment progress
+- Collecting and reporting results
+
+## Routing Logic
+- Simple intent (one application, fixed capacity) → route to run_experiment tool directly
+- Parameter sweep intent → route to parameter_sweep skill
+- Comparison intent → route to application_comparison skill
+- Open-ended intent ("characterize YouTube") → route to network_characterization skill
+```
+
+### HEARTBEAT.md — Health Monitoring & Execution Tracking
+
+Defines health checks and orchestration monitoring.
+
+```markdown
+# Orchestration Health Monitoring
+
+## /health endpoint
+Returns: {status, claude_api_healthy, experiment_api_reachable, storage_service_reachable, ctp_service_reachable, active_orchestrations_count, uptime_seconds}
+
+## Experiment Tracking
+Track status of dispatched experiments: pending → running → complete/failed
+Monitor for: timeouts, failures, resource exhaustion
+
+## Claude API Health
+Monitor: API connectivity, rate limits, token usage, latency
+Alert on: API errors, quota issues, degraded performance
+
+## Orchestration Lifecycle
+1. Intent submitted (202 Accepted)
+2. Claude parses and generates specs (status: processing)
+3. Specs validated against CTP Service (status: validating)
+4. Experiments queued and dispatched (status: executing)
+5. Results collected from Storage Service (status: complete)
 ```
 
 ## Service Dependencies
 
 | Service | Endpoint | Purpose |
 |---------|----------|---------|
-| Experiment API | POST /experiments | Create and execute experiments |
-| Storage Service | GET /results | Query existing results |
-| CTP Service | POST /ctps/validate | Validate network configs |
+| Experiment API | POST /experiments, GET /experiments/{id} | Create and monitor experiments |
+| Storage Service | GET /results, POST /results | Query and store results |
+| CTP Service | POST /ctps/validate | Validate network configurations |
+| Claude API (Anthropic) | https://api.anthropic.com | LLM reasoning backbone |
 
 ## Testing Criteria
 
 ### Unit Tests
-- Intent parsing for various phrasings
-- Parameter sweep generation (cartesian products)
-- Reasoning step logging
+- Claude intent parsing for various phrasings and contexts
+- Parameter sweep generation (Cartesian product logic)
+- Experiment ID generation and naming consistency
+- Reasoning step serialization and logging
+- Tool declaration parsing and validation
+- Skill routing logic (intent → appropriate skill/tool)
 
 ### Integration Tests
-- "Compare YouTube vs Zoom at 10, 25, 50 Mbps" generates 6 experiments
-- "Parameter sweep: 10-50 Mbps in 10 Mbps steps, YouTube" generates 5 experiments
-- Generated experiments are valid (pass CTP validation)
-- Multi-step intents generate correct experiment counts
-- Orchestration tracking follows all experiments to completion
+- "Compare YouTube vs Zoom at 10, 25, 50 Mbps" → generates exactly 6 valid experiment specs
+- "Parameter sweep: 10-50 Mbps in 10 Mbps steps, YouTube" → generates 5 experiments
+- "Characterize YouTube under CUBIC and BBR" → generates 2 × N experiments (2 CCs)
+- Generated experiments pass CTP Service validation
+- Multi-step intents generate correct experiment matrix size
+- Orchestration tracking follows all generated experiments from pending → complete
+- Queries against Storage Service retrieve results correctly
+- Claude reasoning steps logged and retrievable
 
 ### Performance Tests
-- Intent parsing < 2s
-- Experiment generation < 1s per experiment
-- Full orchestration of 10 experiments < 2 minutes wall-clock
+- Claude intent parsing and spec generation < 3s for simple intent
+- Parameter sweep generation < 1s per 20 experiments
+- Full orchestration of 10 experiments dispatched < 1 minute (wall-clock)
+- Orchestration status query < 500ms
+- Health check < 200ms
 
 ## Implementation Guide
 
@@ -609,43 +715,98 @@ class ExecutionManager:
             # Track execution...
 ```
 
-## Prompt Template (prompts/system.md)
+## System Prompt & Reasoning Template
+
+The Claude system prompt guides the reasoning behavior:
 
 ```
-You are a network research orchestration agent. Your role is to interpret
-natural language research intents and generate concrete experiment specifications.
+You are Claude, the Researcher agent in the Agentic Thin Waist network research system.
+Your role is to interpret natural language research intents and generate concrete,
+executable experiment specifications.
 
 CONTEXT:
-- Available applications: youtube, netflix, zoom, twitch, discord, google-meet
+- Available applications: youtube, netflix, zoom, twitch, discord, google-meet, twitch
 - Capacity range: 0.1 to 10000 Mbps
 - Latency range: 0 to 10000 ms
+- Supported congestion control: cubic, bbr, reno, htcp, vegas, bic
 - Supported AQM policies: fifo, codel, pie, fq_codel
+- Available skills: parameter_sweep, application_comparison, baseline_establishment,
+  network_characterization, replicate_study
 
-TASK:
+CORE LOOP:
+1. Parse intent: What does the researcher want to test?
+2. Identify bottleneck regimes: What network conditions are interesting?
+3. Reason about parameter sweep: Cartesian product or custom exploration?
+4. Generate specs: Create JSON experiment definitions
+5. Select skill/tool: parameter_sweep? run_experiment? baseline_establishment?
+6. Return orchestration_id for tracking
+
+EXTRACTION TASK:
 Given a research intent, extract:
 1. Applications to test
 2. Capacity values (Mbps) or ranges
 3. Latency values (ms) or ranges
-4. Duration (seconds)
-5. Number of trials
-6. Other parameters
+4. Congestion control algorithms (optional)
+5. AQM policies (optional)
+6. Duration (seconds)
+7. Number of trials
+8. Reasoning: Why these choices?
 
-OUTPUT:
-Return a JSON object with the extracted parameters.
+OUTPUT FORMAT:
+Return a JSON object with extracted parameters, then explain your reasoning.
 
 EXAMPLES:
-[See examples.md]
+Intent: "Compare YouTube vs Zoom at 10, 25, 50 Mbps with 50ms latency"
+→ applications: ["youtube", "zoom"], capacities: [10, 25, 50], latencies: [50], trials: 1
+→ Reasoning: Cartesian product → 2 × 3 = 6 experiments
+→ Skill: application_comparison (3 capacities, 2 apps)
+
+Intent: "Characterize YouTube under CUBIC and BBR across 5-100 Mbps"
+→ applications: ["youtube"], capacity_range: {min: 5, max: 100, step: 10},
+  cc_algorithms: ["cubic", "bbr"]
+→ Reasoning: Factorial design exploring bottleneck regimes
+→ Skill: parameter_sweep
 ```
+
+The prompt emphasizes reasoning about **why** experiments matter (bottleneck regimes, QoE transitions) not just mechanically generating combinations.
+
+## Implementation Notes
+
+### Critical Timeline
+- **Haarika has NSDI camera-ready deadline this week** — D5 ramps up heavily after that milestone
+- Design review and validation needed before Haarika fully focuses on implementation
+- Coordinate with Prof. Gupta on prompt engineering and Claude integration patterns
+
+### Key Implementation Decisions
+
+1. **Claude as Specification Engine**: Claude generates experiment JSON specs; it does not execute them directly. This separation preserves safety and auditability.
+
+2. **OpenClaw Integration**: Use OpenClaw's tool/skill system to expose TOOLS.md and SKILLS.md to Claude. The framework handles routing and execution tracking.
+
+3. **Async Experiment Dispatch**: Experiments are queued asynchronously. The POST /intent endpoint returns immediately (202) with an orchestration_id. Status polling via GET /orchestration/{orchestration_id}.
+
+4. **CTP Validation**: Before dispatching, validate all generated experiments against the CTP Service (POST /ctps/validate). Reject specs that violate constraints.
+
+5. **Result Aggregation**: Once experiments complete, aggregate results from Storage Service (D3) and present to user via GET /orchestration/{orchestration_id}/results.
+
+### Testing Strategy
+
+- **Unit tests** on Claude prompt behavior (various intent phrasings)
+- **Integration tests** with mock Experiment API and Storage Service
+- **E2E tests** with actual network testbed (coordinated with D2/D4 schedule)
+- **Prompt ablation** to measure impact of reasoning guidance
 
 ## References
 
 - Anthropic Claude API: https://docs.anthropic.com/claude/reference/
-- OpenClaw framework: [Internal SNL-UCSB documentation]
-- Prompt engineering: https://docs.anthropic.com/claude/docs/prompt-engineering
-- Python async/await: https://docs.python.org/3/library/asyncio.html
+- Glia Paper: [Internal publication by SNL-UCSB]
+- OpenClaw Framework: [Internal SNL-UCSB documentation]
+- Prompt Engineering Best Practices: https://docs.anthropic.com/claude/docs/prompt-engineering
+- Python Async Patterns: https://docs.python.org/3/library/asyncio.html
 
 ---
 
 **Last Updated**: 2026-03-04
-**Status**: Specification Ready
-**Next Milestone**: Implementation (Week 5)
+**Status**: Specification Ready (High Priority)
+**Next Milestone**: Implementation (Weeks 3–4, after Haarika's NSDI deadline)
+**Contact**: Haarika (Lead), Prof. Arpit Gupta (PI)

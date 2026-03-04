@@ -1,174 +1,175 @@
 # Agentic Thin Waist
 
-An agentic infrastructure for network research data generation, enabling researchers to conduct reproducible, large-scale experiments across diverse computing environments.
+A service-oriented platform for bottleneck-centric network data generation, enabling researchers to specify experimental intents in natural language and execute reproducible, large-scale experiments across diverse infrastructure.
 
-## Project Vision
+## Vision
 
-The **Data Generation Hourglass** is an intellectual property framework that captures the essential principles of scalable network research. The waist represents a thin, composable set of services that bridges diverse research intents (top) with diverse infrastructure (bottom):
+Progress in networking research depends on access to data that captures how applications and protocols respond to diverse, time-varying bottleneck regimes. Yet generating such data systematically remains hard: bottleneck dynamics are simultaneously behavior-defining and execution-dependent, making them difficult to replicate, vary, or reuse across environments.
+
+This platform applies the **hourglass design** from netUnicorn to network data generation. The "thin waist" is a composable set of services that bridges diverse research intents (top) with diverse infrastructure (bottom):
 
 ```
-                    THE DATA GENERATION HOURGLASS
-
+                RESEARCH INTENTS
     Replication | Counterfactual | Pre-training | Broadband
     Teaching    | DOE Synthesis  | Benchmarking | Hypothesis
    ─────────────────────────────────────────────────────────
-          \          DIVERSE RESEARCH INTENTS            /
-           \                                            /
-            \   (any researcher, any question)         /
-             \                                        /
-              ────────────────────────────────────────
-              |          AGENTIC THIN WAIST          |
-              |                                      |
-              |  OpenClaw + Claude  (orchestration)  |
-              |  Experiment API     (intent plane)   |
-              |  CTP Service        (representation) |
-              |  NetGent            (app execution)  |
-              |  Storage Service    (telemetry)      |
-              |  Substrate Worker   (network exec)   |
-              |                                      |
-              ────────────────────────────────────────
-             /                                        \
-            /    (any Docker-capable host)              \
+          \          any researcher, any question          /
+           \                                              /
+            ────────────────────────────────────────────
+            |           AGENTIC THIN WAIST             |
+            |                                          |
+            |  Orchestration    (Claude + OpenClaw)     |
+            |  Bottleneck Service                       |
+            |    ├─ Intent: Link(), Bottleneck()        |
+            |    ├─ Representation: CrossTraffic(), CTPs|
+            |    └─ Execution: tc, tshark, tcpreplay    |
+            |  NetGent Service  (application workflows) |
+            |  Storage Service  (telemetry + results)   |
+            |                                          |
+            ────────────────────────────────────────────
            /                                            \
-          /          DIVERSE INFRASTRUCTURE              \
+          /          any Docker-capable host              \
    ─────────────────────────────────────────────────────────
     Laptop Docker | AWS EC2 | PINOT Campus | ANL/ESnet
     Mininet       | Azure   | SNL Servers  | NetUnicorn
 ```
 
-**Key principle**: Researchers specify research intents (top), agents orchestrate execution (waist), and infrastructure adapts to environment (bottom). The Thin Waist services are infrastructure-agnostic and can run on any Docker-capable host.
+Researchers specify intents at the top. Agents orchestrate execution through the waist. Infrastructure adapts at the bottom.
 
 ## Progressive Disaggregation
 
-This architecture is built on the principle of **progressive disaggregation**, where each generation of tools builds upon and refactors previous work:
+The architecture is guided by the principle of **progressive disaggregation**, developed across our prior systems. Each system addresses a specific form of disaggregation:
 
-- **NetUnicorn** (monolithic framework) → network orchestration, data collection
-- **NetReplica** (bottleneck emulation) → CTP service refactoring (tc, tshark integration)
-- **NetForge** (experiment specification) → CTP algebra, representation plane
-- **NetGent** (agentic browser automation) → NFA-based workflow execution, application plane
-- **BQT+** (data storage and analysis) → storage service, telemetry aggregation
-- **Thin Waist** (agentic orchestration) → OpenClaw + Claude, intent plane, end-to-end workflow
+**netUnicorn** established two foundational capabilities for network data collection: (1) decoupling data-collection intents from mechanisms — expressing *what* to collect separately from *how* to realize it — and (2) disaggregating intents into independent, reusable tasks. Its service-oriented architecture (client, core/mediation, deployment services, execution services, datastore) demonstrated that this disaggregation enables portability across heterogeneous infrastructure.
 
-Each layer preserves the IP and APIs of previous work while refactoring internals for clarity and composability.
+**NetForge/NetReplica** applies progressive disaggregation to bottleneck-centric data generation along three dimensions:
 
-## Architecture Overview
+1. **Intent–execution disaggregation**: Separates *what* bottleneck behavior to exercise from *where* and *how* it is realized. NetForge introduces a first-class *bottleneck-regime specification* — a declarative description independent of any particular testbed, cloud platform, deployment, or trace.
 
-### The Thin Waist Services
+2. **Static–dynamic attribute disaggregation**: Separates a bottleneck regime into two independently controllable components: *static bottleneck attributes* (capacity, base latency, buffering, queue management) that define the structural envelope, and *dynamic congestion pressure* that drives time-varying contention against that structure.
 
-The Agentic Thin Waist consists of six tightly coupled services that form the critical infrastructure layer:
+3. **Trace–context disaggregation**: Disaggregates observed traffic dynamics from their original trace context via *Cross-Traffic Profiles (CTPs)*. CTPs encode the temporal structure of aggregate demand at a bottleneck — intensity, burstiness, heterogeneity, and temporal correlations — without binding to the particular path, applications, or users that produced it.
 
-#### Control Plane vs Data Plane
+**BQT+** addresses the disaggregation of workflow specification from execution for web-based measurement. It models ISP consumer-facing interfaces as interaction state spaces, formalized as a nondeterministic finite automaton (NFA), where states correspond to observable interface conditions and transitions encode permissible user interactions. This separates querying intent from execution and enables robust, extensible operation across hundreds of heterogeneous providers.
+
+**NetGent** extends BQT+'s NFA-based abstraction to general application workflows (YouTube, Netflix, Zoom, etc.), compiling natural-language workflow specifications into executable state machines.
+
+Together, these systems form the building blocks of the thin waist platform.
+
+## Architecture
+
+### Service Structure
+
+The platform is organized around a **Bottleneck Service** that maps directly to the three logical planes from the NetForge paper, plus supporting services for application execution, storage, and orchestration.
 
 ```
   CONTROL PLANE                          DATA PLANE
-  (user's machine or SNL server)         (wherever data is generated)
- ┌──────────────────────────┐           ┌──────────────────────────┐
- │                          │           │                          │
- │  OpenClaw + Claude       │  dispatch │  Substrate Worker(s)     │
- │  (intent → experiment)   │─────────→ │  (tc, tshark, tcpreplay) │
- │                          │           │                          │
- │  Experiment API :8000    │           │  NetGent Browser Workers │
- │  (orchestration)         │           │  (Netflix, YouTube, Zoom)│
- │                          │           │                          │
- │  CTP Service :8001       │  results  │  Telemetry Collectors    │
- │  (CTP algebra)           │ ←──────── │  (pcap, transport state) │
- │                          │           │                          │
- │  Storage Service :8004   │           │                          │
- │  (results DB, queries)   │           │                          │
- │                          │           │                          │
- │  NetGent NFA Compiler    │           │                          │
- └──────────────────────────┘           └──────────────────────────┘
+  (researcher's machine or SNL server)   (wherever experiments run)
+ ┌──────────────────────────────┐       ┌──────────────────────────┐
+ │                              │       │                          │
+ │  Orchestration (Claude +     │ specs │  Substrate Workers       │
+ │    OpenClaw)                 │──────→│  (tc, tshark, tcpreplay) │
+ │                              │       │                          │
+ │  Bottleneck Service          │       │  NetGent Browser Workers │
+ │  ├─ Experiment API :8000     │       │  (app workflows)         │
+ │  │  (intent plane)           │       │                          │
+ │  ├─ CTP Service :8001        │results│  Telemetry Collectors    │
+ │  │  (representation plane)   │←──────│  (pcap, tcp-info)        │
+ │  └─ Substrate Worker :8002   │       │                          │
+ │     (execution plane)        │       └──────────────────────────┘
+ │                              │
+ │  NetGent Service :8003       │
+ │  Storage Service :8004       │
+ └──────────────────────────────┘
 ```
 
-The **Control Plane** runs on the researcher's machine or SNL server, orchestrating experiments and aggregating results. The **Data Plane** runs on infrastructure where experiments are executed (could be the same machine or remote infrastructure).
+The **Control Plane** runs on the researcher's machine or an SNL server — it orchestrates experiments and aggregates results. The **Data Plane** runs on infrastructure where experiments execute (can be the same machine or remote hosts).
 
-#### Service Interaction Flow
+### Bottleneck Service
 
-```
-  "Compare YouTube vs Zoom at 10, 25, 50 Mbps"
-                    │
-                    ▼
-        ┌───────────────────────┐
-        │  Claude + OpenClaw    │  D5: intent → experiment JSON
-        │  (port 8005)          │
-        └───────────┬───────────┘
-                    │ POST /experiments
-                    ▼
-        ┌───────────────────────┐
-        │  Experiment API       │  D1: orchestrates everything
-        │  (port 8000)          │
-        └──┬────────┬────────┬──┘
-           │        │        │
-           ▼        ▼        ▼
-     ┌─────────┐ ┌────────┐ ┌─────────┐
-     │ CTP     │ │Substrate│ │ NetGent │
-     │ Service │ │ Worker │ │ Service │
-     │ :8001   │ │ :8002  │ │ :8003   │
-     └────┬────┘ └───┬────┘ └────┬────┘
-          │          │           │
-          └──────────┼───────────┘
-                     │ results + telemetry
-                     ▼
-        ┌───────────────────────┐
-        │  Storage Service      │  D3: store, tag, query
-        │  (port 8004)          │
-        └───────────────────────┘
-```
+The Bottleneck Service is the core of the platform, implementing NetForge's three-plane disaggregation:
+
+**Intent Plane (Experiment API, port 8000)**: Accepts bottleneck-regime specifications via `Link()` and `Bottleneck()` objects that define static attributes (capacity, base latency, buffering/AQM) independently of any execution context. Orchestrates the CTP Service and Substrate Worker.
+
+**Representation Plane (CTP Service, port 8001)**: Manages Cross-Traffic Profiles — reusable representations of dynamic congestion pressure extracted from production packet traces. Supports CTP operations: `extract()`, `select()`, `transform()`, `merge()`, `replay()`. Stores and indexes CTPs by statistical descriptors (intensity, burstiness, heterogeneity).
+
+**Execution Plane (Substrate Worker, port 8002)**: Instantiates bottleneck-regime specifications on concrete infrastructure using Linux traffic control (`tc`), `tshark` for capture, and `tcpreplay` for CTP replay. Verifies that configured shaping matches intended specification.
+
+### Supporting Services
+
+**NetGent Service (port 8003)**: NFA-based browser automation for application workflows. Compiles natural-language specifications into executable state machines. Handles YouTube, Netflix, Zoom, NDT speedtests, and other application-level interactions.
+
+**Storage Service (port 8004)**: Telemetry storage and results query interface. Tags measurements with contextual metadata (static config, dynamic CTP, application, transport) to enable rich queries across experimental dimensions.
+
+**Orchestration (port 8005)**: Claude + OpenClaw integration for natural-language intent interpretation. Translates researcher goals into experiment specifications, coordinates multi-step experimental campaigns, and supports the hypothesis → experimentation → analysis → refinement loop.
 
 ### Service Directory
 
-| Service | Port | D# | Purpose | Status |
-|---------|------|----|---------|----|
-| **Experiment API** | 8000 | D1 | Orchestration, experiment lifecycle | Intent Plane |
-| **CTP Service** | 8001 | D1 | Network capacity/latency emulation | Representation Plane |
-| **Substrate Worker** | 8002 | D1 | Execute network conditions (tc, tshark) | Execution Plane |
-| **NetGent Service** | 8003 | D2 | Browser automation, application workflows | Application Execution |
-| **Storage Service** | 8004 | D3 | Telemetry storage, results query, tagging | Data Persistence |
-| **Orchestration** | 8005 | D5 | Claude + OpenClaw, intent interpretation | Agentic Orchestration |
+| Service | Port | Deliverable | NetForge Plane | Lead |
+|---------|------|-------------|----------------|------|
+| Experiment API | 8000 | D1 | Intent | Jaber |
+| CTP Service | 8001 | D1 | Representation | Jaber |
+| Substrate Worker | 8002 | D1 | Execution | Jaber |
+| NetGent Service | 8003 | D2 | Application | Eugene + Jaber |
+| Storage Service | 8004 | D3 | Data Persistence | Manni |
+| Orchestration | 8005 | D5 | Agentic | Haarika |
 
-## Deliverables Overview
+## Deliverables
 
-### D1: Network Virtualization Substrate (PRIORITY: CRITICAL)
-**Status**: Foundation layer for all other work
-- Experiment API: orchestration, state machine, lifecycle
-- CTP Service: capacity/latency profiles, CTP algebra
-- Substrate Worker: tc/tshark integration, network state verification
+### D1: Bottleneck Service — NetReplica as SOA (PRIORITY: CRITICAL)
+**Lead**: Jaber | **Start**: `services/experiment-api/README.md`
 
-**Testing**: An experiment can be created, executed on a local machine with bottleneck emulation, and telemetry collected.
+Refactor NetReplica's monolithic `controller.py` into three services mapping to NetForge's three planes. The Experiment API orchestrates CTP Service and Substrate Worker. An experiment can be created, executed on a local machine with bottleneck emulation via `docker compose up`, and telemetry collected — all from a single API call.
 
-### D2: Application Execution Layer (PRIORITY: HIGH)
-**Status**: Browser automation and application-level workflows
-- NetGent Service: NFA-based workflow execution
-- Workflow compiler: convert workflows to executable specs
-- Integration with substrate worker for QoE metrics collection
+**Key constraint**: Jaber pursues two parallel tracks. Track A (research priority): refactor the monolith with clean dataclasses, typed interfaces, and structured output. Track B (engineering): scaffold the three-service SOA from the same dataclass contracts. The contracts are identical — convergence is mechanical.
 
-**Testing**: YouTube video playback under various network conditions produces consistent QoE metrics.
+### D2: NetGent Programmatic API (PRIORITY: HIGH)
+**Lead**: Eugene + Jaber | **Start**: `services/netgent-service/README.md`
 
-### D3: Telemetry and Results Storage (PRIORITY: HIGH)
-**Status**: Centralized storage and query interface
-- Storage Service: time-series DB for measurements
-- Query API: filter by experiment, application, network condition
-- Contextual tree tagging: link results to experiment metadata
+Expose NetGent's NFA-based workflow engine as a programmatic API that agents can call. Wrap the existing LangGraph StateGraph implementation with clean `execute_workflow()`, `compile_nfa()`, `validate_workflow()` entry points. Make the LLM injectable per-call for OpenClaw integration.
 
-**Testing**: Results from D1 and D2 are persistently stored and retrievable.
+### D3: Telemetry and Storage Pipeline (PRIORITY: HIGH)
+**Lead**: Manni | **Start**: `services/storage-service/README.md`
 
-### D4: Distributed Execution (PRIORITY: MEDIUM)
-**Status**: Multi-host coordination
-- Kubernetes manifests for multi-node deployment
-- Remote substrate worker provisioning
-- Load balancing and fault recovery
+Build the data backbone: collect, tag, store, query. Every experiment result is tagged with its full context (static bottleneck config, dynamic CTP, application, transport protocol). Enables queries like: "Show me YouTube QoE under all CUBIC flows across capacity 10–50 Mbps."
 
-**Testing**: Experiments can run on SNL infrastructure without local Docker.
+### D4: Evaluation Pipeline (PRIORITY: STRETCH)
+Automated evaluation of generated datasets against production baselines. Stretch goal that ramps up after D1–D3 integration.
 
-### D5: Agentic Orchestration (PRIORITY: MEDIUM)
-**Status**: Claude + OpenClaw for intent interpretation
-- Natural language experiment specification
-- Tool/Skill declarations for all services
-- Multi-step reasoning about network conditions and applications
+### D5: Agentic Orchestration — OpenClaw + Claude (PRIORITY: VERY CRITICAL)
+**Lead**: Haarika | **Start**: `services/orchestration/README.md`
 
-**Testing**: "Compare YouTube vs Zoom at 10, 25, 50 Mbps" generates and executes appropriate experiments.
+The agentic interface is what makes the thin waist actually usable. Natural-language experiment specification, tool/skill declarations for all services, multi-step reasoning about network conditions and applications. Ramps up after NSDI camera-ready.
 
-## Quick-Start Guide
+## Development Timeline (4 Weeks)
+
+Three independent tracks running in parallel. Phase 1 (weeks 1–2) is independent work against mocked interfaces. Phase 2 (weeks 3–4) is integration. No one should be blocked by anyone else for the first two weeks.
+
+### Weeks 1–2: Independent Development
+
+| Track | Owner | Work |
+|-------|-------|------|
+| **Bottleneck Service** | Jaber | Track A: dataclasses, typed interfaces, `run_experiment()`. Track B: three-service SOA scaffold with mocked CTP and substrate |
+| **NetGent API** | Eugene + Jaber | Programmatic API wrapper, NFA compiler integration, TOOLS.md for OpenClaw |
+| **Storage + Telemetry** | Manni | Schema design, contextual tree tagging, query API with mock data |
+| **Orchestration** | Haarika | OpenClaw integration, tool declarations, intent → experiment mapping (after NSDI camera-ready) |
+| **Architecture + CI** | Sylee | Service boundary review, Docker Compose, CI/CD, testing infrastructure |
+
+### Weeks 3–4: Integration and Demo
+
+| Track | Work |
+|-------|------|
+| **Service integration** | Connect Bottleneck Service → Storage Service → Orchestration |
+| **End-to-end demo** | "Compare YouTube vs Zoom at 10, 25, 50 Mbps" generates experiments, executes, stores results |
+| **Testing** | Integration tests across service boundaries, bottleneck state verification |
+| **Documentation** | API reference, deployment guide, tutorials |
+
+### Coordination
+- Weekly Friday demo (show working software)
+- Async Slack updates
+- Max 1hr/week overhead — no daily standups
+
+## Quick Start
 
 ### Prerequisites
 
@@ -190,45 +191,33 @@ make build
 make up
 ```
 
-This starts all services in Docker Compose (development mode):
-- Experiment API on http://localhost:8000
-- CTP Service on http://localhost:8001
-- Substrate Worker on http://localhost:8002
-- NetGent Service on http://localhost:8003
-- Storage Service on http://localhost:8004
-- Orchestration on http://localhost:8005
+This starts the Bottleneck Service (Experiment API, CTP Service, Substrate Worker), NetGent, Storage, and Orchestration via Docker Compose.
 
 ### 3. Run Your First Experiment
 
-```bash
-# Create a simple experiment (10 Mbps capacity, 50ms latency)
-curl -X POST http://localhost:8000/experiments \
-  -H "Content-Type: application/json" \
-  -d '{
-    "experiment_id": "test-001",
-    "capacity_mbps": 10,
-    "latency_ms": 50,
-    "application": "youtube",
-    "duration_seconds": 30,
-    "num_trials": 1
-  }'
+```python
+from shared.clients import ExperimentAPIClient
 
-# Check experiment status
-curl http://localhost:8000/experiments/test-001
+client = ExperimentAPIClient("http://localhost:8000")
 
-# Query results
-curl "http://localhost:8004/results?experiment_id=test-001"
-```
+# Specify a bottleneck regime:
+# Static attributes: 10 Mbps capacity, 50ms base latency, pFIFO queue
+# Dynamic attributes: select a bursty CTP from the corpus
+result = client.create_experiment({
+    "static": {
+        "capacity_mbps": 10,
+        "base_latency_ms": 50,
+        "qdisc": "pfifo"
+    },
+    "dynamic": {
+        "ctp_query": {"min_intensity": 3.0, "burstiness": "high"}
+    },
+    "application": "ndt",
+    "duration_seconds": 30
+})
 
-### 4. Using the Agentic Interface
-
-```bash
-# Query Claude via OpenClaw orchestration
-curl -X POST http://localhost:8005/intent \
-  -H "Content-Type: application/json" \
-  -d '{
-    "intent": "Compare YouTube vs Zoom at 10, 25, 50 Mbps with 50ms latency"
-  }'
+print(result.status)  # "success"
+print(result.metrics)  # throughput, RTT, loss measurements
 ```
 
 ## Directory Structure
@@ -236,24 +225,24 @@ curl -X POST http://localhost:8005/intent \
 ```
 agentic-thin-waist/
 ├── README.md                          # This file
-├── docker-compose.yml                 # Development compose
-├── docker-compose.cloud.yml           # Cloud deployment compose
+├── docker-compose.yml                 # Development deployment
+├── docker-compose.cloud.yml           # Cloud deployment (AWS scale-out)
 ├── Makefile                           # Common tasks
 ├── .gitignore
 │
-├── services/                          # All microservices
-│   ├── README.md                      # Service overview
-│   ├── experiment-api/                # D1: Orchestration
-│   ├── ctp-service/                   # D1: Network emulation
-│   ├── substrate-worker/              # D1: Execution
-│   ├── netgent-service/               # D2: Application automation
-│   ├── storage-service/               # D3: Data persistence
-│   └── orchestration/                 # D5: Agentic orchestration
+├── services/                          # All services
+│   ├── README.md                      # Service overview and contracts
+│   ├── experiment-api/                # Intent plane (D1)
+│   ├── ctp-service/                   # Representation plane (D1)
+│   ├── substrate-worker/              # Execution plane (D1)
+│   ├── netgent-service/               # Application workflows (D2)
+│   ├── storage-service/               # Telemetry + results (D3)
+│   └── orchestration/                 # Claude + OpenClaw (D5)
 │
 ├── shared/                            # Shared code and contracts
 │   ├── README.md
 │   ├── models/                        # Dataclass definitions
-│   └── clients/                       # HTTP client utilities
+│   └── clients/                       # Service client libraries
 │
 ├── docs/                              # Documentation
 │   ├── README.md
@@ -266,121 +255,60 @@ agentic-thin-waist/
     └── README.md
 ```
 
+## Existing Repositories
+
+This platform builds on and refactors code from existing SNL-UCSB projects:
+
+- **NetReplica** ([github.com/SNL-UCSB/netReplica](https://github.com/SNL-UCSB/netReplica)) — Bottleneck emulation substrate. Key file: `controller.py` (being refactored into the Bottleneck Service).
+
+- **NetGent** (private SNL-UCSB) — NFA-based browser automation with ~100 pre-built application workflows. Being wrapped with a programmatic API for D2.
+
+- **OpenClaw** (private SNL-UCSB) — Orchestration framework for agentic systems. Provides persistent state, tool/skill declarations, and multi-step coordination. Being integrated for D5.
+
 ## Key Concepts
 
-### The Contextual Tree
+### Bottleneck Regime
 
-Every experiment result includes a **Contextual Tree** that tags measurements with their context:
+A *bottleneck regime* comprises (i) a static envelope — capacity, base latency, buffering, and queue management policy — and (ii) a time-varying congestion-pressure process that drives contention within that envelope. NetForge makes this explicit by disaggregating static and dynamic attributes into independently controllable specifications.
 
-```python
-@dataclass
-class ContextualTreeNode:
-    c_static: dict      # Capacity, latency, buffer, AQM (static config)
-    c_dyn: dict         # CTP cluster ID, description (dynamic network state)
-    c_app: dict         # Application name, workflow spec
-    c_trans: dict       # Transport protocol, congestion control
-```
+### Cross-Traffic Profiles (CTPs)
 
-This enables rich queries: "Show me YouTube performance under all CUBIC flows across capacity 10-50 Mbps."
-
-### CTP: Capacity-Throughput Profile
-
-A **CTP** is a tuple `(capacity_mbps, latency_ms, loss_rate, aqm_policy)` that describes network conditions. The CTP Service translates these into Linux `tc` (traffic control) commands on the data plane.
+A *Cross-Traffic Profile* is a reusable representation of dynamic congestion pressure applied at a bottleneck. CTPs encode the temporal structure of aggregate demand — intensity, burstiness, heterogeneity, and temporal correlations — without binding to the particular path, applications, or users that produced it. CTPs are extracted from production packet traces via `extract()`, indexed by statistical descriptors, and applied at bottlenecks via `replay()`. Additional operations — `select()`, `transform()`, `merge()` — enable controlled reuse and composition across different static configurations.
 
 ### Experiment Lifecycle
 
-1. **Intent** (Claude) → researcher's goal in natural language
-2. **Specification** (OpenClaw) → experiment JSON with explicit parameters
-3. **Provisioning** (Experiment API) → allocate resources, verify substrate
-4. **Execution** (CTP + Substrate + NetGent) → run workflows, collect telemetry
-5. **Aggregation** (Storage Service) → persist results, tag with context
-6. **Analysis** (Researcher) → query, visualize, interpret
+1. **Intent**: Researcher expresses goal in natural language (or structured specification)
+2. **Decomposition**: Orchestration maps intent to one or more bottleneck-regime specifications
+3. **Static specification**: Each experiment defines Link() + Bottleneck() — capacity, latency, buffer, AQM
+4. **Dynamic specification**: CTP selection — choose cross-traffic profile matching desired congestion characteristics
+5. **Execution**: Substrate Worker configures tc/tshark, CTP replay drives background traffic, application runs closed-loop
+6. **Collection**: Telemetry captured at multiple vantage points (upstream, downstream)
+7. **Storage**: Results tagged with full context and persisted for querying
 
-## Existing Repositories
+### Four Requirements (from NetForge)
 
-The Agentic Thin Waist builds on and refactors code from existing SNL-UCSB projects:
-
-- **NetReplica** (`github.com/SNL-UCSB/netReplica`) — bottleneck emulation, tc integration
-  - Key files: `controller.py` (needs refactoring into CTP Service)
-  - Reference: https://github.com/SNL-UCSB/netReplica
-
-- **NetGent** (private SNL-UCSB repo) — NFA-based browser automation
-  - ~100 pre-built workflows (YouTube, Netflix, Zoom, Twitch, etc.)
-  - Reference: Will be integrated as D2 implementation
-
-- **OpenClaw** — orchestration framework for agentic systems
-  - Tool and Skill declarations for multi-step reasoning
-  - Reference: To be integrated as D5 implementation
-
-- **BQT+** — data storage and analysis (private SNL-UCSB)
-  - Time-series database design, query optimization
-  - Reference: Will inform D3 Storage Service design
-
-## Development Timeline
-
-### Week 1: Foundation (D1 Core)
-- Experiment API: REST endpoints, experiment state machine
-- CTP Service: capacity/latency algebra, tc integration
-- Substrate Worker: container setup, Linux capability management
-- Tests: Basic experiment lifecycle
-
-### Week 2: Integration (D1 Complete)
-- Service-to-service API contracts finalized
-- Docker Compose development environment
-- Integration tests: full experiment execution
-- Bottleneck state verification (measured vs configured)
-
-### Week 3: Application Layer (D2 Start)
-- NetGent Service API design
-- NFA workflow compiler integration
-- QoE metrics collection from browsers
-- D2 partial completion: YouTube/Zoom basic workflows
-
-### Week 4: Storage and Analytics (D3)
-- Storage Service schema design
-- Contextual tree tagging on results
-- Query API: experiment filter, time-range, tags
-- Results visualization dashboard
-
-### Week 5: Agentic Orchestration (D5 Start)
-- OpenClaw integration
-- Tool declarations for all services
-- Claude prompt engineering for intent → experiment mapping
-- D5 partial completion: basic intent interpretation
-
-### Week 6: Distributed and Deployment (D4 + Polish)
-- Kubernetes manifests for SNL deployment
-- Multi-host Substrate Worker provisioning
-- Cloud deployment (AWS/Azure) via docker-compose.cloud.yml
-- Documentation and tutorials
-
-### Week 7-8: Refinement and Testing
-- Comprehensive test suite
-- Performance optimization
-- Documentation updates
-- D2, D4, D5 completion and testing
-
-## Team and Contacts
-
-- **Project Lead**: Prof. Guido Appenzeller
-- **Organization**: SNL-UCSB (github.com/SNL-UCSB)
-- **Repository**: github.com/SNL-UCSB/agentic-thin-waist (private)
+The platform must simultaneously satisfy: **controllability** (independent knobs for intent, static structure, and dynamic pressure), **composability** (mix-and-match intent, structure, and pressure; select/adapt/compose), **replicability** (same specifications re-instantiate comparable regimes across runs and environments), and **fidelity** (preserve realistic queueing signals and closed-loop application–bottleneck interaction).
 
 ## References
 
-- NetUnicorn: https://github.com/Aritro-BhumitraX/NetUnicorn
-- NetReplica: https://github.com/SNL-UCSB/netReplica
-- Traffic Control (tc): https://man7.org/linux/man-pages/man8/tc.8.html
-- tcpdump/tshark: https://www.tcpdump.org/
-- Docker Compose: https://docs.docker.com/compose/
-- OpenClaw: [Internal SNL-UCSB documentation]
+- netUnicorn (CCS '23): Data-collection platform with hourglass design and service-oriented architecture
+- NetForge (SIGCOMM submission #1035): Programmable substrate for bottleneck-centric data generation via progressive disaggregation
+- BQT+ (SIGCOMM '26 submission): Robust broadband plan measurement via NFA-based interaction state spaces
+- BQT (SIGCOMM '23): Broadband plan querying tool
+- NetReplica: [github.com/SNL-UCSB/netReplica](https://github.com/SNL-UCSB/netReplica)
+- Linux Traffic Control (tc): [man7.org/linux/man-pages/man8/tc.8.html](https://man7.org/linux/man-pages/man8/tc.8.html)
+
+## Team
+
+- **PI**: Prof. Arpit Gupta (SNL-UCSB)
+- **Organization**: [SNL-UCSB](https://github.com/SNL-UCSB)
+- **Repository**: [github.com/SNL-UCSB/agentic-thin-waist](https://github.com/SNL-UCSB/agentic-thin-waist) (private)
 
 ## License
 
-Proprietary - SNL-UCSB. All rights reserved.
+Proprietary — SNL-UCSB. All rights reserved.
 
 ---
 
 **Last Updated**: 2026-03-04
-**Status**: Architecture Phase
-**Next Milestone**: D1 Deliverables (Week 2)
+**Status**: Architecture Phase — Sprint Kickoff

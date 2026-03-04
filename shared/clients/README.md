@@ -1,6 +1,16 @@
 # HTTP Client Utilities
 
-This directory contains thin HTTP client wrappers for service-to-service communication. All clients inherit from `BaseHTTPClient` for common functionality like retry logic and timeout handling.
+This directory contains thin HTTP client wrappers for service-to-service communication within the netUnicorn SOA. All clients inherit from `BaseHTTPClient` for common functionality like retry logic and timeout handling.
+
+Service clients map to the agentic thin waist microservices:
+
+| Service | Port | Client | Purpose |
+|---------|------|--------|---------|
+| Experiment API | 8000 | ExperimentAPIClient | Orchestration and experiment lifecycle |
+| CTP Service | 8001 | CTPServiceClient | Cross-Traffic Profile operations (Representation Plane) |
+| Substrate Worker | 8002 | SubstrateWorkerClient | Network bottleneck execution (tc, capture) |
+| NetGent Service | 8003 | NetGentServiceClient | Application execution (NFA, workflows) |
+| Storage Service | 8004 | StorageServiceClient | Datastore for results and artifacts |
 
 ## Base Client
 
@@ -29,9 +39,9 @@ class BaseHTTPClient:
 
 **Common Features**:
 - Automatic retry with exponential backoff (3 retries)
-- 10-second timeout (configurable)
-- Request/response logging to stdout
-- Proper exception handling and descriptive error messages
+- Configurable timeout (default 10 seconds)
+- Request/response logging with correlation IDs
+- Proper exception handling with descriptive error messages
 
 ## Client Classes
 
@@ -79,24 +89,32 @@ print(result["experiment_id"])
 
 ### CTPServiceClient
 
-**Port**: 8001
+**Port**: 8001 | **Plane**: Representation
+
+Manages Cross-Traffic Profile (CTP) operations for the Representation Plane. CTPs are reusable demand artifacts that capture temporal patterns of network traffic.
 
 ```python
 class CTPServiceClient(BaseHTTPClient):
     def validate_ctp(self, ctp: dict) -> dict:
-        """POST /ctps/validate"""
+        """POST /ctps/validate - Validate CTP syntax and constraints"""
 
-    def compile_ctp(self, ctp: dict, interface: str = "eth0") -> dict:
-        """POST /ctps/compile"""
+    def extract_ctp(self, pcap_path: str, name: str) -> dict:
+        """POST /ctps/extract - Extract CTP from pcap artifact"""
+
+    def select_ctp(self, ctp_name: str, time_window: dict) -> dict:
+        """POST /ctps/select - Select subset of CTP for replay"""
+
+    def transform_ctp(self, ctp: dict, operations: list) -> dict:
+        """POST /ctps/transform - Apply CTP operations (scale, filter, etc.)"""
+
+    def merge_ctp(self, ctp_names: list) -> dict:
+        """POST /ctps/merge - Combine multiple CTPs"""
+
+    def replay_ctp(self, ctp_name: str, interface: str) -> dict:
+        """POST /ctps/replay - Replay CTP via tcpreplay on interface"""
 
     def get_presets(self) -> dict:
-        """GET /ctps/presets"""
-
-    def create_preset(self, preset: dict) -> dict:
-        """POST /ctps/presets"""
-
-    def verify_network(self, interface: str, expected_ctp: dict) -> dict:
-        """POST /ctps/verify"""
+        """GET /ctps/presets - List available CTP presets"""
 
     def health(self) -> dict:
         """GET /health"""
@@ -107,14 +125,33 @@ class CTPServiceClient(BaseHTTPClient):
 from shared.clients import CTPServiceClient
 
 client = CTPServiceClient("http://ctp-service:8001")
-valid, warnings = client.validate_ctp({
-    "capacity_mbps": 10,
-    "latency_ms": 50,
-    "aqm_policy": "fifo"
+
+# Validate a CTP specification
+valid = client.validate_ctp({
+    "ctp_name": "web-browsing-2024",
+    "download_mbps": 10,
+    "latency_ms": 50
 })
-if valid:
-    commands = client.compile_ctp({...}, interface="eth0")
+
+# Extract CTP from captured traffic
+ctp = client.extract_ctp(
+    pcap_path="/data/traffic.pcap",
+    name="extracted-web-browsing"
+)
+
+# Replay CTP on an interface for testing
+replay_result = client.replay_ctp(
+    ctp_name="web-browsing-2024",
+    interface="eth0"
+)
 ```
+
+**CTP Operations**:
+- `extract()` — Extract demand pattern from pcap
+- `select()` — Select time window or traffic subset
+- `transform()` — Scale, filter, or modify patterns
+- `merge()` — Combine multiple profiles
+- `replay()` — Replay via tcpreplay on target interface
 
 ---
 
@@ -347,6 +384,33 @@ def test_create_experiment(mock_post):
     mock_post.assert_called_once()
 ```
 
+## Service Topology
+
+The clients implement the netUnicorn Service-Oriented Architecture (SOA):
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    Client Interface                      │
+└────────────────────┬────────────────────────────────────┘
+                     │
+┌────────────────────┴────────────────────────────────────┐
+│            Experiment API (8000)                        │
+│   Orchestration & Intent Plane (Link, Bottleneck)      │
+└────┬────────────────────────────────────────────────────┘
+     │
+     ├──→ CTP Service (8001)      [Representation Plane]
+     ├──→ Substrate Worker (8002) [Execution Plane: tc]
+     ├──→ NetGent Service (8003)  [Execution Plane: apps]
+     └──→ Storage Service (8004)  [Datastore: results]
+```
+
+**Data Flow**:
+1. User submits Experiment (Intent: capacity, latency, CTP name)
+2. Experiment API validates with CTP Service
+3. Substrate Worker configures bottleneck via tc
+4. NetGent Service executes application workflow
+5. All results stored and indexed in Storage Service
+
 ## Integration Guidelines
 
 When using clients in a service:
@@ -380,6 +444,16 @@ When using clients in a service:
    logger.info(f"Creating experiment: {exp_id}")
    result = client.create_experiment({...})
    logger.info(f"Experiment created: {result['experiment_id']}")
+   ```
+
+5. **Follow SOA boundaries** — Use clients to respect service boundaries
+   ```python
+   # Good: Call through proper service
+   ctp_client.validate_ctp(ctp_config)
+
+   # Bad: Direct access to CTP implementation
+   from ctp_service.models import CTP
+   CTP.validate(ctp_config)  # Breaks SOA
    ```
 
 ## Timeout Configuration
@@ -416,8 +490,35 @@ Does NOT retry on:
 - 401 Unauthorized
 - 404 Not Found
 
+## Architecture and Terminology
+
+**Three-Plane Architecture**:
+- **Intent Plane**: User specifies Link() and Bottleneck() intents
+- **Representation Plane**: Cross-Traffic Profiles (CTPs) capture temporal demand patterns
+- **Execution Plane**: tc (traffic control), tshark (capture), tcpreplay (replay)
+
+**Bottleneck Regime** = Static attributes + Dynamic pressure:
+- Static: capacity, base latency, buffering, queue management (AQM)
+- Dynamic: CTP temporal structure (extracted, selected, transformed, merged, replayed)
+
+**CTP Operations**:
+- `extract()` — Extract CTP from pcap
+- `select()` — Select time window or flow subset
+- `transform()` — Modify patterns (scale, filter, etc.)
+- `merge()` — Combine multiple CTPs
+- `replay()` — Replay via tcpreplay
+
+**netUnicorn SOA Components**:
+- Client: User interface
+- Core/Mediation: Orchestration (Experiment API)
+- Deployment: Compiler (CTP Service), Connectivity Manager
+- Execution: Processor (Substrate Worker), Gateway (NetGent)
+- Datastore: Storage Service
+
 ---
 
 **Last Updated**: 2026-03-04
 **Status**: Specification Ready
 **Next Milestone**: Implementation (Week 1)
+**Team**: Prof. Arpit Gupta (PI), Jaber, Eugene, Haarika, Manni, Sylee
+**Reference**: OpenClaw (real private SNL-UCSB orchestration framework)
