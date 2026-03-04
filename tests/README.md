@@ -90,7 +90,7 @@ tests/
 │   │   └── test_d2_workflow_tests.py
 │   │
 │   ├── d3/                             # D3: Data Layer
-│   │   ├── test_storage_service.py     # Results and artifact storage
+│   │   ├── test_telemetry_service.py     # Results and artifact storage
 │   │   └── test_d3_query_tests.py
 │   │
 │   ├── d5/                             # D5: Intelligence
@@ -487,7 +487,7 @@ pytest tests/unit/d3/ tests/integration/test_result_storage.py -v
 ```
 
 **What to test**:
-1. Storage Service: CRUD for results, artifacts
+1. Telemetry Service: CRUD for results, artifacts
 2. Query API: Filter, sort, aggregate results
 3. Schema validation: ExperimentResult and ContextualTreeNode
 
@@ -569,7 +569,7 @@ def docker_services():
 | CTP Service (D1) | 25 | 5 | 2 | 95% |
 | Substrate Worker (D1) | 15 | 3 | 1 | 85% |
 | NetGent Service (D2) | 12 | 4 | 2 | 80% |
-| Storage Service (D3) | 18 | 4 | 1 | 85% |
+| Telemetry Service (D3) | 18 | 4 | 1 | 85% |
 | Orchestration (D5) | 14 | 3 | 2 | 75% |
 | Shared Models | 10 | 2 | 0 | 95% |
 | **Total** | **109** | **26** | **10** | **85%** |

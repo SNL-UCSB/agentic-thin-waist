@@ -49,7 +49,7 @@ class Experiment:
 **Usage**:
 - Created by Orchestration Service or user intent
 - Used by Experiment API to track state and orchestrate workflow
-- Stored by Storage Service for audit and analysis
+- Stored by Telemetry Service for audit and analysis
 
 ---
 
@@ -122,7 +122,7 @@ class ExperimentResult:
 **Usage**:
 - Created by Substrate Worker (Execution) and NetGent Service (Application)
 - Aggregated by Experiment API
-- Stored by Storage Service with full audit trail
+- Stored by Telemetry Service with full audit trail
 
 ---
 
@@ -210,7 +210,7 @@ class ContextualTreeNode:
 
 **Usage**:
 - Constructed by Experiment API from Experiment, ExperimentResult, and BottleneckState components
-- Stored by Storage Service as nested JSON
+- Stored by Telemetry Service as nested JSON
 - Queried by researchers and analysis tools
 
 ---
@@ -285,7 +285,7 @@ class WorkflowResult:
 
 **Usage**:
 - Created by NetGent Service (Application execution)
-- Artifacts stored by Storage Service
+- Artifacts stored by Telemetry Service
 - QoE metrics included in ExperimentResult metrics
 
 ---

@@ -1,14 +1,51 @@
 # NetGent Service
 
-NFA-Based Application Workflow Execution — Deliverable D2
+**Port**: 8003
+**Deliverable**: D2 (Application Workflow Engine)
+**Leads**: Eugene + Jaber
+**PI**: Prof. Arpit Gupta
+**Priority**: HIGH
+**Status**: Specification Ready
 
-**Port**: 8003 | **Leads**: Eugene + Jaber | **PI**: Prof. Arpit Gupta
+## Purpose
 
----
+NetGent is the application workflow execution engine. It compiles natural-language workflow specifications into executable NFA (nondeterministic finite automaton) state machines, enabling high-fidelity simulation of user interactions across web-based applications (YouTube, Netflix, Zoom, Twitch, NDT speedtest, Puffer, and others). The service measures Quality of Experience (QoE) metrics during workflow execution under shaped network conditions.
 
-## Overview
+## Input
 
-NetGent extends BQT+'s nondeterministic finite automaton (NFA) abstraction to general application workflows. The service compiles natural-language workflow specifications into executable NFA state machines, enabling high-fidelity simulation of user interactions across web-based applications (YouTube, Netflix, Zoom, Twitch, NDT speedtest, Puffer, and others).
+NetGent accepts:
+- Natural language workflow specifications: "Watch YouTube for 60 seconds, measuring startup time and rebuffer events"
+- Application type: youtube, netflix, zoom, twitch, discord, google-meet, ndt-speedtest, puffer
+- Timeout settings: maximum execution duration
+- LLM model specification (optional): inject custom LLM for NFA compilation
+- Capture preferences: HAR file, console logs, screenshots
+
+## Output
+
+NetGent produces:
+- WorkflowResult: execution status, states traversed, total duration
+- QoE metrics: video startup time (ms), mean bitrate (Mbps), rebuffer events, bitrate changes, resolution
+- Artifacts: HAR file (network timeline), console logs, screenshots at key states
+- NFA details: states traversed, transitions, state count
+- Execution traces: timing of each state, any errors or warnings
+
+## Interfaces
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/workflows/execute` | POST | Execute workflow from NL specification |
+| `/workflows/compile` | POST | Compile NL spec to NFA state machine |
+| `/workflows/validate` | POST | Validate spec without execution |
+| `/workflows/{id}` | GET | Get workflow result and QoE metrics |
+| `/health` | GET | Health check: browser driver, LLM service |
+
+## YouTube MVP Example
+
+For YouTube watch-video-60s under bottleneck:
+- compile(): Claude parses spec → NFA with states: init, navigate youtube.com, search/select video, play, watch 60s, collect stats
+- execute(): Selenium drives browser through states on shaped network (10/25/50 Mbps)
+- During execution: capture HAR file, monitor Stats for Nerds metrics
+- Success criteria: workflow completes, startup_time extracted, rebuffer_events measured, HAR file contains full timeline
 
 ### Key Innovation
 
@@ -155,7 +192,7 @@ Health check endpoint.
     "browser_driver": "available",
     "llm_service": "responsive",
     "workflow_engine": "operational",
-    "storage_service": "connected"
+    "telemetry_service": "connected"
   },
   "uptime_seconds": 3600
 }

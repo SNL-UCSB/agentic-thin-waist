@@ -15,7 +15,7 @@ The three logical planes are:
 |-------|----------|-----------------|-------|
 | **Intent plane** | Experiment API, Orchestration | Accept research intent; generate experiment specs | 8000, 8005 |
 | **Representation plane** | CTP Service | Define and compose Cross-Traffic Profiles (CTPs) | 8001 |
-| **Execution plane** | Substrate Worker, NetGent, Storage | Execute bottleneck conditions; apply traffic patterns; collect results | 8002, 8003, 8004 |
+| **Execution plane** | Substrate Worker, NetGent, Telemetry | Execute bottleneck conditions; apply traffic patterns; collect results | 8002, 8003, 8004 |
 
 ## Service Registry
 
@@ -23,14 +23,23 @@ The three logical planes are:
 |---------|------|-------------|----------|--------------|
 | Experiment API | 8000 | D1 (CRITICAL) | Jaber | All services |
 | CTP Service | 8001 | D1 (CRITICAL) | Jaber | None |
-| Substrate Worker | 8002 | D1 (CRITICAL) | Jaber | Storage Service |
-| NetGent Service | 8003 | D2 (HIGH) | Eugene + Jaber | Substrate Worker, Storage Service |
-| Storage Service | 8004 | D3 (HIGH) | Manni | None |
+| Substrate Worker | 8002 | D1 (CRITICAL) | Jaber | Telemetry Service |
+| NetGent Service | 8003 | D2 (HIGH) | Eugene + Jaber | None (receives spec from upper layer) |
+| Telemetry Service | 8004 | D3 (HIGH) | Manni | None |
 | Orchestration Service | 8005 | D5 (VERY CRITICAL) | Haarika | All services |
 
 **Team**: Prof. Arpit Gupta (PI); Students: Jaber, Haarika, Manni, Eugene, Sylee.
 
 **Timeline**: 4 weeks parallel. Weeks 1-2: independent development against mocked interfaces. Weeks 3-4: integration.
+
+### Design Principle: No Direct Coupling Between NetGent and Telemetry
+
+NetGent (application workflows) and the Telemetry Service (result storage) do **not** communicate directly. The upper layer (Experiment API or Orchestration) provides independent specifications to each:
+
+- **NetGent** receives a workflow spec that includes instrumentation requirements (e.g., "enable Stats for Nerds" for YouTube, "capture HAR file"). NetGent's job is to execute the workflow and produce artifacts — it does not know or care where they are stored.
+- **Telemetry Service** receives experiment results and artifacts from the Experiment API after execution completes. It stores, tags, and indexes them — it does not know which application generated them.
+
+This separation means the Experiment API is responsible for specifying both (a) the NetGent workflow with correct instrumentation flags and (b) the Telemetry Service storage request with correct contextual metadata. Neither downstream service needs awareness of the other.
 
 ---
 
@@ -47,7 +56,7 @@ The three logical planes are:
 - Coordinate CTP validation, substrate configuration, and application execution
 - Implement experiment state machine
 - Verify bottleneck regime before workflow execution
-- Aggregate results from Substrate Worker, NetGent Service, and Storage Service
+- Aggregate results from Substrate Worker, NetGent Service, and Telemetry Service
 
 **Key Endpoints**:
 - `POST /experiments` — Create new experiment
@@ -92,7 +101,7 @@ The three logical planes are:
 - `GET /skills` — List OpenClaw skill definitions
 
 **Configuration Files**:
-- `TOOLS.md` — OpenClaw declarations: Experiment API, CTP Service, Storage Service endpoints
+- `TOOLS.md` — OpenClaw declarations: Experiment API, CTP Service, Telemetry Service endpoints
 - `SKILLS.md` — OpenClaw skill definitions for multi-step workflows (e.g., "compare applications across bandwidth range")
 - `prompts/system.md` — System prompt for Claude
 - `prompts/examples.md` — Few-shot examples for intent → experiment mapping
@@ -157,12 +166,12 @@ class BottleneckRegime:
 1. CTP dataclass definitions with validation
 2. tc command generator for each AQM policy
 3. Network measurement: iperf3 for throughput, ping for RTT
-4. CTP algebra: composition, scaling, normalization
+4. CTP operations: extract, select, transform, merge, replay
 5. Physical limit validation
 
 ---
 
-## Execution Plane: Substrate Worker, NetGent, Storage
+## Execution Plane: Substrate Worker, NetGent, Telemetry
 
 ### 3. Substrate Worker (Port 8002) — D1 CRITICAL
 
@@ -202,7 +211,7 @@ class TelemetrySnapshot:
     packet_loss_percent: float
 ```
 
-**Dependencies**: Storage Service (for storing pcap files).
+**Dependencies**: Telemetry Service (for storing pcap files).
 
 **Implementation**:
 1. Flask server with privileged mode support (CAP_NET_ADMIN)
@@ -254,7 +263,7 @@ class QoEMetrics:
     rebuffer_duration_ms: float
 ```
 
-**Dependencies**: Substrate Worker (network coordination), Storage Service (artifact storage).
+**Dependencies**: Substrate Worker (network coordination), Telemetry Service (artifact storage).
 
 **Implementation**:
 1. NetGent NFA execution engine integration
@@ -267,9 +276,9 @@ class QoEMetrics:
 
 ---
 
-### 5. Storage Service (Port 8004) — D3 HIGH
+### 5. Telemetry Service (Port 8004) — D3 HIGH
 
-**Location**: `./storage-service/`
+**Location**: `./telemetry-service/`
 
 **Purpose**: Context plane data layer. Stores experiment results with contextual tree metadata spanning static bottleneck attributes, dynamic congestion pressure, application characteristics, and transport state.
 
@@ -335,7 +344,7 @@ NetGent Service (execute NFA workflow, collect QoE)
     ↓
 Substrate Worker (stop capture, measure dynamic state)
     ↓
-Storage Service (persist result + contextual tree)
+Telemetry Service (persist result + contextual tree)
     ↓
 Experiment API (aggregate and return result)
 ```
@@ -344,7 +353,7 @@ Each service contributes to the final ExperimentResult:
 - **CTP Service**: Validated bottleneck regime (static attributes)
 - **Substrate Worker**: Pcap files, measured dynamic state, telemetry
 - **NetGent Service**: QoE metrics, workflow artifacts
-- **Storage Service**: Persistent storage, contextual tree tagging
+- **Telemetry Service**: Persistent storage, contextual tree tagging
 
 ---
 
@@ -373,7 +382,7 @@ The platform is designed to satisfy four key requirements:
 - Haarika tests Orchestration → Experiment API → others
 - Jaber validates full D1 pipeline with real Substrate Worker
 - Eugene completes NetGent + Substrate Worker integration
-- Manni validates Storage Service under real query load
+- Manni validates Telemetry Service under real query load
 
 **Testing**: Unit tests for core logic; integration tests for service chains.
 

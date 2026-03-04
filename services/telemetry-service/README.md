@@ -1,4 +1,4 @@
-# Storage Service
+# Telemetry Service
 
 **Port**: 8004
 **Deliverable**: D3 (Centralized Telemetry Storage & Results Query)
@@ -7,9 +7,49 @@
 **Lead**: Manni
 **PI**: Prof. Arpit Gupta
 
-## Overview
+## Purpose
 
-The Storage Service is the centralized persistence layer for experiment results and telemetry in the Agentic Thin Waist architecture. It enables rich queries on network experiments by storing results with complete contextual metadata: static network configuration (c_static), dynamic measured state (c_dyn), application context (c_app), and transport protocol details (c_trans). This contextual tagging enables powerful queries like "Show me YouTube QoE under CUBIC across 10-50 Mbps capacity."
+The Telemetry Service is the centralized persistence and query layer for experiment results and telemetry. It enables rich queries on network experiments by storing results with complete contextual metadata: static network configuration (c_static), dynamic measured state (c_dyn), application context (c_app), and transport protocol details (c_trans). This contextual tagging enables powerful queries like "Show me YouTube startup_time vs capacity under CUBIC."
+
+## Input
+
+Telemetry Service accepts:
+- ExperimentResult objects with full metrics: bottleneck state, QoE metrics, transport state, contextual tree
+- Artifact files: PCAP captures, HAR files, logs, screenshots
+- Tags for result categorization: high-quality, production-run, baseline, etc.
+- Metadata: experiment ID, trial number, application, network parameters
+
+## Output
+
+Telemetry Service produces:
+- Query results filtered by experiment, application, capacity range, latency range, congestion control, date range
+- CSV exports with all relevant columns for analysis
+- Result IDs and artifact URIs for downstream access
+- Aggregate statistics: total results, pagination info
+- Artifact metadata and storage paths
+
+## Interfaces
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/results` | POST | Store experiment result with contextual tree |
+| `/results` | GET | Query results by filters (application, capacity, latency, cc, date) |
+| `/results/{id}` | GET | Get single result with all details |
+| `/results/{id}/artifacts` | GET | List artifacts associated with result |
+| `/results/{id}/tags` | POST | Tag result for categorization |
+| `/results/export/csv` | GET | Export filtered results as CSV |
+| `/artifacts` | POST | Upload artifact file (PCAP, HAR, log) |
+| `/artifacts/{id}` | GET | Download artifact file |
+| `/health` | GET | Health check: database connectivity, storage access |
+
+## YouTube MVP Example
+
+For YouTube experiments at 10/25/50 Mbps:
+- POST /results receives 3 ExperimentResults with contextual trees: {c_static: {capacity: 10/25/50}, c_dyn: {...}, c_app: {youtube}, c_trans: {tcp, cubic}}
+- Each result stores startup_time, bitrate metrics, PCAP path
+- Query: GET /results?application=youtube&capacity_min=10&capacity_max=50&congestion_control=cubic
+- Returns: 3 results with metrics comparable across capacity
+- Success criteria: all results queryable, contextual filters work, CSV export includes startup_time column
 
 ### Core Responsibilities
 
@@ -33,7 +73,7 @@ The service uses SQLAlchemy ORM with PostgreSQL (production) or SQLite (developm
              │ POST /artifacts
              ▼
 ┌────────────────────────────────────┐
-│   STORAGE SERVICE (8004)           │
+│   TELEMETRY SERVICE (8004)           │
 │  ┌──────────────────────────────┐  │
 │  │ SQLAlchemy ORM + Query Engine│  │
 │  │ - Result table               │  │
@@ -67,7 +107,7 @@ This enables queries like: "Show YouTube startup time under CUBIC congestion con
 
 **Endpoint**: `POST /results`
 
-Accepts a completed experiment result with full metadata and contextual tree. The Storage Service assigns a unique `result_id` and persists all fields including the four-layer context.
+Accepts a completed experiment result with full metadata and contextual tree. The Telemetry Service assigns a unique `result_id` and persists all fields including the four-layer context.
 
 **Request**:
 ```json
@@ -406,7 +446,7 @@ class QueryFilter:
 - **SQLite**: Development and testing
 - **S3 or local filesystem**: Artifact storage (pcap files, logs, HAR files)
 
-The Storage Service is independent — it receives results from the Experiment API (D2/D4) and serves queries to the Orchestration Service (D5) and analysis tools.
+The Telemetry Service is independent — it receives results from the Experiment API (D2/D4) and serves queries to the Orchestration Service (D5) and analysis tools.
 
 ## Database Schema
 

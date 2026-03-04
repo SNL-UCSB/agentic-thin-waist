@@ -10,7 +10,7 @@ Service clients map to the agentic thin waist microservices:
 | CTP Service | 8001 | CTPServiceClient | Cross-Traffic Profile operations (Representation Plane) |
 | Substrate Worker | 8002 | SubstrateWorkerClient | Network bottleneck execution (tc, capture) |
 | NetGent Service | 8003 | NetGentServiceClient | Application execution (NFA, workflows) |
-| Storage Service | 8004 | StorageServiceClient | Datastore for results and artifacts |
+| Telemetry Service | 8004 | TelemetryServiceClient | Datastore for results and artifacts |
 
 ## Base Client
 
@@ -262,12 +262,12 @@ print(f"QoE metrics: {results['qoe_metrics']}")
 
 ---
 
-### StorageServiceClient
+### TelemetryServiceClient
 
 **Port**: 8004
 
 ```python
-class StorageServiceClient(BaseHTTPClient):
+class TelemetryServiceClient(BaseHTTPClient):
     def store_result(self, result: dict) -> dict:
         """POST /results"""
 
@@ -300,9 +300,9 @@ class StorageServiceClient(BaseHTTPClient):
 
 **Usage**:
 ```python
-from shared.clients import StorageServiceClient
+from shared.clients import TelemetryServiceClient
 
-storage = StorageServiceClient("http://storage-service:8004")
+telemetry = TelemetryServiceClient("http://telemetry-service:8004")
 
 # Store experiment result
 result_response = storage.store_result({
@@ -401,7 +401,7 @@ The clients implement the netUnicorn Service-Oriented Architecture (SOA):
      ├──→ CTP Service (8001)      [Representation Plane]
      ├──→ Substrate Worker (8002) [Execution Plane: tc]
      ├──→ NetGent Service (8003)  [Execution Plane: apps]
-     └──→ Storage Service (8004)  [Datastore: results]
+     └──→ Telemetry Service (8004)  [Datastore: results]
 ```
 
 **Data Flow**:
@@ -409,7 +409,7 @@ The clients implement the netUnicorn Service-Oriented Architecture (SOA):
 2. Experiment API validates with CTP Service
 3. Substrate Worker configures bottleneck via tc
 4. NetGent Service executes application workflow
-5. All results stored and indexed in Storage Service
+5. All results stored and indexed in Telemetry Service
 
 ## Integration Guidelines
 
@@ -465,7 +465,7 @@ Adjust timeouts for specific operations:
 health_client = ExperimentAPIClient("http://api:8000", timeout=2)
 
 # Long timeout for slow operations
-storage_client = StorageServiceClient("http://storage:8004", timeout=30)
+storage_client = TelemetryServiceClient("http://storage:8004", timeout=30)
 ```
 
 ## Retry Strategy
@@ -513,7 +513,7 @@ Does NOT retry on:
 - Core/Mediation: Orchestration (Experiment API)
 - Deployment: Compiler (CTP Service), Connectivity Manager
 - Execution: Processor (Substrate Worker), Gateway (NetGent)
-- Datastore: Storage Service
+- Datastore: Telemetry Service
 
 ---
 

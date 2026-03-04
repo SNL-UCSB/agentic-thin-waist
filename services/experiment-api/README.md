@@ -11,6 +11,46 @@
 
 The Experiment API is the **Intent Plane** of the Bottleneck Service. It provides the high-level, user-facing interface for specifying and executing network bottleneck experiments. The Intent Plane abstracts the complexity of applying static bottleneck attributes (capacity, base latency, buffering, queue management) and dynamic congestion pressure (specified via Cross-Traffic Profiles) into a simple, composable experiment specification.
 
+## Input
+
+Experiment API accepts specifications with:
+- Static bottleneck attributes: capacity (Mbps), base latency (ms), buffer size (bytes), queue discipline (AQM policy)
+- Dynamic congestion pressure: Cross-Traffic Profile (CTP) name and transformation operations (extract, select, transform, merge, replay)
+- Application workflow: application type, workflow specification, duration, number of trials
+- Metadata: researcher info, study details, custom parameters
+
+## Output
+
+Experiment API returns:
+- ExperimentResult with complete trial metrics: QoE metrics (startup time, bitrate, rebuffers), transport metrics (throughput, RTT, packet loss)
+- BottleneckState verification: actual measured capacity/latency vs. configured
+- PCAP capture paths and analysis context (c_static, c_dyn, c_app, c_trans)
+- Aggregated metrics across multiple trials
+- Per-trial detailed results with full network traces
+
+## Interfaces
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/experiments` | POST | Create new experiment spec with bottleneck regime |
+| `/experiments` | GET | List experiments with filtering by status/application/capacity |
+| `/experiments/{id}` | GET | Get experiment status and progress |
+| `/experiments/{id}/execute` | POST | Start experiment execution |
+| `/experiments/{id}/results` | GET | Retrieve completed experiment results with metrics |
+| `/experiments/batch` | POST | Create multiple experiments atomically |
+| `/status` | GET | Check substrate health and service connectivity |
+
+## YouTube MVP Example
+
+For the YouTube QoE experiment comparing 10/25/50 Mbps with 50ms latency under CUBIC congestion control:
+- Experiment API receives 3 experiment specs (youtube-10mbps, youtube-25mbps, youtube-50mbps)
+- Each specifies capacity, 50ms latency, fq_codel AQM, "watch-video-60s" workflow
+- Returns 3 experiment IDs with status "pending" and HATEOAS links for execution
+- Client calls POST /experiments/{id}/execute for each
+- Success criteria: all 3 experiment IDs created, validated for CTP availability, dispatched to Substrate Worker
+
+## Extended Responsibilities
+
 The Experiment API is responsible for:
 
 1. **Intent specification**: Accept experiment definitions with static bottleneck regime attributes and dynamic CTP parameters
@@ -73,7 +113,7 @@ CTP Service  Substrate     NetGent Service
   └─────────────┼──────────────┘
                 │
                 ▼
-         Storage Service
+         Telemetry Service
              :8004
 ```
 
@@ -507,7 +547,7 @@ The Experiment API references CTPs by name; the CTP Service handles validation a
       "status": "healthy",
       "latency_ms": 25
     },
-    "storage_service": {
+    "telemetry_service": {
       "status": "healthy",
       "latency_ms": 35
     }
@@ -620,7 +660,7 @@ class ExperimentResult:
 - **Outputs**: Metrics (QoE, transport), PCAP path, any errors
 - **Failure Mode**: Timeout after 60s; return 504 Gateway Timeout; log partial results
 
-### Storage Service (Archival)
+### Telemetry Service (Archival)
 - **Endpoint**: POST `/results/store`
 - **Purpose**: Persist ExperimentResult to durable storage (S3, database, etc.)
 - **Inputs**: ExperimentResult, metadata, PCAP path
@@ -702,7 +742,7 @@ The Experiment API must enforce four core requirements:
 - CTP Service integration: invalid CTP name → 404, valid CTP → 200 with transformed rules
 - Substrate Worker integration: tc module load, measured capacity/RTT within 5% of configured
 - NetGent Service integration: workflow execution under shaped conditions
-- Storage Service integration: ExperimentResult persisted, archive URL returned
+- Telemetry Service integration: ExperimentResult persisted, archive URL returned
 - Batch experiments: multiple experiments run concurrently without interference
 - Query filtering: by status, application, ctp_name, aqm_policy, capacity range
 - Error handling: transient failures (503) trigger retry; persistent failures (400, 404) surface to client
@@ -721,7 +761,7 @@ The Experiment API must enforce four core requirements:
 
 ### Track A (Monolithic, Clean Interfaces)
 - Single process with internal orchestration logic
-- Clear service clients (CTPClient, SubstrateClient, NetGentClient, StorageClient)
+- Clear service clients (CTPClient, SubstrateClient, NetGentClient, TelemetryClient)
 - In-memory experiment store with thread-safe concurrent access
 - Returns fully-formed ExperimentResult with all metrics and analysis
 - **Jaber delivers working code first via Track A**
@@ -816,12 +856,12 @@ services:
       CTP_SERVICE_URL: http://ctp-service:8001
       SUBSTRATE_WORKER_URL: http://substrate-worker:8002
       NETGENT_SERVICE_URL: http://netgent-service:8003
-      STORAGE_SERVICE_URL: http://storage-service:8004
+      TELEMETRY_SERVICE_URL: http://telemetry-service:8004
     depends_on:
       - ctp-service
       - substrate-worker
       - netgent-service
-      - storage-service
+      - telemetry-service
 
   ctp-service:
     image: ctp-service:latest
@@ -839,8 +879,8 @@ services:
     ports:
       - "8003:8003"
 
-  storage-service:
-    image: storage-service:latest
+  telemetry-service:
+    image: telemetry-service:latest
     ports:
       - "8004:8004"
 ```

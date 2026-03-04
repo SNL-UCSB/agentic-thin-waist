@@ -82,7 +82,7 @@ docs/
 ### For Manni (D3: Data Layer - HIGH)
 - **ARCHITECTURE.md** → Data layer design
 - **API_REFERENCE.md** → Result schema and storage contracts
-- Service README: Storage Service
+- Service README: Telemetry Service
 - **tests/README.md** → D3 result storage tests
 
 ### For Haarika (D5: Intelligence - VERY CRITICAL)
@@ -141,7 +141,7 @@ All services must satisfy these four requirements:
 - NetGent Service: Browser automation and NFA workflow execution
 
 **D3: Data Layer** — HIGH (Manni)
-- Storage Service: Results, artifacts, and experiment query management
+- Telemetry Service: Results, artifacts, and experiment query management
 
 **D5: Intelligence** — VERY CRITICAL (Haarika)
 - Orchestration Service: Claude + OpenClaw integration for intelligent orchestration

@@ -4,11 +4,49 @@
 **Deliverable**: D1 (Network Virtualization Substrate - Execution Plane)
 **Lead**: Jaber
 **PI**: Prof. Arpit Gupta
+**Priority**: CRITICAL
 **Status**: Active Development
 
-## Overview
+## Purpose
 
-The Substrate Worker is the **Execution Plane** of the Bottleneck Service. It instantiates bottleneck-regime specifications on concrete infrastructure, translating high-level network constraints into operational Linux traffic control (tc) configurations, packet capture (tshark), and traffic replay (tcpreplay) operations.
+The Substrate Worker is the **Execution Plane** of the Bottleneck Service. It instantiates bottleneck-regime specifications on concrete infrastructure, translating high-level network constraints into operational Linux traffic control (tc) configurations, packet capture (tshark), and traffic replay (tcpreplay) operations. It applies both static attributes (capacity, latency, AQM) and dynamic pressure (CTP background traffic) to the network interface.
+
+## Input
+
+Substrate Worker accepts:
+- BottleneckState specifications: download/upload capacity (Mbps), latency (ms), queue discipline, buffer depth
+- Network interface assignments: upstream/downstream interfaces, delay interface
+- CTP replay sessions: traffic pattern files, replay rates, hybrid mode configuration
+- Packet capture filters: interface, tcpdump filter syntax, output directory
+- Configuration: network namespace, capture directory path
+
+## Output
+
+Substrate Worker produces:
+- BottleneckState verification results: verified boolean, measured capacity, measured RTT
+- tc qdisc command outputs confirming kernel module load
+- PCAP files from packet capture at specified interface
+- tcpreplay session metrics: packets replayed, actual rate achieved
+- Status reports: interface configuration, qdisc state, available tc modules
+
+## Interfaces
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/shape` | POST | Configure bottleneck regime (tc qdisc rules) |
+| `/capture` | POST | Start packet capture with tshark |
+| `/replay` | POST | Start CTP traffic replay via tcpreplay |
+| `/state` | GET | Get current bottleneck configuration and verification |
+| `/health` | GET | Health check: privileges, tc availability, qdisc support |
+
+## YouTube MVP Example
+
+For YouTube at 10/25/50 Mbps with 50ms latency under CUBIC:
+- /shape: Apply tc rules to eth0 for each capacity (tbf rate + fq_codel, netem delay 50ms)
+- /capture: Start tshark on eth0, capture filter "tcp port 443"
+- /replay: Start tcpreplay with scaled CTP at each bottleneck rate
+- /state: Verify bottleneck_state.verified=True, measured_throughput within ±5% of target
+- Success criteria: all 3 capacity regimes verify, tc modules load, measured throughput matches config within tolerance
 
 ## Core Concepts
 

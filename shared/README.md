@@ -22,7 +22,7 @@ shared/
 │   ├── ctp_service.py          # CTPServiceClient (port 8001)
 │   ├── substrate_worker.py     # SubstrateWorkerClient (port 8002)
 │   ├── netgent_service.py      # NetGentServiceClient (port 8003)
-│   ├── storage_service.py      # StorageServiceClient (port 8004)
+│   ├── storage_service.py      # TelemetryServiceClient (port 8004)
 │   └── README.md               # Complete client API reference
 │
 └── constants.py                # Shared constants, enums, port definitions
@@ -88,7 +88,7 @@ Service clients map to the netUnicorn SOA architecture:
 - `CTPServiceClient` (port 8001) — CTP Service (Representation Plane)
 - `SubstrateWorkerClient` (port 8002) — Execution substrate worker
 - `NetGentServiceClient` (port 8003) — NetGent (Application execution)
-- `StorageServiceClient` (port 8004) — Datastore service
+- `TelemetryServiceClient` (port 8004) — Datastore service
 
 ### Using Clients
 
@@ -171,7 +171,7 @@ from shared.clients import (
     CTPServiceClient,
     SubstrateWorkerClient,
     NetGentServiceClient,
-    StorageServiceClient
+    TelemetryServiceClient
 )
 
 # Import constants

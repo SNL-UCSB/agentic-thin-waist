@@ -30,7 +30,7 @@ This document lists all files created in the Agentic Thin Waist project reposito
 - `services/experiment-api/app/__init__.py` — Package initialization
 
 ### Service: ctp-service (D1 - Representation Plane)
-- `services/ctp-service/README.md` — CTP algebra specifications
+- `services/ctp-service/README.md` — CTP operations and representation plane
 - `services/ctp-service/Dockerfile`
 - `services/ctp-service/requirements.txt`
 - `services/ctp-service/app/__init__.py`
@@ -47,11 +47,11 @@ This document lists all files created in the Agentic Thin Waist project reposito
 - `services/netgent-service/requirements.txt`
 - `services/netgent-service/app/__init__.py`
 
-### Service: storage-service (D3 - Data Persistence)
-- `services/storage-service/README.md` — Data storage and query specifications
-- `services/storage-service/Dockerfile`
-- `services/storage-service/requirements.txt`
-- `services/storage-service/app/__init__.py`
+### Service: telemetry-service (D3 - Data Persistence)
+- `services/telemetry-service/README.md` — Data storage and query specifications
+- `services/telemetry-service/Dockerfile`
+- `services/telemetry-service/requirements.txt`
+- `services/telemetry-service/app/__init__.py`
 
 ### Service: orchestration (D5 - Agentic Orchestration)
 - `services/orchestration/README.md` — Claude + OpenClaw integration

@@ -1,17 +1,57 @@
-# CTP Service — Representation Plane of the Bottleneck
+# CTP Service
 
 **Port**: 8001
-**Deliverable**: D1 (Agentic Thin Waist - Representation Plane)
-**Team**: PI: Prof. Arpit Gupta | Lead: Jaber
+**Deliverable**: D1 (Network Virtualization Substrate - Representation Plane)
+**Lead**: Jaber
+**PI**: Prof. Arpit Gupta
+**Priority**: CRITICAL
 **Status**: Active Development
 
-## Overview
+## Purpose
 
 The CTP (Cross-Traffic Profile) Service is the **Representation Plane** of the bottleneck in the Agentic Thin Waist architecture. It transforms passive packet traces from production networks into reusable, composable representations of dynamic congestion pressure—enabling systematic experimentation with realistic traffic conditions without binding to specific paths, applications, or users.
 
-A **CTP is a reusable representation of dynamic congestion pressure applied at a bottleneck**. It encodes the temporal structure of aggregate demand observed at a bottleneck—intensity, burstiness, heterogeneity, and temporal correlations—without binding to the particular path, applications, or users that produced it.
+A CTP is a reusable representation of dynamic congestion pressure applied at a bottleneck, encoding temporal structure of aggregate demand (intensity, burstiness, heterogeneity, temporal correlations) without binding to particular paths, applications, or users that produced it.
 
-The CTP Service implements the **TRACE–CONTEXT DISAGGREGATION** from the NetForge paper (Section 3.4), transforming passive packet traces into composable, transformable representations of network traffic.
+## Input
+
+CTP Service accepts:
+- Packet traces (PCAP files) from production networks
+- CTP selection queries by statistical descriptors (intensity, burstiness, temporal correlation, contributor structure)
+- CTP transformation parameters (target capacity, scale factor)
+- CTP merge specifications (weighted composition of multiple CTPs)
+- Replay configurations (interface, duration, mode: hybrid or open-loop)
+
+## Output
+
+CTP Service produces:
+- Cross-Traffic Profiles (CTPs) with statistical descriptors: intensity (packets/sec, bits/sec), burstiness (PMR, CoV), temporal correlation, structural properties
+- Transformed CTPs adapted to target bottleneck capacity while preserving temporal structure
+- Merged CTPs from weighted composition of multiple profiles
+- tcpreplay commands and traffic streams for bottleneck link injection
+- Replay session metrics: fidelity percentage, actual vs. target intensity
+
+## Interfaces
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/ctps/extract` | POST | Parse PCAP traces into CTP representations |
+| `/ctps/select` | POST | Query corpus by statistical descriptors |
+| `/ctps/transform` | POST | Rescale CTP amplitude to target capacity |
+| `/ctps/merge` | POST | Compose multiple CTPs with weights |
+| `/ctps/replay` | POST | Apply CTP at bottleneck via tcpreplay |
+| `/ctps/{id}` | GET | Get full CTP details and descriptors |
+| `/ctps` | GET | List CTPs with pagination |
+| `/health` | GET | Service health and PostgreSQL connectivity |
+
+## YouTube MVP Example
+
+For YouTube at 10/25/50 Mbps:
+- extract() processes campus trace to identify realistic background traffic CTPs
+- select() retrieves CTPs matching intensity ranges for each capacity (low for 10Mbps, high for 50Mbps)
+- transform() adapts selected CTP to each target capacity: scale factors 0.5×, 1.0×, 2.0× while preserving burst timing
+- replay() applies transformed CTPs to eth0 during youtube workflow execution
+- Success criteria: 3 CTP replay configs ready, each with fidelity >95% (actual intensity within 5% of target)
 
 ## Core Concepts
 
@@ -851,9 +891,8 @@ curl -X POST http://localhost:8001/ctps/select \
 - netem (network emulation): https://man7.org/linux/man-pages/man8/tc-netem.8.html
 
 **Related Systems**:
-- NetReplica: https://github.com/SNL-UCSB/netReplica
+- NetReplica: Private SNL-UCSB repository
 - Containernet: Network emulation with containers
-- TEACUP: Traffic emulation framework
 
 ---
 

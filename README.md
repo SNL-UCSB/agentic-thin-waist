@@ -24,7 +24,7 @@ This platform applies the **hourglass design** from netUnicorn to network data g
             |    ├─ Representation: CrossTraffic(), CTPs|
             |    └─ Execution: tc, tshark, tcpreplay    |
             |  NetGent Service  (application workflows) |
-            |  Storage Service  (telemetry + results)   |
+            |  Telemetry Service  (telemetry + results)   |
             |                                          |
             ────────────────────────────────────────────
            /                                            \
@@ -79,7 +79,7 @@ The platform is organized around a **Bottleneck Service** that maps directly to 
  │     (execution plane)        │       └──────────────────────────┘
  │                              │
  │  NetGent Service :8003       │
- │  Storage Service :8004       │
+ │  Telemetry Service :8004       │
  └──────────────────────────────┘
 ```
 
@@ -99,7 +99,7 @@ The Bottleneck Service is the core of the platform, implementing NetForge's thre
 
 **NetGent Service (port 8003)**: NFA-based browser automation for application workflows. Compiles natural-language specifications into executable state machines. Handles YouTube, Netflix, Zoom, NDT speedtests, and other application-level interactions.
 
-**Storage Service (port 8004)**: Telemetry storage and results query interface. Tags measurements with contextual metadata (static config, dynamic CTP, application, transport) to enable rich queries across experimental dimensions.
+**Telemetry Service (port 8004)**: Telemetry storage and results query interface. Tags measurements with contextual metadata (static config, dynamic CTP, application, transport) to enable rich queries across experimental dimensions.
 
 **Orchestration (port 8005)**: Claude + OpenClaw integration for natural-language intent interpretation. Translates researcher goals into experiment specifications, coordinates multi-step experimental campaigns, and supports the hypothesis → experimentation → analysis → refinement loop.
 
@@ -111,7 +111,7 @@ The Bottleneck Service is the core of the platform, implementing NetForge's thre
 | CTP Service | 8001 | D1 | Representation | Jaber |
 | Substrate Worker | 8002 | D1 | Execution | Jaber |
 | NetGent Service | 8003 | D2 | Application | Eugene + Jaber |
-| Storage Service | 8004 | D3 | Data Persistence | Manni |
+| Telemetry Service | 8004 | D3 | Data Persistence | Manni |
 | Orchestration | 8005 | D5 | Agentic | Haarika |
 
 ## Deliverables
@@ -129,7 +129,7 @@ Refactor NetReplica's monolithic `controller.py` into three services mapping to 
 Expose NetGent's NFA-based workflow engine as a programmatic API that agents can call. Wrap the existing LangGraph StateGraph implementation with clean `execute_workflow()`, `compile_nfa()`, `validate_workflow()` entry points. Make the LLM injectable per-call for OpenClaw integration.
 
 ### D3: Telemetry and Storage Pipeline (PRIORITY: HIGH)
-**Lead**: Manni | **Start**: `services/storage-service/README.md`
+**Lead**: Manni | **Start**: `services/telemetry-service/README.md`
 
 Build the data backbone: collect, tag, store, query. Every experiment result is tagged with its full context (static bottleneck config, dynamic CTP, application, transport protocol). Enables queries like: "Show me YouTube QoE under all CUBIC flows across capacity 10–50 Mbps."
 
@@ -151,7 +151,7 @@ Three independent tracks running in parallel. Phase 1 (weeks 1–2) is independe
 |-------|-------|------|
 | **Bottleneck Service** | Jaber | Track A: dataclasses, typed interfaces, `run_experiment()`. Track B: three-service SOA scaffold with mocked CTP and substrate |
 | **NetGent API** | Eugene + Jaber | Programmatic API wrapper, NFA compiler integration, TOOLS.md for OpenClaw |
-| **Storage + Telemetry** | Manni | Schema design, contextual tree tagging, query API with mock data |
+| **Telemetry + Storage** | Manni | Schema design, contextual tree tagging, query API with mock data |
 | **Orchestration** | Haarika | OpenClaw integration, tool declarations, intent → experiment mapping (after NSDI camera-ready) |
 | **Architecture + CI** | Sylee | Service boundary review, Docker Compose, CI/CD, testing infrastructure |
 
@@ -159,7 +159,7 @@ Three independent tracks running in parallel. Phase 1 (weeks 1–2) is independe
 
 | Track | Work |
 |-------|------|
-| **Service integration** | Connect Bottleneck Service → Storage Service → Orchestration |
+| **Service integration** | Connect Bottleneck Service → Telemetry Service → Orchestration |
 | **End-to-end demo** | "Compare YouTube vs Zoom at 10, 25, 50 Mbps" generates experiments, executes, stores results |
 | **Testing** | Integration tests across service boundaries, bottleneck state verification |
 | **Documentation** | API reference, deployment guide, tutorials |
@@ -191,7 +191,7 @@ make build
 make up
 ```
 
-This starts the Bottleneck Service (Experiment API, CTP Service, Substrate Worker), NetGent, Storage, and Orchestration via Docker Compose.
+This starts the Bottleneck Service (Experiment API, CTP Service, Substrate Worker), NetGent, Telemetry, and Orchestration via Docker Compose.
 
 ### 3. Run Your First Experiment
 
@@ -236,7 +236,7 @@ agentic-thin-waist/
 │   ├── ctp-service/                   # Representation plane (D1)
 │   ├── substrate-worker/              # Execution plane (D1)
 │   ├── netgent-service/               # Application workflows (D2)
-│   ├── storage-service/               # Telemetry + results (D3)
+│   ├── telemetry-service/             # Telemetry + results (D3)
 │   └── orchestration/                 # Claude + OpenClaw (D5)
 │
 ├── shared/                            # Shared code and contracts
@@ -259,11 +259,9 @@ agentic-thin-waist/
 
 This platform builds on and refactors code from existing SNL-UCSB projects:
 
-- **NetReplica** ([github.com/SNL-UCSB/netReplica](https://github.com/SNL-UCSB/netReplica)) — Bottleneck emulation substrate. Key file: `controller.py` (being refactored into the Bottleneck Service).
+- **NetReplica** (private SNL-UCSB) — Bottleneck emulation substrate. Key file: `controller.py` (being refactored into the Bottleneck Service).
 
-- **NetGent** (private SNL-UCSB) — NFA-based browser automation with ~100 pre-built application workflows. Being wrapped with a programmatic API for D2.
-
-- **OpenClaw** (private SNL-UCSB) — Orchestration framework for agentic systems. Provides persistent state, tool/skill declarations, and multi-step coordination. Being integrated for D5.
+- **NetGent** ([github.com/SNL-UCSB/NetGent](https://github.com/SNL-UCSB/NetGent)) — NFA-based browser automation with ~100 pre-built application workflows. Being wrapped with a programmatic API for D2.
 
 ## Key Concepts
 
@@ -295,7 +293,7 @@ The platform must simultaneously satisfy: **controllability** (independent knobs
 - NetForge (SIGCOMM submission #1035): Programmable substrate for bottleneck-centric data generation via progressive disaggregation
 - BQT+ (SIGCOMM '26 submission): Robust broadband plan measurement via NFA-based interaction state spaces
 - BQT (SIGCOMM '23): Broadband plan querying tool
-- NetReplica: [github.com/SNL-UCSB/netReplica](https://github.com/SNL-UCSB/netReplica)
+- NetReplica: Private SNL-UCSB repository
 - Linux Traffic Control (tc): [man7.org/linux/man-pages/man8/tc.8.html](https://man7.org/linux/man-pages/man8/tc.8.html)
 
 ## Team

@@ -7,11 +7,47 @@
 **Lead**: Haarika
 **PI**: Prof. Arpit Gupta
 
-## Overview
+## Purpose
 
-The Orchestration Service is the agentic brain of the Agentic Thin Waist. It interprets natural language research intents and translates them into concrete, executable experiment specifications. Built on Claude (Anthropic API) as the LLM backbone and OpenClaw as the orchestration framework, this service implements multi-step reasoning about network conditions, applications, and experimental design strategies.
+The Orchestration Service is the agentic brain of the Agentic Thin Waist. It interprets natural language research intents and translates them into concrete, executable experiment specifications. Built on Claude (Anthropic) as the LLM backbone, this service implements multi-step reasoning about network conditions, applications, and experimental design strategies. Claude reasons through hypotheses about bottlenecks, generates parameter sweeps, and orchestrates complex multi-step experiment workflows.
 
-The core architecture mirrors the Glia paper: Claude acts as the "Researcher" agent (the reasoning backbone), and the Skills & Tools form the "Supervisor" layer (executable actions). The service reason through hypotheses about network bottlenecks, generates parameter sweeps, and orchestrates complex multi-step experiment workflows.
+## Input
+
+Orchestration Service accepts:
+- Natural language research intent: "Compare YouTube vs Zoom at 10, 25, 50 Mbps with 50ms latency"
+- Context parameters: number of trials, default latency, duration
+- Preferences: capture PCAP, desired congestion control algorithms, execution strategy
+
+## Output
+
+Orchestration Service produces:
+- Orchestration ID for tracking long-running experiment campaigns
+- Generated experiment specifications (JSON): one per bottleneck regime
+- Experiment progress tracking: pending, running, complete status
+- Final aggregated results: all experiment metrics across parameter sweep
+- Claude reasoning steps: extracted intent → parameter sweep → experiment specs
+
+## Interfaces
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/intent` | POST | Submit NL research intent, returns orchestration_id |
+| `/orchestration/{id}` | GET | Get orchestration status and experiment progress |
+| `/orchestration/{id}/results` | GET | Get aggregated results from all experiments |
+| `/orchestration/{id}/reasoning` | GET | Get Claude reasoning steps (for transparency) |
+| `/tools` | GET | List available tools (run_experiment, query_results, etc.) |
+| `/skills` | GET | List available skills (parameter_sweep, comparison, etc.) |
+| `/health` | GET | Health check: Claude API, Experiment API, Telemetry Service |
+
+## YouTube MVP Example
+
+For intent "Compare YouTube QoE at 10, 25, 50 Mbps with 50ms latency under CUBIC":
+- Claude parses intent → identifies: apps=[youtube], capacities=[10,25,50], latency=50ms, cc=cubic, trials=1
+- Generates 3 experiment specs: youtube-10mbps-cubic, youtube-25mbps-cubic, youtube-50mbps-cubic
+- Dispatches to Experiment API, returns orchestration_id immediately (202)
+- Client polls /orchestration/{id} to track: pending → running → complete
+- GET /orchestration/{id}/results returns aggregated results (startup_time across capacity)
+- Success criteria: NL in → 3 experiment specs out → results aggregated end-to-end
 
 ### Core Responsibilities
 
@@ -59,7 +95,7 @@ The core architecture mirrors the Glia paper: Claude acts as the "Researcher" ag
       ┌──────┼──────┬──────────┐
       ▼      ▼      ▼          ▼
   ┌──────┐┌──────┐┌──────┐ ┌──────────┐
-  │Exp   ││CTP   ││Storage│ │Analysis  │
+  │Exp   ││CTP   ││Telemetry│ │Analysis  │
   │API   ││Svc   ││Svc   │ │Tools     │
   │:8000 ││:8001 ││:8004 │ │(Future)  │
   └──────┘└──────┘└──────┘ └──────────┘
@@ -67,7 +103,7 @@ The core architecture mirrors the Glia paper: Claude acts as the "Researcher" ag
 
 ### Key Difference: Specification vs. Execution
 
-The critical insight is that Claude reasonably handles **specification**: translating natural language intent into structured experiment specs. This mirrors how a researcher writes a hypothesis and experimental plan before running it. Claude identifies bottleneck regimes to explore, determines relevant parameter sweeps, and generates the JSON specifications. The downstream Experiment API (D2/D4) and Storage Service (D3) handle **execution and persistence**.
+The critical insight is that Claude reasonably handles **specification**: translating natural language intent into structured experiment specs. This mirrors how a researcher writes a hypothesis and experimental plan before running it. Claude identifies bottleneck regimes to explore, determines relevant parameter sweeps, and generates the JSON specifications. The downstream Experiment API (D2/D4) and Telemetry Service (D3) handle **execution and persistence**.
 
 ## API Specification
 
@@ -245,7 +281,7 @@ Submit a natural language research intent. Claude reasons through the intent, ge
     },
     {
       "tool_name": "query_results",
-      "service": "Storage Service :8004",
+      "service": "Telemetry Service :8004",
       "description": "Query stored experiment results by filters",
       "parameters": {
         "application": {"type": "string"},
@@ -367,7 +403,7 @@ Submit a natural language research intent. Claude reasons through the intent, ge
   "checks": {
     "claude_api": "connected",
     "experiment_api": "reachable",
-    "storage_service": "reachable",
+    "telemetry_service": "reachable",
     "ctp_service": "reachable"
   },
   "model": "claude-opus-4-6"
@@ -544,7 +580,7 @@ Defines health checks and orchestration monitoring.
 # Orchestration Health Monitoring
 
 ## /health endpoint
-Returns: {status, claude_api_healthy, experiment_api_reachable, storage_service_reachable, ctp_service_reachable, active_orchestrations_count, uptime_seconds}
+Returns: {status, claude_api_healthy, experiment_api_reachable, telemetry_service_reachable, ctp_service_reachable, active_orchestrations_count, uptime_seconds}
 
 ## Experiment Tracking
 Track status of dispatched experiments: pending → running → complete/failed
@@ -559,7 +595,7 @@ Alert on: API errors, quota issues, degraded performance
 2. Claude parses and generates specs (status: processing)
 3. Specs validated against CTP Service (status: validating)
 4. Experiments queued and dispatched (status: executing)
-5. Results collected from Storage Service (status: complete)
+5. Results collected from Telemetry Service (status: complete)
 ```
 
 ## Service Dependencies
@@ -567,7 +603,7 @@ Alert on: API errors, quota issues, degraded performance
 | Service | Endpoint | Purpose |
 |---------|----------|---------|
 | Experiment API | POST /experiments, GET /experiments/{id} | Create and monitor experiments |
-| Storage Service | GET /results, POST /results | Query and store results |
+| Telemetry Service | GET /results, POST /results | Query and store results |
 | CTP Service | POST /ctps/validate | Validate network configurations |
 | Claude API (Anthropic) | https://api.anthropic.com | LLM reasoning backbone |
 
@@ -588,7 +624,7 @@ Alert on: API errors, quota issues, degraded performance
 - Generated experiments pass CTP Service validation
 - Multi-step intents generate correct experiment matrix size
 - Orchestration tracking follows all generated experiments from pending → complete
-- Queries against Storage Service retrieve results correctly
+- Queries against Telemetry Service retrieve results correctly
 - Claude reasoning steps logged and retrievable
 
 ### Performance Tests
@@ -787,19 +823,19 @@ The prompt emphasizes reasoning about **why** experiments matter (bottleneck reg
 
 4. **CTP Validation**: Before dispatching, validate all generated experiments against the CTP Service (POST /ctps/validate). Reject specs that violate constraints.
 
-5. **Result Aggregation**: Once experiments complete, aggregate results from Storage Service (D3) and present to user via GET /orchestration/{orchestration_id}/results.
+5. **Result Aggregation**: Once experiments complete, aggregate results from Telemetry Service (D3) and present to user via GET /orchestration/{orchestration_id}/results.
 
 ### Testing Strategy
 
 - **Unit tests** on Claude prompt behavior (various intent phrasings)
-- **Integration tests** with mock Experiment API and Storage Service
+- **Integration tests** with mock Experiment API and Telemetry Service
 - **E2E tests** with actual network testbed (coordinated with D2/D4 schedule)
 - **Prompt ablation** to measure impact of reasoning guidance
 
 ## References
 
 - Anthropic Claude API: https://docs.anthropic.com/claude/reference/
-- Glia Paper: [Internal publication by SNL-UCSB]
+- Glia Paper: Glia: Synergizing LLM and Internet Agents (MIT)
 - OpenClaw Framework: [Internal SNL-UCSB documentation]
 - Prompt Engineering Best Practices: https://docs.anthropic.com/claude/docs/prompt-engineering
 - Python Async Patterns: https://docs.python.org/3/library/asyncio.html
