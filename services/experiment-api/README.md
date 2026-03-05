@@ -15,7 +15,7 @@ The Experiment API is the **Intent Plane** of the NetForge Service. It provides 
 
 Experiment API accepts specifications with:
 - Static bottleneck attributes: capacity (Mbps), base latency (ms), buffer size (bytes), queue discipline (AQM policy)
-- Dynamic congestion pressure: Cross-Traffic Profile (CTP) name and transformation operations (extract, select, transform, merge, replay)
+- Dynamic congestion pressure: Cross-Traffic Profile (CTP) name and transformation operations (extract, select, transform, merge)
 - Application workflow: application type, workflow specification, duration, number of trials
 - Metadata: researcher info, study details, custom parameters
 
@@ -74,19 +74,22 @@ The Experiment API maps the Intent Plane to NetForge's three-layer abstraction:
                      │
                      ▼
 ┌─────────────────────────────────────────────────────────────┐
-│      REPRESENTATION PLANE (CTP Service :8001)               │
+│      REPRESENTATION PLANE (CTP Service :8001,                │
+│                          Telemetry Service :8004)            │
 │  - CrossTraffic() with CTP operations                       │
-│  - CTP operations: extract(), select(), transform(),        │
-│    merge(), replay()                                        │
+│  - CTP operations: extract(), select(), transform(), merge()│
 │  - Maps intent to network conditions                        │
+│  - Telemetry: contextual tree storage and query             │
 └────────────────────┬────────────────────────────────────────┘
                      │
                      ▼
 ┌─────────────────────────────────────────────────────────────┐
-│       EXECUTION PLANE (Substrate Worker :8002)              │
+│       EXECUTION PLANE (Substrate Worker :8002,               │
+│                       NetGent Service :8003)                 │
 │  - tc (traffic control) for bottleneck enforcement          │
 │  - tshark for packet capture                                │
-│  - tcpreplay for traffic generation                         │
+│  - tcpreplay for CTP traffic replay                         │
+│  - NetGent NFA workflows for application execution          │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -131,7 +134,8 @@ The Experiment API synthesizes these into a coherent bottleneck specification th
 
 A **CTP** captures realistic cross-traffic patterns for reproducible network experimentation. It encodes:
 - Network measurement data (PCAP, flow traces, aggregate statistics)
-- Operations to transform it: `extract()` (isolate specific flows), `select()` (choose subset), `transform()` (modify intensity), `merge()` (combine profiles), `replay()` (schedule on network)
+- Operations to transform it: `extract()` (isolate specific flows), `select()` (choose subset), `transform()` (modify intensity), `merge()` (combine profiles)
+- Replay is handled by Substrate Worker (receives replay-ready PCAP from CTP Service)
 
 The Experiment API references CTPs by name; the CTP Service handles validation and transformation.
 
@@ -198,7 +202,7 @@ The Experiment API references CTPs by name; the CTP Service handles validation a
 - buffer_size > 0 (queue buffer in bytes)
 - aqm_policy in ["fifo", "codel", "pie", "fq_codel", "cake"] (kernel tc modules)
 - ctp_name exists and is registered (CTP Service validation)
-- ctp_operations are valid: extract, select, transform, merge, replay
+- ctp_operations are valid: extract, select, transform, merge
 - application in list of supported apps
 - workflow_spec matches application capabilities
 - duration_seconds > 0
@@ -255,10 +259,12 @@ The Experiment API references CTPs by name; the CTP Service handles validation a
 
 **States**:
 - `pending` — Created, not yet started
-- `provisioning` — CTP validation, Substrate Worker configuration, tc module loading
-- `running` — Workflows executing under bottleneck regime
-- `complete` — All trials finished, results aggregated
-- `failed` — Error occurred (CTP validation, Substrate config, or workflow execution)
+- `provisioning` — CTP validation, replay PCAP export, Substrate Worker configuration, tc module loading
+- `replay_warmup` — CTP replay started via tcpreplay, bottleneck regime verification in progress
+- `executing` — NetGent workflows executing under verified bottleneck regime, packet capture active
+- `collecting` — Trials complete, stopping replay/capture, measuring final dynamic state
+- `complete` — Results aggregated, stored in Telemetry Service
+- `failed` — Error occurred (CTP validation, Substrate config, regime verification, or workflow execution)
 - `archived` — Results stored, temporary files cleaned up
 
 ---
@@ -375,9 +381,11 @@ The Experiment API references CTPs by name; the CTP Service handles validation a
 ```
 
 **State Transitions**:
-- pending → provisioning (CTP validated)
-- provisioning → running (Substrate Worker ready, capture started)
-- running → complete (all trials done, results aggregated)
+- pending → provisioning (CTP validated, replay PCAP exported)
+- provisioning → replay_warmup (Substrate Worker configured, CTP replay started)
+- replay_warmup → executing (bottleneck regime verified, capture started, NetGent workflow dispatched)
+- executing → collecting (all trials done, stopping replay and capture)
+- collecting → complete (results aggregated, stored in Telemetry Service)
 
 **Error Cases**:
 - 400 Bad Request — experiment already executed
@@ -587,7 +595,7 @@ class BottleneckStatic:
 class BottleneckDynamic:
     """Dynamic congestion pressure (Representation Plane)."""
     ctp_name: str                 # Cross-Traffic Profile identifier
-    ctp_operations: List[str]     # CTP operations: extract, select, transform, merge, replay
+    ctp_operations: List[str]     # CTP operations: extract, select, transform, merge
     ctp_validated: bool = False
 
 @dataclass
@@ -640,17 +648,17 @@ class ExperimentResult:
 ## Service Integration Points
 
 ### CTP Service (Representation Plane)
-- **Endpoint**: POST `/ctps/validate`
-- **Purpose**: Validate CTP name, operations, and transform them into Substrate Worker instructions
-- **Inputs**: ctp_name, ctp_operations (extract, select, transform, merge, replay)
-- **Outputs**: Validated CTP config, transformed traffic shaping rules
+- **Endpoint**: POST `/ctps/validate`, GET `/ctps/{id}/replay-data`
+- **Purpose**: Validate CTP name and operations; export replay-ready PCAP for Substrate Worker
+- **Inputs**: ctp_name, ctp_operations (extract, select, transform, merge)
+- **Outputs**: Validated CTP config, replay-ready PCAP data for Substrate Worker
 - **Failure Mode**: Return 404 if CTP not found; 400 if operations invalid; return 503 if unavailable
 
 ### Substrate Worker (Execution Plane)
-- **Endpoint**: POST `/workers/configure`
-- **Purpose**: Apply bottleneck regime via tc (traffic control), tshark (capture), tcpreplay (replay)
-- **Inputs**: BottleneckStatic, BottleneckDynamic, application config
-- **Outputs**: BottleneckState (measured capacity, RTT, enforcement success)
+- **Endpoint**: POST `/workers/configure`, POST `/workers/replay`, POST `/workers/capture/start`
+- **Purpose**: Apply bottleneck regime via tc, replay CTP traffic via tcpreplay, capture via tshark
+- **Inputs**: BottleneckStatic, BottleneckDynamic, replay-ready PCAP (from CTP Service), capture config
+- **Outputs**: BottleneckState (measured capacity, RTT, enforcement success), pcap files, replay metrics
 - **Failure Mode**: Return 503 on kernel module unavailability or privilege errors; retry with backoff
 
 ### NetGent Service (Application Execution)
@@ -660,11 +668,11 @@ class ExperimentResult:
 - **Outputs**: Metrics (QoE, transport), PCAP path, any errors
 - **Failure Mode**: Timeout after 60s; return 504 Gateway Timeout; log partial results
 
-### Telemetry Service (Archival)
-- **Endpoint**: POST `/results/store`
-- **Purpose**: Persist ExperimentResult to durable storage (S3, database, etc.)
-- **Inputs**: ExperimentResult, metadata, PCAP path
-- **Outputs**: Confirmation, archive URL
+### Telemetry Service (Representation Plane — Data Layer)
+- **Endpoint**: POST `/results`, POST `/artifacts/{id}/upload`
+- **Purpose**: Persist ExperimentResult with contextual tree to durable storage
+- **Inputs**: ExperimentResult, contextual tree metadata, PCAP path, workflow artifacts
+- **Outputs**: Confirmation, result_id, archive URL
 - **Failure Mode**: Queue in-memory on transient failures; retry async
 
 ## Experiment State Machine
@@ -683,26 +691,46 @@ class ExperimentResult:
                     ┌──────────────────────────┐
                     │    PROVISIONING          │
                     │ • CTP Service validate   │
-                    │ • Substrate config       │
-                    │ • tc module load         │
+                    │ • Export replay-ready PCAP│
+                    │ • Substrate config (tc)  │
                     │ • tshark prep            │
                     └─────┬────────────────────┘
                           │ success
                           ▼
                     ┌──────────────────────────┐
-                    │      RUNNING             │
+                    │    REPLAY_WARMUP         │
+                    │ • Start CTP replay       │
+                    │   (tcpreplay on Substrate│
+                    │    Worker)               │
+                    │ • Verify bottleneck      │
+                    │   regime (within 5%)     │
+                    │ • Start packet capture   │
+                    └─────┬────────────────────┘
+                          │ regime_verified
+                          ▼
+                    ┌──────────────────────────┐
+                    │      EXECUTING           │
                     │ • NetGent workflow exec  │
-                    │ • Capture PCAP (tshark)  │
-                    │ • CTP replay (tcpreplay) │
+                    │ • Active PCAP capture    │
+                    │ • CTP replay ongoing     │
                     │ • Trial loop (N times)   │
                     └─────┬────────────────────┘
                           │ all_trials_done
                           ▼
                     ┌──────────────────────────┐
+                    │      COLLECTING          │
+                    │ • Stop CTP replay        │
+                    │ • Stop packet capture    │
+                    │ • Measure final dynamic  │
+                    │   state (throughput, RTT) │
+                    └─────┬────────────────────┘
+                          │ metrics_collected
+                          ▼
+                    ┌──────────────────────────┐
                     │      COMPLETE            │
                     │ • Aggregate results      │
                     │ • Build ExperimentResult │
-                    │ • Queue storage          │
+                    │ • Store in Telemetry Svc │
                     └─────┬────────────────────┘
                           │ storage_confirmed
                           ▼
@@ -715,9 +743,35 @@ class ExperimentResult:
         FAILURE TRANSITIONS (from any state):
         error → FAILED → retry_or_discard
 
-        Retry allowed from: pending, provisioning, running
+        Retry allowed from: pending, provisioning, replay_warmup, executing
         No retry from: archived
 ```
+
+### Implicit Synchronization
+
+The Experiment API handles all service synchronization implicitly based on the experiment specification. There is no separate synchronization service — the state machine phases enforce ordering, and the infrastructure type declared in the experiment determines sync strategy.
+
+**Design Principle**: The user never specifies synchronization requirements. The system infers them from the experiment's infrastructure declaration.
+
+**Single-Host (Docker Compose on laptop)**:
+- All services share the host clock — no clock alignment needed
+- Phase transitions are sequential HTTP calls within the same host
+- CTP replay warmup and bottleneck verification happen in-process before workflow execution begins
+
+**Distributed (multi-server testbed)**:
+- NTP-based clock alignment across servers (assumed pre-configured)
+- Experiment API uses timestamps in all phase transition messages
+- Substrate Worker and NetGent receive explicit `start_at` timestamps for coordinated execution
+- Telemetry Service receives results tagged with synchronized timestamps
+
+**How it works**:
+1. The experiment specification declares `infrastructure_type` (e.g., `"docker_local"`, `"distributed_testbed"`, `"cloud_aws"`)
+2. The Experiment API's orchestrator selects the appropriate synchronization strategy at `provisioning` time
+3. For `docker_local`: no-op sync (shared clock, sequential phase transitions)
+4. For `distributed_testbed`: inject NTP-aligned timestamps into Substrate Worker and NetGent dispatch calls
+5. For `cloud_aws`: use cloud-native time sync (AWS Time Sync Service) + coordinated start times
+
+This ensures the system works seamlessly on a laptop with Docker and elastically scales across diverse infrastructure without exposing synchronization complexity to the user.
 
 ## Quality Attributes
 
@@ -733,7 +787,7 @@ The Experiment API must enforce four core requirements:
 ### Unit Tests
 - Experiment creation with valid/invalid bottleneck regime (static + dynamic)
 - State machine transitions (valid and invalid)
-- CTP operation validation (extract, select, transform, merge, replay)
+- CTP operation validation (extract, select, transform, merge)
 - BottleneckStatic constraint validation (capacity > 0, buffer > 0, latency >= 0)
 - Dataclass serialization/deserialization (Experiment, ExperimentResult)
 
@@ -913,6 +967,6 @@ pytest tests/test_fidelity.py -v --tb=short
 ---
 
 **Deliverable**: D1 (Network Virtualization Substrate - Intent Plane)
-**Last Updated**: 2026-03-04
+**Last Updated**: 2026-03-05
 **Status**: Specification Ready (Implementation by Jaber, Week 1–3)
 **Quality Attributes**: Controllability, Composability, Fidelity, Replicability

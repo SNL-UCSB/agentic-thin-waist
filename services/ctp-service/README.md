@@ -20,7 +20,6 @@ CTP Service accepts:
 - CTP selection queries by statistical descriptors (intensity, burstiness, temporal correlation, contributor structure)
 - CTP transformation parameters (target capacity, scale factor)
 - CTP merge specifications (weighted composition of multiple CTPs)
-- Replay configurations (interface, duration, mode: hybrid or open-loop)
 
 ## Output
 
@@ -28,8 +27,7 @@ CTP Service produces:
 - Cross-Traffic Profiles (CTPs) with statistical descriptors: intensity (packets/sec, bits/sec), burstiness (PMR, CoV), temporal correlation, structural properties
 - Transformed CTPs adapted to target bottleneck capacity while preserving temporal structure
 - Merged CTPs from weighted composition of multiple profiles
-- tcpreplay commands and traffic streams for bottleneck link injection
-- Replay session metrics: fidelity percentage, actual vs. target intensity
+- Replay-ready packet data (PCAP format) for handoff to Substrate Worker
 
 ## Interfaces
 
@@ -39,7 +37,7 @@ CTP Service produces:
 | `/ctps/select` | POST | Query corpus by statistical descriptors |
 | `/ctps/transform` | POST | Rescale CTP amplitude to target capacity |
 | `/ctps/merge` | POST | Compose multiple CTPs with weights |
-| `/ctps/replay` | POST | Apply CTP at bottleneck via tcpreplay |
+| `/ctps/{id}/replay-data` | GET | Export CTP as replay-ready PCAP for Substrate Worker |
 | `/ctps/{id}` | GET | Get full CTP details and descriptors |
 | `/ctps` | GET | List CTPs with pagination |
 | `/health` | GET | Service health and PostgreSQL connectivity |
@@ -50,8 +48,8 @@ For YouTube at 10/25/50 Mbps:
 - extract() processes campus trace to identify realistic background traffic CTPs
 - select() retrieves CTPs matching intensity ranges for each capacity (low for 10Mbps, high for 50Mbps)
 - transform() adapts selected CTP to each target capacity: scale factors 0.5×, 1.0×, 2.0× while preserving burst timing
-- replay() applies transformed CTPs to eth0 during youtube workflow execution
-- Success criteria: 3 CTP replay configs ready, each with fidelity >95% (actual intensity within 5% of target)
+- CTP Service prepares replay-ready PCAP data; Substrate Worker handles actual replay on the wire
+- Success criteria: 3 transformed CTPs ready with replay-ready PCAP exports available for Substrate Worker
 
 ## Core Concepts
 
@@ -103,7 +101,6 @@ The NetForge prototype ingests packet traces from production vantage points. For
 │  │ • select() — query by attrs  │  │
 │  │ • transform() — adapt CTP    │  │
 │  │ • merge() — compose CTPs     │  │
-│  │ • replay() — apply at link   │  │
 │  │                              │  │
 │  └──────────────────────────────┘  │
 │                                     │
@@ -114,22 +111,21 @@ The NetForge prototype ingests packet traces from production vantage points. For
 │  └──────────────────────────────┘  │
 └────────────┬─────────────────────────┘
              │
-             │ tcpreplay commands
-             │ Hybrid replay model:
-             │ • background: open-loop
-             │ • target app: fully reactive
+             │ Replay-ready PCAP data
+             │ (handed to Substrate Worker
+             │  for actual replay)
              │
              ▼
         ┌────────────────────┐
-        │ Linux Bottleneck   │
-        │ tc/qdisc (applied) │
-        │ Network Interface  │
+        │ Substrate Worker   │
+        │ :8002              │
+        │ Handles tcpreplay  │
         └────────────────────┘
 ```
 
 ## CTP Operations
 
-The CTP Service provides five core operations (from NetForge paper):
+The CTP Service provides four core operations (from NetForge paper):
 
 ### 1. extract() — Process Packet Traces into CTPs
 
@@ -287,59 +283,6 @@ Systematically combine multiple CTPs to control dynamic pressure, creating synth
 }
 ```
 
-### 5. replay() — Apply CTP at Bottleneck via tcpreplay
-
-Apply a CTP at the bottleneck using hybrid replay: background traffic open-loop, target application fully reactive.
-
-**Endpoint**: `POST /ctps/replay`
-
-**Request**:
-```json
-{
-  "ctp_id": "ctp-20260304-042",
-  "interface": "eth0",
-  "duration_seconds": 300,
-  "target_app_port": 5000,
-  "replay_mode": "hybrid"
-}
-```
-
-**Response** (200 OK):
-```json
-{
-  "replay_session_id": "replay-20260304-042-eth0-001",
-  "ctp_applied": "ctp-20260304-042",
-  "interface": "eth0",
-  "replay_mode": "hybrid",
-  "background_traffic": "open_loop_via_tcpreplay",
-  "target_app_traffic": "fully_reactive",
-  "replay_status": "running",
-  "estimated_completion": "2026-03-04T14:05:30Z",
-  "metrics_endpoint": "/ctps/replay/replay-20260304-042-eth0-001/metrics"
-}
-```
-
-**Replay Results** (GET after completion):
-```json
-{
-  "replay_session_id": "replay-20260304-042-eth0-001",
-  "status": "completed",
-  "duration_seconds": 300,
-  "replay_fidelity": {
-    "ctp_target_intensity_mbps": 2150,
-    "replayed_intensity_mbps": 2128,
-    "fidelity_percent": 98.9,
-    "burstiness_preserved": true
-  },
-  "target_app_metrics": {
-    "request_count": 15847,
-    "p50_latency_ms": 142,
-    "p99_latency_ms": 1250,
-    "error_rate": 0.02
-  }
-}
-```
-
 ## API Reference
 
 ### General Health Check
@@ -352,7 +295,6 @@ Apply a CTP at the bottleneck using hybrid replay: background traffic open-loop,
   "status": "healthy",
   "service_version": "1.0.0",
   "postgresql_connected": true,
-  "tcpreplay_available": true,
   "kernel_version": "6.8.0-94-generic"
 }
 ```
@@ -480,31 +422,16 @@ class CrossTrafficProfile:
     structure: CTPStructure
     created_at: datetime
 
-    def to_replay_format(self) -> Dict:
-        """Convert CTP for tcpreplay input."""
+    def to_pcap_export(self) -> bytes:
+        """Generate replay-ready PCAP data for Substrate Worker."""
         pass
-
-@dataclass
-class ReplaySession:
-    """Active or completed CTP replay."""
-    session_id: str
-    ctp_id: str
-    interface: str
-    duration_seconds: int
-    replay_mode: str                 # "hybrid", "open-loop"
-    status: str                      # "running", "completed", "failed"
-    start_time: datetime
-    end_time: Optional[datetime]
-    fidelity_percent: Optional[float]
-    target_app_metrics: Optional[Dict]
 ```
 
 ## Service Dependencies
 
 **External Dependencies**:
 - **PostgreSQL**: CTP corpus storage and multi-dimensional indexing (must support JSON queries on statistical descriptors)
-- **tcpreplay**: Packet replay at bottleneck for replay() operations
-- **Linux kernel**: tc/qdisc support for traffic control (kernel 3.5+)
+- **scapy** (optional): For generating replay-ready PCAP files from CTP descriptors
 
 **Other Services**:
 - Experiment Controller (Port 8000): Orchestrates CTP selections and replay sessions
@@ -517,14 +444,13 @@ class ReplaySession:
 - **Selection**: Query by all descriptor types (intensity, burstiness, temporal_correlation, structure)
 - **Transform**: Validate amplitude scaling while preserving temporal structure and asymmetry
 - **Merge**: Weighted CTP composition produces correct aggregate descriptors
-- **Replay**: tcpreplay command generation for hybrid mode (open-loop background, reactive target)
+- **Export**: Replay-ready PCAP generation from CTP descriptors for Substrate Worker handoff
 - **Indexing**: PostgreSQL schema, multi-dimensional range queries, JSON descriptor storage
 
 ### Integration Tests
 - **End-to-end extraction**: PCAP ingestion → CTP storage → query retrieval (realistic 48k-user traces)
 - **Transform fidelity**: Scale CTP to different bottleneck capacities; verify burst timing preserved
-- **Replay accuracy**: Apply replay session, measure actual vs. target intensity (within 5% tolerance)
-- **Hybrid mode**: Validate background traffic open-loop while target app remains reactive
+- **PCAP export**: Generated replay-ready PCAP matches CTP intensity and temporal structure
 - **Corpus scale**: Performance with 230k CTPs (campus gateway corpus size)
 
 ### Performance Tests
@@ -532,7 +458,7 @@ class ReplaySession:
 - Selection query: < 100ms for range queries on 230k CTPs (PostgreSQL B-tree)
 - Transform: < 50ms amplitude rescaling
 - Merge: < 100ms for 3-CTP weighted composition
-- Replay initialization: < 1 second to start tcpreplay on interface
+- PCAP export: < 2 seconds to generate replay-ready PCAP from CTP descriptors
 - Corpus query: < 500ms for multi-dimensional descriptor queries
 
 ## Implementation Architecture
@@ -560,14 +486,13 @@ services/ctp-service/
 │   │   ├── select.py              # Multi-dimensional query
 │   │   ├── transform.py           # CTP amplitude scaling
 │   │   ├── merge.py               # CTP composition
-│   │   └── replay.py              # tcpreplay orchestration
+│   │   └── export.py              # Replay-ready PCAP generation
 │   ├── api/
 │   │   ├── __init__.py
 │   │   └── routes.py              # Endpoint handlers
 │   └── utils/
 │       ├── __init__.py
-│       ├── logging.py
-│       └── subprocess.py           # Safe tcpreplay execution
+│       └── logging.py
 └── tests/
     ├── __init__.py
     ├── conftest.py                # pytest fixtures
@@ -726,54 +651,28 @@ class CTPMerger:
         return merged
 ```
 
-#### 5. Replay Operation (app/operations/replay.py)
+#### 5. Export Operation (app/operations/export.py)
 ```python
-class CTPReplayer:
-    """Apply CTP at bottleneck via tcpreplay (hybrid mode)."""
+class CTPExporter:
+    """Generate replay-ready PCAP files from CTP descriptors for Substrate Worker."""
 
-    def start_replay(
+    def export_replay_pcap(
         self,
         ctp_id: str,
-        interface: str,
-        duration_seconds: int,
-        target_app_port: int = None
-    ) -> ReplaySession:
+        target_rate_mbps: float = None
+    ) -> str:
         """
-        Hybrid replay model:
-        - Background traffic: open-loop via tcpreplay from CTP packets
-        - Target application: fully reactive (normal TCP congestion control)
+        Generate a replay-ready PCAP file from CTP descriptors.
 
-        1. Generate tcpreplay commands from CTP
-        2. Start tcpreplay on background traffic
-        3. If target_app_port provided, monitor reactive traffic separately
-        4. Track fidelity: actual vs. target intensity
-        5. Return session object
+        1. Load CTP from corpus
+        2. Reconstruct packet timing from temporal descriptors
+        3. Generate synthetic packets matching CTP intensity and structure
+        4. Write PCAP file suitable for tcpreplay by Substrate Worker
+        5. Return file path
+
+        The Substrate Worker uses this PCAP with tcpreplay
+        to apply the CTP at the bottleneck interface.
         """
-        ctp = self.db.get_ctp(ctp_id)
-        replay_pcap = self._generate_pcap_from_ctp(ctp)
-
-        # Start tcpreplay in background
-        session = ReplaySession(
-            session_id=f"replay-{timestamp}",
-            ctp_id=ctp_id,
-            interface=interface,
-            duration_seconds=duration_seconds,
-            replay_mode="hybrid",
-            status="running"
-        )
-
-        # Execute: tcpreplay -i {interface} --duration {duration} {replay_pcap}
-        proc = self._start_tcpreplay(replay_pcap, interface, duration_seconds)
-        self.db.store_replay_session(session)
-
-        return session
-
-    def _generate_pcap_from_ctp(self, ctp: CrossTrafficProfile) -> str:
-        """Reconstruct synthetic PCAP from CTP descriptors."""
-        pass
-
-    def get_replay_metrics(self, session_id: str) -> Dict:
-        """Measure actual vs. expected intensity during/after replay."""
         pass
 ```
 
@@ -799,20 +698,6 @@ CREATE INDEX idx_ctps_intensity_mean ON ctps USING BTREE ((intensity->>'mean_mbp
 CREATE INDEX idx_ctps_burstiness_pmr ON ctps USING BTREE ((burstiness->>'pmr')::FLOAT);
 CREATE INDEX idx_ctps_contributors ON ctps USING BTREE ((structure->>'contributor_count')::INT);
 CREATE INDEX idx_ctps_temporal_corr ON ctps USING BTREE ((temporal_correlation->>'lag_1')::FLOAT);
-
-CREATE TABLE replay_sessions (
-    session_id TEXT PRIMARY KEY,
-    ctp_id TEXT REFERENCES ctps,
-    interface TEXT,
-    duration_seconds INT,
-    replay_mode TEXT,
-    status TEXT,
-    start_time TIMESTAMP,
-    end_time TIMESTAMP,
-    fidelity_percent FLOAT,
-    target_app_metrics JSONB,
-    created_at TIMESTAMP DEFAULT NOW()
-);
 ```
 
 ### Example Test: Transform Preserves Structure
@@ -846,7 +731,6 @@ CTP_PORT=8001
 CTP_HOST=0.0.0.0
 CTP_LOG_LEVEL=INFO
 CTP_CORPUS_SIZE=230000        # Expected corpus size (campus gateway)
-CTP_TCPREPLAY_TIMEOUT=600     # Max seconds for replay session
 CTP_EXTRACT_BATCH_SIZE=1000   # PCAP processing batch size
 ```
 
@@ -876,7 +760,7 @@ curl -X POST http://localhost:8001/ctps/select \
 ### Monitoring
 - Prometheus metrics: `/metrics` (operation latencies, query counts, PostgreSQL connection pool)
 - Structured logs: JSON format with trace IDs for correlating requests
-- Health check: `GET /health` returns database connectivity, tcpreplay availability, corpus stats
+- Health check: `GET /health` returns database connectivity, corpus stats
 
 ## References
 
@@ -884,11 +768,6 @@ curl -X POST http://localhost:8001/ctps/select \
 - Describes CTP extraction, indexing, and composition model
 - Campus gateway corpus: 48k users, 8.2 Gbps peak, 230k CTPs from 15-min intervals
 - Hierarchical demand representation with prefix-based trees
-
-**Linux Network Tools**:
-- tcpreplay: https://www.tcpreplay.appneta.com/
-- Linux tc qdisc: https://man7.org/linux/man-pages/man8/tc.8.html
-- netem (network emulation): https://man7.org/linux/man-pages/man8/tc-netem.8.html
 
 **Related Systems**:
 - NetReplica: Private SNL-UCSB repository

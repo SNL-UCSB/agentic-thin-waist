@@ -11,12 +11,14 @@
 
 The Substrate Worker is the **Execution Plane** of the NetForge Service. It instantiates bottleneck-regime specifications on concrete infrastructure, translating high-level network constraints into operational Linux traffic control (tc) configurations, packet capture (tshark), and traffic replay (tcpreplay) operations. It applies both static attributes (capacity, latency, AQM) and dynamic pressure (CTP background traffic) to the network interface.
 
+**The Substrate Worker is the sole owner of all network execution**: tc qdisc management, tcpreplay for CTP traffic, and tshark for packet capture. It receives replay-ready PCAP data from the CTP Service (which handles CTP algebra and export) and executes the actual replay on the network interface. This separation keeps CTP Service as a pure representation/database layer while Substrate Worker handles all privileged kernel operations.
+
 ## Input
 
 Substrate Worker accepts:
 - BottleneckState specifications: download/upload capacity (Mbps), latency (ms), queue discipline, buffer depth
 - Network interface assignments: upstream/downstream interfaces, delay interface
-- CTP replay sessions: traffic pattern files, replay rates, hybrid mode configuration
+- CTP replay sessions: replay-ready PCAP files (from CTP Service), replay rates, hybrid mode configuration
 - Packet capture filters: interface, tcpdump filter syntax, output directory
 - Configuration: network namespace, capture directory path
 
@@ -80,8 +82,8 @@ NetForge provides `NAT()` and `Tunnel()` abstractions for connectivity beyond th
 
 ```
 ┌──────────────────────────────────┐
-│  NetForge Service                │
-│  (CTP Orchestration Layer)       │
+│  Experiment API                  │
+│  (Intent Plane Orchestration)    │
 └────────────┬──────────────────────┘
              │
              │ POST /shape (BottleneckState)
@@ -115,6 +117,11 @@ NetForge provides `NAT()` and `Tunnel()` abstractions for connectivity beyond th
         │ LibreQoS/XDP    │
         └─────────────────┘
 ```
+
+### Dependencies
+
+- **CTP Service** (Port 8001): Provides replay-ready PCAP data via `GET /ctps/{id}/replay-data`. The Substrate Worker does not perform CTP algebra — it receives pre-processed PCAP and replays it via tcpreplay.
+- **Experiment API** (Port 8000): Dispatches configuration, replay, and capture commands. The Experiment API orchestrates the sequencing of Substrate Worker operations.
 
 ## Configuration Requirements
 
@@ -350,5 +357,5 @@ substrate-worker:
 **Project**: Agentic Thin Waist (NetForge Service)
 **PI**: Prof. Arpit Gupta
 **Lead**: Jaber
-**Last Updated**: 2026-03-04
+**Last Updated**: 2026-03-05
 **Status**: Specification Complete — Ready for Implementation

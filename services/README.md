@@ -13,9 +13,9 @@ The three logical planes are:
 
 | Plane | Services | Responsibility | Ports |
 |-------|----------|-----------------|-------|
-| **Intent plane** | Experiment API, Orchestration | Accept research intent; generate experiment specs | 8000, 8005 |
-| **Representation plane** | CTP Service | Define and compose Cross-Traffic Profiles (CTPs) | 8001 |
-| **Execution plane** | Substrate Worker, NetGent, Telemetry | Execute bottleneck conditions; apply traffic patterns; collect results | 8002, 8003, 8004 |
+| **Intent plane** | Experiment API, Orchestration | Accept research intent; generate experiment specs; coordinate execution sequencing and synchronization | 8000, 8005 |
+| **Representation plane** | CTP Service, Telemetry Service | Define and compose Cross-Traffic Profiles (CTPs); store and query experiment results with contextual metadata | 8001, 8004 |
+| **Execution plane** | Substrate Worker, NetGent | Execute bottleneck conditions; apply CTP traffic via tcpreplay; run application workflows | 8002, 8003 |
 
 ## Service Registry
 
@@ -23,7 +23,7 @@ The three logical planes are:
 |---------|------|-------------|----------|--------------|
 | Experiment API | 8000 | D1 (CRITICAL) | Jaber, Satyam, Snithik | All services |
 | CTP Service | 8001 | D1 (CRITICAL) | Jaber, Satyam, Snithik | None |
-| Substrate Worker | 8002 | D1 (CRITICAL) | Jaber, Satyam, Snithik | Telemetry Service |
+| Substrate Worker | 8002 | D1 (CRITICAL) | Jaber, Satyam, Snithik | CTP Service (replay PCAP) |
 | NetGent Service | 8003 | D2 (HIGH) | Eugene + Jaber | None (receives spec from upper layer) |
 | Telemetry Service | 8004 | D3 (HIGH) | Manni | None |
 | Orchestration Service | 8005 | D5 (VERY CRITICAL) | Haarika | All services |
@@ -124,7 +124,7 @@ This separation means the Experiment API is responsible for specifying both (a) 
 
 ---
 
-## Representation Plane: CTP Service
+## Representation Plane: CTP Service & Telemetry Service
 
 ### 2. CTP Service (Port 8001) — D1 CRITICAL
 
@@ -134,8 +134,8 @@ This separation means the Experiment API is responsible for specifying both (a) 
 
 **Responsibilities**:
 - Define CTP profiles with static bottleneck attributes (capacity, latency, loss_rate, aqm_policy)
-- Implement CTP operations: extract(), select(), transform(), merge(), replay()
-- Compile CTPs to Linux tc (traffic control) commands
+- Implement CTP operations: extract(), select(), transform(), merge()
+- Export replay-ready PCAP data for Substrate Worker
 - Support CTP composition and algebra
 - Verify network state matches configured CTP
 
@@ -166,113 +166,8 @@ class BottleneckRegime:
 1. CTP dataclass definitions with validation
 2. tc command generator for each AQM policy
 3. Network measurement: iperf3 for throughput, ping for RTT
-4. CTP operations: extract, select, transform, merge, replay
+4. CTP operations: extract, select, transform, merge
 5. Physical limit validation
-
----
-
-## Execution Plane: Substrate Worker, NetGent, Telemetry
-
-### 3. Substrate Worker (Port 8002) — D1 CRITICAL
-
-**Location**: `./substrate-worker/`
-
-**Purpose**: Data plane execution. Applies bottleneck regime conditions to the network using Linux kernel capabilities and collects packet traces and telemetry.
-
-**Responsibilities**:
-- Apply CTP configurations via tc qdisc management
-- Collect packet traces via tshark or tcpdump
-- Measure dynamic bottleneck state (throughput, RTT, congestion pressure)
-- Execute privileged network operations (requires CAP_NET_ADMIN)
-- Store raw pcap files for trace-level analysis
-
-**Key Endpoints**:
-- `POST /workers/configure` — Apply CTP to network interface
-- `GET /workers/status` — Get current bottleneck regime
-- `POST /workers/capture/start` — Start packet capture (tshark)
-- `POST /workers/capture/stop` — Stop capture, return pcap file path
-- `GET /workers/metrics` — Get measured throughput/RTT/queue_depth
-
-**Core Contracts**:
-```python
-@dataclass
-class BottleneckRegime:
-    static_attrs: dict  # configured capacity, latency, loss, aqm
-    dynamic_pressure: dict  # measured_throughput, measured_rtt
-
-@dataclass
-class TelemetrySnapshot:
-    timestamp: str
-    interface: str
-    tx_packets: int
-    rx_packets: int
-    tx_bytes: int
-    rx_bytes: int
-    packet_loss_percent: float
-```
-
-**Dependencies**: Telemetry Service (for storing pcap files).
-
-**Implementation**:
-1. Flask server with privileged mode support (CAP_NET_ADMIN)
-2. tc command executor for qdisc management
-3. tshark/tcpdump integration for packet capture
-4. iperf3 client for throughput measurement
-5. ping-based RTT measurement
-6. Pcap storage to mounted volume
-7. Linux sysctl tuning
-
----
-
-### 4. NetGent Service (Port 8003) — D2 HIGH
-
-**Location**: `./netgent-service/`
-
-**Purpose**: Application-level execution plane. Uses NFA (nondeterministic finite automaton) to specify and execute browser automation workflows, generating application-specific traffic and measuring QoE.
-
-**Responsibilities**:
-- Compile NetGent workflows from NFA specification
-- Execute browser automation (YouTube, Netflix, Zoom, etc.)
-- Collect QoE metrics: video startup time, rebuffer events, bitrate
-- Coordinate network conditions with Substrate Worker
-- Store workflow logs and artifacts
-
-**Key Endpoints**:
-- `POST /workflows/compile` — Compile NFA from spec
-- `POST /workflows/execute` — Run workflow under current network conditions
-- `GET /workflows/results/{workflow_id}` — Retrieve execution results
-- `GET /workflows/available` — List available NFA workflows
-- `POST /workflows/qoe/measure` — Extract QoE metrics from logs
-
-**Core Contracts**:
-```python
-@dataclass
-class WorkflowResult:
-    workflow_id: str
-    application: str  # "youtube", "netflix", "zoom"
-    status: str  # "success", "failure", "timeout"
-    states_executed: List[str]
-    qoe_metrics: dict  # startup_time_ms, rebuffer_events, bitrate
-    duration_seconds: float
-
-@dataclass
-class QoEMetrics:
-    video_startup_time_ms: float
-    mean_bitrate_mbps: float
-    rebuffer_events: int
-    rebuffer_duration_ms: float
-```
-
-**Dependencies**: Substrate Worker (network coordination), Telemetry Service (artifact storage).
-
-**Implementation**:
-1. NetGent NFA execution engine integration
-2. NFA compiler from JSON specs
-3. Selenium or Puppeteer for browser automation
-4. QoE metric extractors per application
-5. Workflow state logging and error handling
-6. Timeout management (30-second default)
-7. Artifact storage
 
 ---
 
@@ -280,7 +175,7 @@ class QoEMetrics:
 
 **Location**: `./telemetry-service/`
 
-**Purpose**: Context plane data layer. Stores experiment results with contextual tree metadata spanning static bottleneck attributes, dynamic congestion pressure, application characteristics, and transport state.
+**Purpose**: Representation plane data layer. Stores experiment results with contextual tree metadata spanning static bottleneck attributes, dynamic congestion pressure, application characteristics, and transport state. The Telemetry Service is part of the Representation plane because it defines and manages the structured representations (contextual trees) that give meaning to raw execution data.
 
 **Responsibilities**:
 - Store ExperimentResult with complete contextual tree
@@ -329,29 +224,135 @@ class ExperimentResult:
 
 ---
 
+## Execution Plane: Substrate Worker & NetGent
+
+### 3. Substrate Worker (Port 8002) — D1 CRITICAL
+
+**Location**: `./substrate-worker/`
+
+**Purpose**: Data plane execution. Applies bottleneck regime conditions to the network using Linux kernel capabilities, replays CTP traffic via tcpreplay, and collects packet traces and telemetry.
+
+**Responsibilities**:
+- Apply CTP configurations via tc qdisc management
+- Replay CTP traffic via tcpreplay (receives replay-ready PCAP from CTP Service)
+- Collect packet traces via tshark or tcpdump
+- Measure dynamic bottleneck state (throughput, RTT, congestion pressure)
+- Execute privileged network operations (requires CAP_NET_ADMIN)
+- Store raw pcap files for trace-level analysis
+
+**Key Endpoints**:
+- `POST /workers/configure` — Apply CTP to network interface
+- `GET /workers/status` — Get current bottleneck regime
+- `POST /workers/capture/start` — Start packet capture (tshark)
+- `POST /workers/capture/stop` — Stop capture, return pcap file path
+- `GET /workers/metrics` — Get measured throughput/RTT/queue_depth
+- `POST /workers/replay` — Replay CTP traffic via tcpreplay
+
+**Core Contracts**:
+```python
+@dataclass
+class BottleneckRegime:
+    static_attrs: dict  # configured capacity, latency, loss, aqm
+    dynamic_pressure: dict  # measured_throughput, measured_rtt
+
+@dataclass
+class TelemetrySnapshot:
+    timestamp: str
+    interface: str
+    tx_packets: int
+    rx_packets: int
+    tx_bytes: int
+    rx_bytes: int
+    packet_loss_percent: float
+```
+
+**Dependencies**: CTP Service (for replay-ready PCAP data).
+
+**Implementation**:
+1. Flask server with privileged mode support (CAP_NET_ADMIN)
+2. tc command executor for qdisc management
+3. tcpreplay for CTP traffic replay (receives PCAP from CTP Service)
+4. tshark/tcpdump integration for packet capture
+5. iperf3 client for throughput measurement
+6. ping-based RTT measurement
+7. Pcap storage to mounted volume
+8. Linux sysctl tuning
+
+---
+
+### 4. NetGent Service (Port 8003) — D2 HIGH
+
+**Location**: `./netgent-service/`
+
+**Purpose**: Application-level execution plane. Uses NFA (nondeterministic finite automaton) to specify and execute browser automation workflows, generating application-specific traffic and measuring QoE.
+
+**Responsibilities**:
+- Compile NetGent workflows from NFA specification
+- Execute browser automation (YouTube, Netflix, Zoom, etc.)
+- Collect QoE metrics: video startup time, rebuffer events, bitrate
+- Coordinate network conditions with Substrate Worker
+- Store workflow logs and artifacts
+
+**Key Endpoints**:
+- `POST /workflows/compile` — Compile NFA from spec
+- `POST /workflows/execute` — Run workflow under current network conditions
+- `GET /workflows/results/{workflow_id}` — Retrieve execution results
+- `GET /workflows/available` — List available NFA workflows
+- `POST /workflows/qoe/measure` — Extract QoE metrics from logs
+
+**Core Contracts**:
+```python
+@dataclass
+class WorkflowResult:
+    workflow_id: str
+    application: str  # "youtube", "netflix", "zoom"
+    status: str  # "success", "failure", "timeout"
+    states_executed: List[str]
+    qoe_metrics: dict  # startup_time_ms, rebuffer_events, bitrate
+    duration_seconds: float
+
+@dataclass
+class QoEMetrics:
+    video_startup_time_ms: float
+    mean_bitrate_mbps: float
+    rebuffer_events: int
+    rebuffer_duration_ms: float
+```
+
+**Dependencies**: Substrate Worker (network coordination). NetGent does not communicate directly with Telemetry Service; the Experiment API handles result storage.
+
+**Implementation**:
+1. NetGent NFA execution engine integration
+2. NFA compiler from JSON specs
+3. Selenium or Puppeteer for browser automation
+4. QoE metric extractors per application
+5. Workflow state logging and error handling
+6. Timeout management (30-second default)
+7. Artifact storage
+
+---
+
 ## Service Interaction Flow
 
 ```
-Orchestration Service (intent)
+Orchestration Service (natural language intent)
     ↓
-Experiment API (experiment specification)
-    ↓
-CTP Service (validate bottleneck regime)
-    ↓
-Substrate Worker (configure bottleneck, start capture)
-    ↓
-NetGent Service (execute NFA workflow, collect QoE)
-    ↓
-Substrate Worker (stop capture, measure dynamic state)
-    ↓
-Telemetry Service (persist result + contextual tree)
+Experiment API (experiment specification + sequencing)
+    ├→ CTP Service (validate bottleneck regime, export replay-ready PCAP)
+    ├→ Substrate Worker (configure bottleneck via tc)
+    ├→ Substrate Worker (replay CTP traffic via tcpreplay, start capture)
+    ├→ NetGent Service (execute NFA workflow, collect QoE)
+    ├→ Substrate Worker (stop capture, measure dynamic state)
+    ├→ Telemetry Service (persist result + contextual tree)
     ↓
 Experiment API (aggregate and return result)
 ```
 
+The Experiment API orchestrates the sequencing implicitly: it manages phase transitions (provisioning → replay_warmup → executing → collecting → complete) and infers synchronization requirements from the experiment specification's infrastructure type.
+
 Each service contributes to the final ExperimentResult:
-- **CTP Service**: Validated bottleneck regime (static attributes)
-- **Substrate Worker**: Pcap files, measured dynamic state, telemetry
+- **CTP Service**: Validated bottleneck regime (static attributes), replay-ready PCAP export
+- **Substrate Worker**: tc enforcement, CTP replay via tcpreplay, pcap capture, measured dynamic state
 - **NetGent Service**: QoE metrics, workflow artifacts
 - **Telemetry Service**: Persistent storage, contextual tree tagging
 
@@ -361,7 +362,7 @@ Each service contributes to the final ExperimentResult:
 
 The platform is designed to satisfy four key requirements:
 
-1. **Controllability**: CTP operations (extract, select, transform, merge, replay) enable fine-grained network condition control
+1. **Controllability**: CTP operations (extract, select, transform, merge) define network conditions; Substrate Worker enforces them via tc and tcpreplay
 2. **Composability**: Services operate independently (weeks 1-2 with mocks) and compose (weeks 3-4 integration)
 3. **Fidelity**: Substrate Worker verification ensures applied conditions match specifications within 5% tolerance
 4. **Replicability**: Contextual trees capture all context; pcap traces enable offline replay
@@ -388,4 +389,4 @@ The platform is designed to satisfy four key requirements:
 
 ---
 
-**Last Updated**: 2026-03-04 | **Status**: Design Phase | **Next**: Week 1-2 Parallel Implementation
+**Last Updated**: 2026-03-05 | **Status**: Design Phase | **Next**: Week 1-2 Parallel Implementation
