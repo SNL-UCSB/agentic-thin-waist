@@ -14,11 +14,11 @@ services:
       - CTP_SERVICE_URL=http://ctp-service:8001
       - SUBSTRATE_WORKER_URL=http://substrate-worker:8002
       - NETGENT_SERVICE_URL=http://netgent-service:8003
-      - STORAGE_SERVICE_URL=http://storage-service:8004
+      - TELEMETRY_SERVICE_URL=http://telemetry-service:8004
     depends_on:
       - ctp-service
       - substrate-worker
-      - storage-service
+      - telemetry-service
     networks:
       - agentic-network
     volumes:
@@ -60,9 +60,9 @@ services:
       - "8002:8002"
     environment:
       - FLASK_ENV=development
-      - STORAGE_SERVICE_URL=http://storage-service:8004
+      - TELEMETRY_SERVICE_URL=http://telemetry-service:8004
     depends_on:
-      - storage-service
+      - telemetry-service
     networks:
       - agentic-network
     volumes:
@@ -90,10 +90,10 @@ services:
     environment:
       - FLASK_ENV=development
       - SUBSTRATE_WORKER_URL=http://substrate-worker:8002
-      - STORAGE_SERVICE_URL=http://storage-service:8004
+      - TELEMETRY_SERVICE_URL=http://telemetry-service:8004
     depends_on:
       - substrate-worker
-      - storage-service
+      - telemetry-service
     networks:
       - agentic-network
     volumes:
@@ -104,12 +104,12 @@ services:
       timeout: 3s
       retries: 10
 
-  # D3: Storage Service - Telemetry and Results
-  storage-service:
+  # D3: Telemetry Service - Telemetry and Results
+  telemetry-service:
     build:
-      context: ./services/storage-service
+      context: ./services/telemetry-service
       dockerfile: Dockerfile
-    container_name: storage-service
+    container_name: telemetry-service
     ports:
       - "8004:8004"
     environment:
@@ -118,8 +118,8 @@ services:
     networks:
       - agentic-network
     volumes:
-      - ./services/storage-service:/app
-      - storage-data:/data
+      - ./services/telemetry-service:/app
+      - telemetry-data:/data
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
       interval: 5s
@@ -143,7 +143,7 @@ services:
       - ctp-service
       - substrate-worker
       - netgent-service
-      - storage-service
+      - telemetry-service
     networks:
       - agentic-network
     volumes:
@@ -159,4 +159,4 @@ networks:
     driver: bridge
 
 volumes:
-  storage-data:
+  telemetry-data:

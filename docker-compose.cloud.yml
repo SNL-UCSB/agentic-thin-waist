@@ -75,8 +75,8 @@ services:
           cpus: '1'
           memory: 1G
 
-  storage-service:
-    image: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/agentic-thin-waist/storage-service:latest
+  telemetry-service:
+    image: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/agentic-thin-waist/telemetry-service:latest
     restart: always
     ports:
       - "8004:8004"
