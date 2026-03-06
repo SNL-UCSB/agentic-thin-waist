@@ -122,6 +122,21 @@ CTP Service  Substrate     NetGent Service
 
 ## Core Concepts
 
+### Terminology: Experiment vs. Iteration
+
+An **experiment** is a research campaign that may encompass multiple **iterations** (individual runs). Each iteration pairs one network configuration (NetReplica/NetForge) with one or more concurrent application configurations (NetGent). The Experiment API operates at the iteration level — each `POST /experiments` creates a single iteration. The Orchestration Service (port 8005) operates at the experiment level — it synthesizes a set of iterations from a research intent.
+
+**Within a single iteration**, the application field can specify multiple concurrent applications. For example, one iteration might run YouTube and Zoom simultaneously on the same 10 Mbps bottleneck — both competing for bandwidth under the same network conditions and cross-traffic. This is distinct from running them in separate iterations: concurrent execution captures the interaction effects (how Zoom's real-time traffic affects YouTube's adaptive bitrate, and vice versa), while separate iterations isolate each application's behavior.
+
+**Composition patterns** across iterations:
+
+- **Single-app iteration**: One network condition, one application. Example: YouTube alone at 10 Mbps / 50ms. The simplest case.
+- **Multi-app iteration (concurrent)**: One network condition, multiple applications running simultaneously. Example: YouTube + Zoom sharing a 10 Mbps / 50ms link. This captures cross-application interference and is what makes the N:1 mapping between NetGent and NetReplica possible within a single iteration.
+- **Parameter sweep**: One application (or app combination) across multiple network conditions. Example: YouTube at 10, 25, 50 Mbps. Each capacity level is a separate iteration.
+- **Full Cartesian**: Multiple app combinations × multiple network conditions. Example: {YouTube-only, Zoom-only, YouTube+Zoom} × {10, 25, 50 Mbps} = 9 iterations. This is what `POST /experiments/batch` is designed for.
+
+The distinction matters for how results are aggregated. Within an experiment, iterations share a research intent and are analyzed collectively. The Telemetry Service tags each iteration's results with its contextual tree coordinates so they can be queried both individually and as part of the parent experiment.
+
 ### Bottleneck Regime
 
 A **bottleneck regime** is defined by:
@@ -137,7 +152,7 @@ A **CTP** captures realistic cross-traffic patterns for reproducible network exp
 - Operations to transform it: `extract()` (isolate specific flows), `select()` (choose subset), `transform()` (modify intensity), `merge()` (combine profiles)
 - Replay is handled by Substrate Worker (receives replay-ready PCAP from CTP Service)
 
-The Experiment API references CTPs by name; the CTP Service handles validation and transformation.
+The Experiment API references CTPs by name or by cluster attributes (see CTP Service); the CTP Service handles validation and transformation.
 
 ## API Specification
 
@@ -155,8 +170,11 @@ The Experiment API references CTPs by name; the CTP Service handles validation a
   "aqm_policy": "fq_codel",
   "ctp_name": "caffeine-mix-2024",
   "ctp_operations": ["extract:dns", "transform:scale=0.5"],
-  "application": "youtube",
-  "workflow_spec": "watch-video-60s",
+  "ctp_cluster": null,
+  "ctp_sampling": null,
+  "applications": [
+    {"application": "youtube", "workflow_spec": "watch-video-60s"}
+  ],
   "duration_seconds": 60,
   "num_trials": 3,
   "capture_pcap": true,
@@ -203,8 +221,9 @@ The Experiment API references CTPs by name; the CTP Service handles validation a
 - aqm_policy in ["fifo", "codel", "pie", "fq_codel", "cake"] (kernel tc modules)
 - ctp_name exists and is registered (CTP Service validation)
 - ctp_operations are valid: extract, select, transform, merge
-- application in list of supported apps
-- workflow_spec matches application capabilities
+- ctp_cluster (optional): cluster ID from CTP Service cluster taxonomy; when provided, overrides ctp_name with cluster-based selection
+- ctp_sampling (optional): sampling strategy when using clusters — `{"strategy": "random", "n_samples": 5}` or `{"strategy": "all"}`
+- applications: non-empty list; each entry has application in list of supported apps and workflow_spec matching that application's capabilities. Multiple entries run concurrently on the same bottleneck.
 - duration_seconds > 0
 - num_trials >= 1
 - experiment_id is unique

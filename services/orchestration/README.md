@@ -41,22 +41,33 @@ Orchestration Service produces:
 
 ## YouTube MVP Example
 
-For intent "Compare YouTube QoE at 10, 25, 50 Mbps with 50ms latency under CUBIC":
-- Claude parses intent → identifies: apps=[youtube], capacities=[10,25,50], latency=50ms, cc=cubic, trials=1
-- Generates 3 experiment specs: youtube-10mbps-cubic, youtube-25mbps-cubic, youtube-50mbps-cubic
+For intent "Generate traffic for YouTube at 100ms base latency and 6 Mbps":
+- Claude parses intent → identifies: apps=[youtube], capacity=6Mbps, latency=100ms
+- **Clarification step**: Claude surfaces defaults — "AQM policy: fq_codel. Congestion control: cubic. No cross-traffic specified — I have 20 CTP clusters available. Should I use all clusters, a specific subset, or no cross-traffic?" User confirms defaults, selects "high-burstiness clusters only."
+- Claude queries CTP Service for cluster taxonomy → identifies 5 high-burstiness clusters
+- Generates 5 iterations (one per CTP cluster): youtube-6mbps-100ms-cluster-3, youtube-6mbps-100ms-cluster-7, ...
 - Dispatches to Experiment API, returns orchestration_id immediately (202)
 - Client polls /orchestration/{id} to track: pending → running → complete
-- GET /orchestration/{id}/results returns aggregated results (startup_time across capacity)
-- Success criteria: NL in → 3 experiment specs out → results aggregated end-to-end
+- GET /orchestration/{id}/results returns aggregated results across CTP clusters
+- Success criteria: NL in → clarification → N iteration specs out → results aggregated end-to-end
+
+**Composition examples**: For intent "Compare YouTube vs Zoom at 10, 25, 50 Mbps with 50ms latency under CUBIC":
+- Claude must determine the **experiment design**: should YouTube and Zoom run in separate iterations (isolated) or concurrently within the same iteration (competing for the same link)?
+- **Isolated design** (6 iterations): YouTube-only at 10/25/50 Mbps + Zoom-only at 10/25/50 Mbps. Answers: "How does each app perform in isolation under varying bandwidth?"
+- **Concurrent design** (3 iterations): YouTube+Zoom simultaneously at 10/25/50 Mbps. Answers: "How do these apps interact when sharing a bottleneck?" Each iteration runs multiple NetGent workflows on one NetReplica configuration.
+- **Full design** (9 iterations): Both isolated and concurrent runs. Answers: "How does each app perform alone vs. when competing?" This is the richest comparison but most expensive.
+- Claude should clarify with the researcher which design is intended, since the choice fundamentally changes what the data can answer.
 
 ### Core Responsibilities
 
 1. **Natural Language Intent Parsing** — Interpret researcher intent ("Compare YouTube vs Zoom at 10-50 Mbps")
-2. **Multi-Step Reasoning** — Use Claude to reason about which experiments to run, bottleneck regimes to explore
-3. **Experiment Specification Generation** — Create JSON experiment definitions and parameter sweeps
-4. **Tool & Skill Management** — Expose NetReplica/NetGent functions as OpenClaw tools; declare skills for multi-step workflows
-5. **Execution Orchestration** — Dispatch experiments to Experiment API, track progress, handle failures
-6. **Query & Refinement** — Interpret follow-up queries and refine experimental design iteratively
+2. **Interactive Clarification** — Surface defaults for unspecified parameters and let the user confirm or override. For example: "Your intent doesn't specify AQM policy — defaulting to fq_codel. You haven't specified cross-traffic — I have 20 CTP clusters available. Want all, a subset, or a specific cluster?" The system should never silently assume underspecified parameters.
+3. **Multi-Step Reasoning** — Use Claude to reason about which experiments to run, bottleneck regimes to explore, and how to compose iterations — including whether applications should run in isolation or concurrently within the same iteration
+4. **Experiment Specification Generation** — Create JSON experiment definitions and parameter sweeps. An experiment is a research campaign; each generated spec is one iteration (see Experiment API terminology).
+5. **CTP-Aware Intent Specification** — Support dynamic attribute specification in intents. A user can say "use cross-traffic from high-burstiness clusters" or "sample 5 CTPs from Cluster A." The Orchestration Service queries the CTP Service's cluster taxonomy and generates iterations with appropriate CTP references.
+6. **Tool & Skill Management** — Expose NetReplica/NetGent functions as OpenClaw tools; declare skills for multi-step workflows
+7. **Execution Orchestration** — Dispatch iterations to Experiment API, track progress, handle failures
+8. **Query & Refinement** — Interpret follow-up queries and refine experimental design iteratively
 
 ### Glia Paper Architecture Mapping
 

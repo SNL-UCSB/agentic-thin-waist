@@ -2,6 +2,25 @@
 
 This document provides a quick reference for the six microservices comprising the Agentic Thin Waist platform, organized by the three logical planes: Intent plane, Representation plane, and Execution plane. Services operate in parallel over a 4-week timeline: weeks 1-2 with mocked interfaces, weeks 3-4 for integration.
 
+## MVP Goal
+
+**Intent → Data in 4 weeks.** A researcher expresses a data generation intent in natural language. The system translates it into experiment specifications, configures infrastructure, executes the experiment, and stores the resulting data. The researcher specifies the intent and gets the data — without dealing with any of the mechanics in between. Intelligence, analysis, and the closed-loop feedback cycle (generate → analyze → refine intent → regenerate) are post-MVP extensions.
+
+## Terminology: Experiments and Iterations
+
+An **experiment** is a research campaign encompassing one or more **iterations**. Each iteration is an atomic run: one network configuration (NetReplica) paired with one or more concurrent application configurations (NetGent). A single iteration can run multiple applications simultaneously on the same bottleneck — for example, YouTube and Zoom competing for a shared 10 Mbps link. The Experiment API operates at the iteration level. The Orchestration Service operates at the experiment level — synthesizing iterations from a research intent.
+
+**Composition within and across iterations:**
+
+| Pattern | Scope | Description | Example |
+|---------|-------|-------------|---------|
+| **Single-app** | Within iteration | One network condition, one application | YouTube alone at 10 Mbps / 50ms |
+| **Multi-app concurrent** | Within iteration | One network condition, multiple applications running simultaneously | YouTube + Zoom sharing 10 Mbps / 50ms |
+| **Parameter sweep** | Across iterations | One app config across multiple network conditions | YouTube at 10 / 25 / 50 Mbps (3 iterations) |
+| **Full Cartesian** | Across iterations | Multiple app combinations × multiple network conditions | {YouTube-only, Zoom-only, YouTube+Zoom} × {10, 25, 50 Mbps} = 9 iterations |
+
+The multi-app concurrent pattern is key: running applications simultaneously within one iteration captures cross-application interference effects (bandwidth competition, queue sharing) that separate iterations cannot.
+
 ## Architecture Overview: Three Logical Planes
 
 Progressive disaggregation of the Agentic Thin Waist spans three dimensions:
@@ -66,7 +85,7 @@ This separation means the Experiment API is responsible for specifying both (a) 
 - `GET /experiments/{experiment_id}/results` — Fetch aggregated results
 
 **Core Contracts**:
-- Input: Experiment with capacity_mbps, latency_ms, loss_rate, application, duration
+- Input: Experiment with capacity_mbps, latency_ms, loss_rate, applications (one or more concurrent), duration
 - Output: ExperimentResult with bottleneck_state, qoe_metrics, pcap_paths, contextual_tree
 
 **Dependencies**: Experiment API depends on all downstream services.
@@ -137,6 +156,7 @@ This separation means the Experiment API is responsible for specifying both (a) 
 - Implement CTP operations: extract(), select(), transform(), merge()
 - Export replay-ready PCAP data for Substrate Worker
 - Support CTP composition and algebra
+- Provide cluster-based CTP selection: CTPs are grouped into clusters with semantically meaningful attributes (intensity, burstiness, temporal correlation). The Orchestration Service can query by cluster attributes (e.g., "high-burstiness clusters") or by cluster ID. Cluster taxonomy is derived from preprocessing of production traces.
 - Verify network state matches configured CTP
 
 **Key Endpoints**:
