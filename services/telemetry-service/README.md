@@ -498,6 +498,8 @@ CREATE TABLE artifacts (
 
 ## Testing Criteria
 
+> **Unit tests for this service live in `services/telemetry-service/tests/`.** Run them with `pytest services/telemetry-service/tests/ -v`.
+
 ### Unit Tests
 - Result creation and validation with all four contextual layers
 - ContextualTreeNode tagging and extraction

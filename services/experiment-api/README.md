@@ -803,6 +803,8 @@ The Experiment API must enforce four core requirements:
 
 ## Testing Strategy
 
+> **Unit tests for this service live in `services/experiment-api/tests/`.** Run them with `pytest services/experiment-api/tests/ -v`.
+
 ### Unit Tests
 - Experiment creation with valid/invalid bottleneck regime (static + dynamic)
 - State machine transitions (valid and invalid)

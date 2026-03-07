@@ -66,39 +66,34 @@ Full workflow testing in realistic conditions:
 
 ## Test Structure
 
+> **Unit tests live inside each service's own `tests/` folder.** The top-level `tests/` directory is reserved for cross-service integration tests, end-to-end tests, and shared fixtures.
+
+### Per-Service Unit Tests
+
+```
+services/
+├── experiment-api/tests/               # D1: Experiment API unit tests
+├── ctp-service/tests/                  # D1: CTP Service unit tests
+├── substrate-worker/tests/             # D1: Substrate Worker unit tests
+├── netgent-service/tests/              # D2: NetGent Service unit tests
+├── telemetry-service/tests/            # D3: Telemetry Service unit tests
+└── orchestration/tests/                # D5: Orchestration Service unit tests
+
+shared/tests/                           # Shared models and clients unit tests
+```
+
+Each service's `tests/` directory contains:
+- `__init__.py` — Package marker
+- `conftest.py` — Service-specific fixtures (to be created)
+- `test_*.py` — Unit test modules (to be created)
+
+### Cross-Service Tests (this directory)
+
 ```
 tests/
 ├── README.md                           # This file
 ├── __init__.py
-├── conftest.py                         # pytest fixtures and global config
-│
-├── schema/                             # Level 1: Schema validation
-│   ├── test_experiment_schema.py       # Experiment dataclass validation
-│   ├── test_bottleneck_state_schema.py # BottleneckState validation
-│   ├── test_result_schema.py           # ExperimentResult validation
-│   └── test_contextual_tree_schema.py  # ContextualTreeNode validation
-│
-├── unit/                               # Level 2: Unit tests
-│   ├── d1/                             # D1: Foundation (Network Virtualization)
-│   │   ├── test_experiment_api.py      # Experiment API orchestration
-│   │   ├── test_ctp_service.py         # CTP Service (bottleneck regime)
-│   │   ├── test_substrate_worker.py    # Substrate Worker execution
-│   │   └── test_d1_four_requirements.py # Controllability, composability tests
-│   │
-│   ├── d2/                             # D2: Application Layer
-│   │   ├── test_netgent_service.py     # Browser automation, NFA workflows
-│   │   └── test_d2_workflow_tests.py
-│   │
-│   ├── d3/                             # D3: Data Layer
-│   │   ├── test_telemetry_service.py     # Results and artifact storage
-│   │   └── test_d3_query_tests.py
-│   │
-│   ├── d5/                             # D5: Intelligence
-│   │   ├── test_orchestration_service.py # Claude + OpenClaw integration
-│   │   └── test_d5_orchestration_tests.py
-│   │
-│   └── shared/
-│       └── test_shared_models.py       # Dataclass utilities
+├── conftest.py                         # (To be created) Global pytest fixtures
 │
 ├── integration/                        # Level 3: Service integration
 │   ├── test_experiment_lifecycle.py    # Full experiment workflow
@@ -128,54 +123,54 @@ tests/
 ### Quick Start
 
 ```bash
-# Run all tests
+# Run all tests (unit + integration + e2e)
 make test
 
 # Or with pytest directly
-pytest tests/ -v
+pytest tests/ services/*/tests/ shared/tests/ -v
 ```
 
 ### By Level
 
 ```bash
-# Level 1: Schema validation only (very fast)
-pytest tests/schema/ -v
+# Unit tests only (fast) — from each service's tests/ folder
+pytest services/*/tests/ shared/tests/ -v
 
-# Level 1 + 2: Unit tests (fast)
-pytest tests/schema/ tests/unit/ -v
-
-# All levels except E2E (medium speed)
-pytest tests/schema/ tests/unit/ tests/integration/ -v
+# Integration tests only (medium speed, requires Docker Compose)
+pytest tests/integration/ -v
 
 # All tests including E2E (full validation)
-pytest tests/ -v
+pytest services/*/tests/ shared/tests/ tests/ -v
 ```
 
 ### By Service (D1, D2, D3, D5)
 
 ```bash
-# D1 Foundation tests
-pytest tests/unit/d1/ tests/integration/test_bottleneck_verification.py -v
+# D1 Foundation unit tests
+pytest services/experiment-api/tests/ services/ctp-service/tests/ services/substrate-worker/tests/ -v
 
-# D2 Application tests
-pytest tests/unit/d2/ tests/integration/test_workflow_execution.py -v
+# D2 Application unit tests
+pytest services/netgent-service/tests/ -v
 
-# D3 Data Layer tests
-pytest tests/unit/d3/ tests/integration/test_result_storage.py -v
+# D3 Data Layer unit tests
+pytest services/telemetry-service/tests/ -v
 
-# D5 Intelligence tests
-pytest tests/unit/d5/ tests/integration/test_orchestration_e2e.py -v
+# D5 Intelligence unit tests
+pytest services/orchestration/tests/ -v
+
+# Shared library unit tests
+pytest shared/tests/ -v
 ```
 
 ### With Coverage
 
 ```bash
 # Generate coverage report
-pytest tests/ --cov=app --cov-report=html
+pytest services/*/tests/ shared/tests/ tests/ --cov=app --cov=shared --cov-report=html
 open htmlcov/index.html
 
 # Coverage by service
-pytest tests/unit/d1/ --cov=app.d1 --cov-report=term-missing
+pytest services/experiment-api/tests/ --cov=services.experiment_api.app --cov-report=term-missing
 ```
 
 ### Integration Tests (Requires Docker Compose)
@@ -448,7 +443,7 @@ def test_replicability_across_substrates():
 
 **Core tests**:
 ```bash
-pytest tests/unit/d1/ tests/integration/test_bottleneck_verification.py -v
+pytest services/experiment-api/tests/ services/ctp-service/tests/ services/substrate-worker/tests/ -v
 ```
 
 **What to test**:
@@ -466,7 +461,7 @@ pytest tests/unit/d1/ tests/integration/test_bottleneck_verification.py -v
 
 **Core tests**:
 ```bash
-pytest tests/unit/d2/ tests/integration/test_workflow_execution.py -v
+pytest services/netgent-service/tests/ -v
 ```
 
 **What to test**:
@@ -483,7 +478,7 @@ pytest tests/unit/d2/ tests/integration/test_workflow_execution.py -v
 
 **Core tests**:
 ```bash
-pytest tests/unit/d3/ tests/integration/test_result_storage.py -v
+pytest services/telemetry-service/tests/ -v
 ```
 
 **What to test**:
@@ -500,7 +495,7 @@ pytest tests/unit/d3/ tests/integration/test_result_storage.py -v
 
 **Core tests**:
 ```bash
-pytest tests/unit/d5/ tests/integration/test_orchestration_e2e.py -v
+pytest services/orchestration/tests/ -v
 ```
 
 **What to test**:

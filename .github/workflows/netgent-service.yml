@@ -1,0 +1,33 @@
+name: Netgent Service - Build & Test
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'services/netgent-service/**'
+      - 'shared/**'
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/netgent-service
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Copy shared module into build context
+        run: cp -r ../../shared ./shared
+
+      - name: Build Docker image
+        run: docker build -t netgent-service .
+
+      - name: Run tests
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}/services/netgent-service/tests:/app/tests \
+            netgent-service \
+            python -m pytest tests/ -v --tb=short
