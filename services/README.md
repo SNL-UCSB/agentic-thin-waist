@@ -51,6 +51,12 @@ The three logical planes are:
 
 **Timeline**: 4 weeks parallel. Weeks 1-2: independent development against mocked interfaces. Weeks 3-4: integration.
 
+### Design Principle: Dumb Services, Smart Controller
+
+Each downstream service (CTP, Substrate Worker, NetGent, Telemetry) is **narrow and stateless with respect to coordination**. A service receives one configuration at a time, executes it, and returns a result. It does not track which iteration it is on, how many remain, or what other services are doing. All coordination, sequencing, progress tracking, retry logic, and cross-service awareness lives in the **Experiment API (controller)**.
+
+For an experiment with 100 iterations, the controller dispatches iteration configs one at a time (or in controlled batches). Each service sees only its current task. This keeps services simple, testable, and independently deployable.
+
 ### Design Principle: No Direct Coupling Between NetGent and Telemetry
 
 NetGent (application workflows) and the Telemetry Service (result storage) do **not** communicate directly. The upper layer (Experiment API or Orchestration) provides independent specifications to each:
@@ -304,13 +310,14 @@ class TelemetrySnapshot:
 
 **Location**: `./netgent-service/`
 
-**Purpose**: Application-level execution plane. Uses NFA (nondeterministic finite automaton) to specify and execute browser automation workflows, generating application-specific traffic and measuring QoE.
+**Purpose**: Application-level execution plane. Executes application workflows — both browser-based (YouTube, Netflix, Zoom via NFA/Selenium) and host-level processes (ping, speed tests, shell commands) — generating application-specific traffic and measuring QoE.
 
 **Responsibilities**:
-- Compile NetGent workflows from NFA specification
+- Compile NetGent workflows from NFA specification (browser-based applications)
 - Execute browser automation (YouTube, Netflix, Zoom, etc.)
+- Execute host-level processes (ping, NDT speed tests, iperf3, shell commands)
 - Collect QoE metrics: video startup time, rebuffer events, bitrate
-- Coordinate network conditions with Substrate Worker
+- Maintain an **active application registry**: the authoritative list of supported applications
 - Store workflow logs and artifacts
 
 **Key Endpoints**:
@@ -357,18 +364,36 @@ class QoEMetrics:
 ```
 Orchestration Service (natural language intent)
     ↓
-Experiment API (experiment specification + sequencing)
-    ├→ CTP Service (validate bottleneck regime, export replay-ready PCAP)
-    ├→ Substrate Worker (configure bottleneck via tc)
-    ├→ Substrate Worker (replay CTP traffic via tcpreplay, start capture)
-    ├→ NetGent Service (execute NFA workflow, collect QoE)
-    ├→ Substrate Worker (stop capture, measure dynamic state)
-    ├→ Telemetry Service (persist result + contextual tree)
+Experiment API / Controller (experiment specification + sequencing)
+    │
+    ├→ [Pre-flight checks]
+    │   ├→ CTP Service: Is the requested CTP replay-ready? (cold start check)
+    │   │   └→ If not ready: instruct CTP Service to prepare, wait for confirmation
+    │   ├→ NetGent Service: Is the requested application supported? (GET /workflows/available)
+    │   │   └→ If not supported: reject experiment (application onboarding is out-of-band)
+    │   └→ Substrate Worker: Is the worker available?
+    │
+    ├→ [Per-iteration dispatch — one at a time]
+    │   ├→ CTP Service (validate bottleneck regime, export replay-ready PCAP)
+    │   ├→ Substrate Worker (configure bottleneck via tc)
+    │   ├→ Substrate Worker (replay CTP traffic via tcpreplay, start capture)
+    │   ├→ NetGent Service (execute NFA workflow, collect QoE)
+    │   ├→ Substrate Worker (stop capture, measure dynamic state)
+    │   └→ Telemetry Service (persist result + contextual tree)
+    │
     ↓
 Experiment API (aggregate and return result)
 ```
 
-The Experiment API orchestrates the sequencing implicitly: it manages phase transitions (provisioning → replay_warmup → executing → collecting → complete) and infers synchronization requirements from the experiment specification's infrastructure type.
+The Experiment API orchestrates the sequencing implicitly: it manages phase transitions (provisioning → replay_warmup → executing → collecting → complete) and infers synchronization requirements from the experiment specification's infrastructure type. The controller dispatches one iteration at a time — services never receive batch instructions or need awareness of other iterations.
+
+**Pre-flight checks** are the controller's responsibility. Before dispatching any iteration, the controller verifies:
+
+1. **CTP readiness (cold start)**: The controller queries the CTP Service to confirm the requested CTP is replay-ready. If the CTP requires preparation (extracting from a larger dataset, transforming, etc.), the controller instructs the CTP Service to prepare it and waits for confirmation before proceeding. This prevents iteration failures due to missing replay data.
+
+2. **Application support (NetGent readiness)**: The controller queries NetGent's active application registry (`GET /workflows/available`) to confirm the requested application is supported. If the application is not in the registry, the experiment cannot proceed — adding new application support is a separate, out-of-band process (not part of the thin waist pipeline).
+
+3. **Substrate availability**: The controller confirms at least one Substrate Worker is available and healthy.
 
 Each service contributes to the final ExperimentResult:
 - **CTP Service**: Validated bottleneck regime (static attributes), replay-ready PCAP export
@@ -388,6 +413,12 @@ The platform is designed to satisfy four key requirements:
 4. **Replicability**: Contextual trees capture all context; pcap traces enable offline replay
 
 ---
+
+## MVP Deployment: Single-Node Architecture
+
+The MVP targets a **single-node deployment**: the control plane (Experiment API, Orchestration) and data plane (Substrate Worker, NetGent) all run on the same machine via Docker Compose. This means all services share a host clock, network namespace (with appropriate bridging), and filesystem. Multi-node deployment (overlay networks, GRE tunnels, distributed testbed) is a post-MVP extension.
+
+The control plane always runs locally (researcher's laptop or SNL server). In future multi-node configurations, only the data plane scales out to cloud/remote infrastructure.
 
 ## Development Workflow
 
@@ -409,4 +440,4 @@ The platform is designed to satisfy four key requirements:
 
 ---
 
-**Last Updated**: 2026-03-05 | **Status**: Design Phase | **Next**: Week 1-2 Parallel Implementation
+**Last Updated**: 2026-03-07 | **Status**: Design Phase | **Next**: Week 1-2 Parallel Implementation

@@ -9,16 +9,19 @@
 
 ## Purpose
 
-NetGent is the application workflow execution engine. It compiles natural-language workflow specifications into executable NFA (nondeterministic finite automaton) state machines, enabling high-fidelity simulation of user interactions across web-based applications (YouTube, Netflix, Zoom, Twitch, NDT speedtest, Puffer, and others). The service measures Quality of Experience (QoE) metrics during workflow execution under shaped network conditions.
+NetGent is the application workflow execution engine. It handles **all host-level application processes** — both browser-based interactions (YouTube, Netflix, Zoom, Twitch via NFA/Selenium) and non-browser processes (ping, NDT speed tests, iperf3, shell commands). The service compiles natural-language workflow specifications into executable NFA (nondeterministic finite automaton) state machines for browser automation, and provides direct execution wrappers for shell-based tools. NetGent measures Quality of Experience (QoE) metrics during workflow execution under shaped network conditions.
+
+NetGent also maintains the **active application registry**: the authoritative list of applications the system currently supports. The controller (Experiment API) queries this registry before dispatching any iteration. Adding support for a new application is an out-of-band process — it requires implementing the NFA workflow or shell wrapper and registering it in the registry. This is explicitly scoped out of the real-time thin waist pipeline.
 
 ## Input
 
 NetGent accepts:
 - Natural language workflow specifications: "Watch YouTube for 60 seconds, measuring startup time and rebuffer events"
-- Application type: youtube, netflix, zoom, twitch, discord, google-meet, ndt-speedtest, puffer
+- Application type: youtube, netflix, zoom, twitch, discord, google-meet, ndt-speedtest, puffer, ping, iperf3
 - Timeout settings: maximum execution duration
 - LLM model specification (optional): inject custom LLM for NFA compilation
 - Capture preferences: HAR file, console logs, screenshots
+- Shell command specifications (for non-browser workflows): command, arguments, duration, output parsing rules
 
 ## Output
 
@@ -37,7 +40,14 @@ NetGent produces:
 | `/workflows/compile` | POST | Compile NL spec to NFA state machine |
 | `/workflows/validate` | POST | Validate spec without execution |
 | `/workflows/{id}` | GET | Get workflow result and QoE metrics |
+| `/workflows/available` | GET | **Active application registry** — list all supported applications and their capabilities |
 | `/health` | GET | Health check: browser driver, LLM service |
+
+### Active Application Registry (`GET /workflows/available`)
+
+This endpoint is the **source of truth** for what applications the system supports. The controller (Experiment API) queries this before dispatching any iteration. Response includes application name, execution type (browser or shell), supported QoE metrics, and any prerequisites (credentials, URLs, etc.).
+
+Adding a new application requires: (1) implementing the NFA workflow or shell wrapper, (2) registering it in the application registry, and (3) deploying the updated service. This is an out-of-band development process, not something that happens during experiment execution.
 
 ## YouTube MVP Example
 
@@ -202,16 +212,27 @@ Health check endpoint.
 
 ## Supported Applications
 
+### Browser-Based (NFA + Selenium/CDP)
+
 | Application | NFA Support | QoE Metrics | Notes |
 |-------------|-------------|------------|-------|
 | YouTube | Full | Startup, bitrate, rebuffers | Login-free |
 | Netflix | Full | Startup, resolution, rebuffers | Requires credentials |
 | Zoom | Full | Video quality, audio quality, packet loss | Requires URL/token |
 | Twitch | Full | Startup, bitrate, chat interaction | Live & VOD support |
-| NDT speedtest | Full | Upload, download, latency, loss | No UI interaction |
 | Puffer | Full | Bitrate, ABR decisions, QoE | Research platform |
 | Google Meet | Full | Video quality, connection state | Real-time metrics |
 | Discord | Partial | Voice quality, connection state | Limited video QoE |
+
+### Host-Level Processes (Shell Execution)
+
+| Application | Execution Type | Metrics | Notes |
+|-------------|---------------|---------|-------|
+| NDT speedtest | Shell (ndt-client) | Upload, download, latency, loss | No browser needed |
+| ping | Shell | RTT, packet loss, jitter | Standard ICMP ping |
+| iperf3 | Shell | Throughput, jitter, packet loss | Client/server mode |
+
+All host-level processes that generate network traffic or measure network properties belong in NetGent's scope. If a workflow involves running something on the host machine under shaped network conditions, NetGent owns it.
 
 ---
 
@@ -461,6 +482,6 @@ BROWSER_POOL_SIZE=5
 
 ---
 
-**Last Updated**: 2026-03-04
+**Last Updated**: 2026-03-07
 **Status**: Specification Ready
 **Next Phase**: Integration with BQT+ orchestrator, OpenClaw LLM routing
