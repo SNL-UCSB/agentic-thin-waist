@@ -620,6 +620,8 @@ Alert on: API errors, quota issues, degraded performance
 
 ## Testing Criteria
 
+> **Unit tests for this service live in `services/orchestration/tests/`.** Run them with `pytest services/orchestration/tests/ -v`.
+
 ### Unit Tests
 - Claude intent parsing for various phrasings and contexts
 - Parameter sweep generation (Cartesian product logic)

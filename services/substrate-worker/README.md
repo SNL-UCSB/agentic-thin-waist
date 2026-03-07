@@ -285,6 +285,8 @@ Never hardcode passwords in configuration files.
 
 ## Testing and Validation
 
+> **Unit tests for this service live in `services/substrate-worker/tests/`.** Run them with `pytest services/substrate-worker/tests/ -v`.
+
 **Unit Tests**: BottleneckState/SubstrateStatus dataclass parsing, parameter range checks, interface validation, CTP path resolution.
 
 **Integration Tests**: tc command execution (±5% capacity/latency tolerance), tshark pcap generation, tcpreplay injection at specified rate, BottleneckState.verified state accuracy.

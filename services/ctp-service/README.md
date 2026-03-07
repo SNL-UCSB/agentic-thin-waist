@@ -439,6 +439,8 @@ class CrossTrafficProfile:
 
 ## Testing Criteria
 
+> **Unit tests for this service live in `services/ctp-service/tests/`.** Run them with `pytest services/ctp-service/tests/ -v`.
+
 ### Unit Tests
 - **Extraction**: Verify PCAP parsing, packet aggregation into CTPs, statistical computation
 - **Selection**: Query by all descriptor types (intensity, burstiness, temporal_correlation, structure)

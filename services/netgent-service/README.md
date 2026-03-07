@@ -414,6 +414,8 @@ HAR file analysis extracts:
 
 ## Testing Strategy
 
+> **Unit tests for this service live in `services/netgent-service/tests/`.** Run them with `pytest services/netgent-service/tests/ -v`.
+
 ### Unit Tests
 - NFA compilation from NL specs
 - State transition validation

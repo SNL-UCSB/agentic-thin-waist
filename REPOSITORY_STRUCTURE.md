@@ -28,36 +28,42 @@ This document lists all files created in the Agentic Thin Waist project reposito
 - `services/experiment-api/Dockerfile` — Service container definition
 - `services/experiment-api/requirements.txt` — Python dependencies
 - `services/experiment-api/app/__init__.py` — Package initialization
+- `services/experiment-api/tests/__init__.py` — Unit tests for this service
 
 ### Service: ctp-service (D1 - Representation Plane)
 - `services/ctp-service/README.md` — CTP operations and representation plane
 - `services/ctp-service/Dockerfile`
 - `services/ctp-service/requirements.txt`
 - `services/ctp-service/app/__init__.py`
+- `services/ctp-service/tests/__init__.py` — Unit tests for this service
 
 ### Service: substrate-worker (D1 - Execution Plane)
 - `services/substrate-worker/README.md` — Network execution specifications
 - `services/substrate-worker/Dockerfile`
 - `services/substrate-worker/requirements.txt`
 - `services/substrate-worker/app/__init__.py`
+- `services/substrate-worker/tests/__init__.py` — Unit tests for this service
 
 ### Service: netgent-service (D2 - Application Execution)
 - `services/netgent-service/README.md` — Browser automation and NFA workflows
 - `services/netgent-service/Dockerfile`
 - `services/netgent-service/requirements.txt`
 - `services/netgent-service/app/__init__.py`
+- `services/netgent-service/tests/__init__.py` — Unit tests for this service
 
 ### Service: telemetry-service (D3 - Data Persistence)
 - `services/telemetry-service/README.md` — Data storage and query specifications
 - `services/telemetry-service/Dockerfile`
 - `services/telemetry-service/requirements.txt`
 - `services/telemetry-service/app/__init__.py`
+- `services/telemetry-service/tests/__init__.py` — Unit tests for this service
 
 ### Service: orchestration (D5 - Agentic Orchestration)
 - `services/orchestration/README.md` — Claude + OpenClaw integration
 - `services/orchestration/Dockerfile`
 - `services/orchestration/requirements.txt`
 - `services/orchestration/app/__init__.py`
+- `services/orchestration/tests/__init__.py` — Unit tests for this service
 
 ## Directory: /shared/
 
@@ -73,6 +79,9 @@ This document lists all files created in the Agentic Thin Waist project reposito
 - `shared/clients/README.md` — HTTP client utilities for all services
 - `shared/clients/__init__.py`
 
+### Shared Tests
+- `shared/tests/__init__.py` — Unit tests for shared models and clients
+
 ## Directory: /docs/
 
 ### Documentation
@@ -85,12 +94,19 @@ This document lists all files created in the Agentic Thin Waist project reposito
 ## Directory: /tests/
 
 ### Testing Framework
-- `tests/README.md` — Testing guide and best practices
+- `tests/README.md` — Testing guide, best practices, and integration/e2e test home
 - `tests/__init__.py` — Package initialization
-- `tests/conftest.py` — (To be created) Pytest fixtures and configuration
-- `tests/unit/` — (To be created) Unit tests for individual services
-- `tests/integration/` — (To be created) Integration tests
-- `tests/fixtures/` — (To be created) Test data and fixtures
+
+> **Note**: Unit tests live inside each service's own `tests/` folder (e.g., `services/experiment-api/tests/`). The top-level `tests/` directory is reserved for cross-service integration tests, end-to-end tests, and shared fixtures.
+
+### Per-Service Unit Tests
+- `services/experiment-api/tests/` — Experiment API unit tests
+- `services/ctp-service/tests/` — CTP Service unit tests
+- `services/substrate-worker/tests/` — Substrate Worker unit tests
+- `services/netgent-service/tests/` — NetGent Service unit tests
+- `services/telemetry-service/tests/` — Telemetry Service unit tests
+- `services/orchestration/tests/` — Orchestration Service unit tests
+- `shared/tests/` — Shared models and clients unit tests
 
 ## File Summary
 

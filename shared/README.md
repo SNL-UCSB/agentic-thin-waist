@@ -193,13 +193,11 @@ from shared.constants import (
 
 ## Testing Shared Code
 
+> **Unit tests for shared code live in `shared/tests/`.**
+
 ```bash
 # Run shared code tests
-pytest shared/tests/
-
-# Or from the root:
-pytest tests/test_shared_models.py
-pytest tests/test_shared_clients.py
+pytest shared/tests/ -v
 ```
 
 ## Migration Strategy
