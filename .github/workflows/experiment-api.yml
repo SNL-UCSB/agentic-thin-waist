@@ -1,6 +1,7 @@
 name: Experiment API - Build & Test
 
 on:
+  workflow_dispatch:
   pull_request:
     branches: [main]
     paths:
