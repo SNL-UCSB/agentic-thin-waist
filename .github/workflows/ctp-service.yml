@@ -1,0 +1,32 @@
+name: CTP Service - Build & Test
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'services/ctp-service/**'
+      - 'shared/**'
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/ctp-service
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Copy shared module into build context
+        run: cp -r ../../shared ./shared
+
+      - name: Build Docker image
+        run: docker build -t ctp-service .
+
+      - name: Run tests
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}/services/ctp-service/tests:/app/tests \
+            ctp-service \
+            python -m pytest tests/ -v --tb=short

@@ -1,0 +1,32 @@
+name: Orchestration - Build & Test
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'services/orchestration/**'
+      - 'shared/**'
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/orchestration
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Copy shared module into build context
+        run: cp -r ../../shared ./shared
+
+      - name: Build Docker image
+        run: docker build -t orchestration .
+
+      - name: Run tests
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}/services/orchestration/tests:/app/tests \
+            orchestration \
+            python -m pytest tests/ -v --tb=short

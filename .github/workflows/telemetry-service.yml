@@ -1,0 +1,32 @@
+name: Telemetry Service - Build & Test
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'services/telemetry-service/**'
+      - 'shared/**'
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/telemetry-service
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Copy shared module into build context
+        run: cp -r ../../shared ./shared
+
+      - name: Build Docker image
+        run: docker build -t telemetry-service .
+
+      - name: Run tests
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}/services/telemetry-service/tests:/app/tests \
+            telemetry-service \
+            python -m pytest tests/ -v --tb=short

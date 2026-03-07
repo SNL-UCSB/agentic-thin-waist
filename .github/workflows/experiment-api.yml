@@ -1,0 +1,32 @@
+name: Experiment API - Build & Test
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'services/experiment-api/**'
+      - 'shared/**'
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/experiment-api
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Copy shared module into build context
+        run: cp -r ../../shared ./shared
+
+      - name: Build Docker image
+        run: docker build -t experiment-api .
+
+      - name: Run tests
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}/services/experiment-api/tests:/app/tests \
+            experiment-api \
+            python -m pytest tests/ -v --tb=short
