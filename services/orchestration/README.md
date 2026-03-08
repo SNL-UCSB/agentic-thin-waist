@@ -465,6 +465,29 @@ class ReasoningStep:
     reasoning: str
 ```
 
+## Parameter Knowledge Files
+
+A key architectural element of the Orchestration Service is the **parameter knowledge files** — a set of domain knowledge documents (markdown) that ground Claude's reasoning about experiment parameters. These files define:
+
+- **Acceptable ranges** for every parameter: capacity (0.1–10000 Mbps), latency (0–10000 ms), buffer sizes, etc.
+- **Default values** and their rationale: why fq_codel is the default AQM, why 60 seconds is the default duration
+- **Application-specific defaults**: YouTube workflows default to 60s, Zoom defaults to 120s, speed tests to 30s
+- **CTP cluster taxonomy**: descriptions of available CTP clusters, their characteristics (burstiness, intensity, temporal correlation), and when to use each
+- **Constraint relationships**: e.g., "if capacity < 5 Mbps and application = zoom, warn that video quality will degrade"
+- **Common experimental designs**: standard parameter sweeps, baseline configurations, comparison patterns
+
+These files live in `knowledge/` within the orchestration service directory and are loaded into Claude's context (via system prompt or tool context) when processing intents. They prevent Claude from generating physically impossible or experimentally meaningless configurations, and they ensure that underspecified intents get reasonable defaults.
+
+```
+services/orchestration/
+├── knowledge/
+│   ├── parameter_ranges.md      # Valid ranges for all experiment parameters
+│   ├── application_defaults.md  # Per-application default configurations
+│   ├── ctp_clusters.md          # CTP cluster taxonomy and descriptions
+│   ├── experimental_designs.md  # Common experiment patterns and templates
+│   └── constraints.md           # Cross-parameter constraints and warnings
+```
+
 ## Configuration Files & Deliverables
 
 ### TOOLS.md — Available Tools for Claude
@@ -855,7 +878,7 @@ The prompt emphasizes reasoning about **why** experiments matter (bottleneck reg
 
 ---
 
-**Last Updated**: 2026-03-04
+**Last Updated**: 2026-03-07
 **Status**: Specification Ready (High Priority)
 **Next Milestone**: Implementation (Weeks 3–4, after Haarika's NSDI deadline)
 **Contact**: Haarika (Lead), Prof. Arpit Gupta (PI)

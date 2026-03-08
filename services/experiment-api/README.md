@@ -49,16 +49,33 @@ For the YouTube QoE experiment comparing 10/25/50 Mbps with 50ms latency under C
 - Client calls POST /experiments/{id}/execute for each
 - Success criteria: all 3 experiment IDs created, validated for CTP availability, dispatched to Substrate Worker
 
+## Controller Pattern: Dumb Services, Smart Controller
+
+The Experiment API is the **controller** — the single point of coordination for all downstream services. The key design principle is **dumb services, smart controller**:
+
+- Each downstream service (CTP, Substrate Worker, NetGent, Telemetry) receives **one configuration at a time** and executes it. Services are narrow and stateless with respect to coordination — they do not track iteration counts, monitor other services, or manage sequencing.
+- The Experiment API owns **all coordination**: dispatching iteration configs one at a time, tracking progress across iterations, handling retries, enforcing ordering, and aggregating results.
+- For an experiment with 100 iterations, the controller dispatches them sequentially (or in controlled batches). Each service sees only its current task.
+
+### Pre-Flight Checks (Controller Responsibility)
+
+Before dispatching any iteration, the controller performs pre-flight checks:
+
+1. **CTP cold start check**: Query CTP Service to confirm the requested CTP is replay-ready. If the CTP requires preparation (extraction, transformation), the controller instructs CTP Service to prepare it and waits for confirmation. This prevents iteration failures due to missing replay data.
+2. **Application support check**: Query NetGent's active application registry (`GET /workflows/available`) to confirm the requested application is supported. If not in the registry, the experiment cannot proceed — adding new application support is out-of-band.
+3. **Substrate availability**: Confirm at least one Substrate Worker is available and healthy.
+
 ## Extended Responsibilities
 
 The Experiment API is responsible for:
 
 1. **Intent specification**: Accept experiment definitions with static bottleneck regime attributes and dynamic CTP parameters
-2. **Experiment orchestration**: Coordinate Intent Plane (Link, Bottleneck), Representation Plane (CrossTraffic with CTP operations), and Execution Plane (tc, tshark, tcpreplay)
-3. **Bottleneck regime management**: Manage the combination of static attributes and dynamic pressure that defines a bottleneck regime
-4. **Lifecycle management**: Create, validate, provision, execute, and archive experiments with state machine enforcement
-5. **Result aggregation**: Collect measurements and analysis from multiple services into unified ExperimentResult
-6. **Quality attributes**: Enforce controllability, composability, fidelity, and replicability throughout the experiment lifecycle
+2. **Experiment orchestration (controller)**: Coordinate Intent Plane (Link, Bottleneck), Representation Plane (CrossTraffic with CTP operations), and Execution Plane (tc, tshark, tcpreplay) — dispatching one iteration at a time
+3. **Pre-flight validation**: CTP readiness check, application support check, substrate availability check before any dispatch
+4. **Bottleneck regime management**: Manage the combination of static attributes and dynamic pressure that defines a bottleneck regime
+5. **Lifecycle management**: Create, validate, provision, execute, and archive experiments with state machine enforcement
+6. **Result aggregation**: Collect measurements and analysis from multiple services into unified ExperimentResult
+7. **Quality attributes**: Enforce controllability, composability, fidelity, and replicability throughout the experiment lifecycle
 
 ## Architecture: NetForge Three-Plane Model
 
@@ -988,6 +1005,6 @@ pytest tests/test_fidelity.py -v --tb=short
 ---
 
 **Deliverable**: D1 (Network Virtualization Substrate - Intent Plane)
-**Last Updated**: 2026-03-05
+**Last Updated**: 2026-03-07
 **Status**: Specification Ready (Implementation by Jaber, Week 1–3)
 **Quality Attributes**: Controllability, Composability, Fidelity, Replicability
