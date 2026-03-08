@@ -1,0 +1,24 @@
+name: Black Formatter Check
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  black:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Black
+        run: pip install black==23.12.0
+
+      - name: Run Black check
+        run: black --check --diff .
