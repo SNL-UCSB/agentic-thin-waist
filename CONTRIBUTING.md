@@ -188,13 +188,9 @@ When opening a pull request, use the following structure for the description:
 
 - ...
 
-## How to test
+## Checklist
 
-<!-- Steps a reviewer can follow to verify the change works. -->
-
-1. `cd services/<service-name>`
-2. `pytest tests/ -v`
-3. (any additional manual steps)
+- [ ] I implemented unit tests
 
 ## Notes
 
