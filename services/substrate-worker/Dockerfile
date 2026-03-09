@@ -1,21 +1,28 @@
-# Placeholder Dockerfile for service
-# Update this file with actual service implementation
+FROM ubuntu:22.04
 
-FROM python:3.10-slim
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y \
+    python3 python3-pip \
+    tshark iputils-ping iproute2 \
+    net-tools iperf3 \
+    curl wget iptables byobu nano \
+    speedtest-cli tcpreplay \
+    python3-flask python3-requests \
+    sudo \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Copy requirements
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip3 install -r requirements.txt
 
-# Copy application code
-COPY app/ app/
-COPY shared/ ../shared/
+COPY . .
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD python -c "import requests; requests.get('http://localhost:8000/health')"
 
-# Run application
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "4", "app.main:app"]
+EXPOSE 8002
+
+# Run topology setup once, then start the HTTP service
+# CMD ["bash", "-lc", "cd app && chmod +x setup.sh && ./setup.sh && python3 main.py"]
+
+CMD ["bash", "-lc", "cd app && chmod +x setup.sh && ./setup.sh && uvicorn main:app --host 0.0.0.0 --port 8002 --reload"]
