@@ -31,6 +31,7 @@ def shaping(download_mbps, upload_mbps, qdisc, r2q=100):
         f"tc qdisc add dev veth4 parent 1:10 {qdisc}"
     )
 
+
 def latency(latency_ms):
     if latency_ms == 0:
         run_cmd("tc qdisc del dev veth6 root 2>/dev/null || true")
@@ -93,8 +94,12 @@ def capture(
     upFileName = os.path.join(outDir, "up_" + outputFileName)
     downFileName = os.path.join(outDir, "down_" + outputFileName)
 
-    UpCommand = f"tshark -i {upstreamIface} -a duration:{duration} -w {upFileName} {flags}"
-    DownCommand = f"tshark -i {downstreamIface} -a duration:{duration} -w {downFileName} {flags}"
+    UpCommand = (
+        f"tshark -i {upstreamIface} -a duration:{duration} -w {upFileName} {flags}"
+    )
+    DownCommand = (
+        f"tshark -i {downstreamIface} -a duration:{duration} -w {downFileName} {flags}"
+    )
 
     if ip not in (None, "", "all"):
         UpCommand += f' -f "host {ip}"'

@@ -12,22 +12,29 @@ from datetime import datetime
 app = FastAPI()
 
 CURRENT_BOTTLENECK_STATE = None  # will hold a BottleneckState
-CURRENT_INTERFACES = None        # {"downstream_iface": ..., "upstream_iface": ...}
-ACTIVE_REPLAYS: dict = {}        # replay_id → session dict
+CURRENT_INTERFACES = None  # {"downstream_iface": ..., "upstream_iface": ...}
+ACTIVE_REPLAYS: dict = {}  # replay_id → session dict
 
 
 # =========================
 # Data models (classes)
 # =========================
 
+
 class ShapeRequest(BaseModel):
-    upstream_iface: str = Field(..., description="Upload/egress interface (e.g., veth4)")
-    downstream_iface: str = Field(..., description="Download/ingress interface (e.g., veth2)")
+    upstream_iface: str = Field(
+        ..., description="Upload/egress interface (e.g., veth4)"
+    )
+    downstream_iface: str = Field(
+        ..., description="Download/ingress interface (e.g., veth2)"
+    )
     download_mbps: float = Field(..., gt=0, description="Download capacity in Mbps")
     upload_mbps: float = Field(..., gt=0, description="Upload capacity in Mbps")
     latency_ms: float = Field(..., ge=0, description="One-way delay in ms")
     qdisc: str = Field(..., description="Queue discipline (e.g., fq_codel, pfifo)")
-    buffer_packets: int = Field(1000, ge=1, description="Queue depth / limit in packets")
+    buffer_packets: int = Field(
+        1000, ge=1, description="Queue depth / limit in packets"
+    )
 
 
 class BottleneckState(BaseModel):
@@ -50,8 +57,12 @@ class ShapeResponse(BaseModel):
 class CaptureRequest(BaseModel):
     duration: int = Field(..., gt=0, description="Capture duration in seconds")
     prefix: str = Field("capture", description="Filename prefix for pcap files")
-    upstream_iface: str = Field("veth4", description="Interface to capture upstream traffic")
-    downstream_iface: str = Field("veth2", description="Interface to capture downstream traffic")
+    upstream_iface: str = Field(
+        "veth4", description="Interface to capture upstream traffic"
+    )
+    downstream_iface: str = Field(
+        "veth2", description="Interface to capture downstream traffic"
+    )
 
 
 class CaptureResponse(BaseModel):
@@ -65,8 +76,12 @@ class ReplayRequest(BaseModel):
     interface: str = Field("veth4", description="Interface to replay traffic on")
     rate: str = Field("10M", description="Replay rate e.g. '10M', '5M', '50K'")
     loop: bool = Field(False, description="Loop replay indefinitely")
-    duration_seconds: Optional[int] = Field(None, description="Stop replay after N seconds (ignored if loop=False)")
-    ctp_service_url: str = Field("http://localhost:8001", description="Base URL of CTP Service")
+    duration_seconds: Optional[int] = Field(
+        None, description="Stop replay after N seconds (ignored if loop=False)"
+    )
+    ctp_service_url: str = Field(
+        "http://localhost:8001", description="Base URL of CTP Service"
+    )
 
 
 class ReplayResponse(BaseModel):
@@ -105,6 +120,7 @@ class HealthResponse(BaseModel):
 # =========================
 # Helper functions
 # =========================
+
 
 def run_cmd(cmd: str) -> None:
     subprocess.run(cmd, shell=True, check=True)
@@ -191,8 +207,11 @@ def _run_in_ns(ns: str, cmd: str, timeout: int = 30) -> subprocess.CompletedProc
 
 
 def _kill_iperf3_servers() -> None:
-    subprocess.run("ip netns exec ns2 pkill -f 'iperf3 -s' 2>/dev/null || true", shell=True)
+    subprocess.run(
+        "ip netns exec ns2 pkill -f 'iperf3 -s' 2>/dev/null || true", shell=True
+    )
     import time
+
     time.sleep(0.3)
 
 
@@ -226,7 +245,9 @@ def _verify_bottleneck_state() -> None:
             timeout=IPERF_DURATION + 10,
         )
         if up.returncode == 0:
-            upload_mbps = _json.loads(up.stdout)["end"]["sum_sent"]["bits_per_second"] / 1e6
+            upload_mbps = (
+                _json.loads(up.stdout)["end"]["sum_sent"]["bits_per_second"] / 1e6
+            )
             expected = CURRENT_BOTTLENECK_STATE.upload_mbps
             diff_pct = abs(upload_mbps - expected) / expected * 100
             log.append(
@@ -256,7 +277,9 @@ def _verify_bottleneck_state() -> None:
             timeout=IPERF_DURATION + 10,
         )
         if down.returncode == 0:
-            download_mbps = _json.loads(down.stdout)["end"]["sum_received"]["bits_per_second"] / 1e6
+            download_mbps = (
+                _json.loads(down.stdout)["end"]["sum_received"]["bits_per_second"] / 1e6
+            )
             expected = CURRENT_BOTTLENECK_STATE.download_mbps
             diff_pct = abs(download_mbps - expected) / expected * 100
             log.append(
@@ -278,8 +301,6 @@ def _verify_bottleneck_state() -> None:
 
     CURRENT_BOTTLENECK_STATE.verified = verified
     CURRENT_BOTTLENECK_STATE.verification_log = log
-
-
 
 
 def _cmd_available(cmd: str) -> bool:
@@ -323,6 +344,7 @@ def _get_interfaces() -> List[str]:
 # =========================
 # API endpoints
 # =========================
+
 
 @app.post("/shape", response_model=ShapeResponse)
 def shape(cfg: ShapeRequest) -> ShapeResponse:
@@ -397,7 +419,6 @@ def start_capture(cfg: CaptureRequest) -> CaptureResponse:
         duration=cfg.duration,
         files=[up_file, down_file],
     )
-
 
 
 @app.get("/state")
