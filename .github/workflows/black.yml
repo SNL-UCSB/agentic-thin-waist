@@ -13,14 +13,25 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get changed Python files
+        id: changed
+        run: |
+          FILES=$(git diff --name-only --diff-filter=ACM origin/${{ github.base_ref }}...HEAD -- '*.py' | tr '\n' ' ' | xargs)
+          echo "files=$FILES" >> "$GITHUB_OUTPUT"
 
       - name: Set up Python
+        if: steps.changed.outputs.files != ''
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
       - name: Install Black
+        if: steps.changed.outputs.files != ''
         run: pip install black==23.12.0
 
       - name: Run Black check
-        run: black --check --diff .
+        if: steps.changed.outputs.files != ''
+        run: echo "${{ steps.changed.outputs.files }}" | xargs black --check --diff
