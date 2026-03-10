@@ -3,6 +3,8 @@ name: Black Formatter Check
 on:
   pull_request:
     branches: [main]
+    paths:
+      - "**/*.py"
 
 jobs:
   black:
