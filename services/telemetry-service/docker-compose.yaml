@@ -87,7 +87,7 @@ services:
       S3_CONNECTION_RETRIES: ${S3_CONNECTION_RETRIES}
       S3_CONNECTION_TIMEOUT_SECONDS: ${S3_CONNECTION_TIMEOUT_SECONDS}
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8004/health"]
+      test: ["CMD", "python", "-c", "import urllib.request,sys; urllib.request.urlopen('http://localhost:8004/health')"]
       interval: 5s
       timeout: 5s
       retries: 10
