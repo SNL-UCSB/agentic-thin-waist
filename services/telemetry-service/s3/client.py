@@ -7,13 +7,18 @@ from botocore.client import Config as BotoConfig
 
 class S3Client:
     def __init__(self):
+        self.client = None
+
+    def init_app(self, app):
         self.bucket_name = Config.S3_BUCKET_NAME
+
         boto_config = BotoConfig(
             retries={
                 "max_attempts": Config.S3_CONNECTION_RETRIES,
             },
             connect_timeout=Config.S3_CONNECTION_TIMEOUT_SECONDS,
         )
+
         self.client = boto3.client(
             "s3",
             endpoint_url=Config.S3_ENDPOINT_URL,
