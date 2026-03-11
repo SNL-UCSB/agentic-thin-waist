@@ -53,6 +53,20 @@ def add_results():
     data = request.get_json()
     if not data:
         return jsonify({"error": "No data provided"}), 400
+    if not isinstance(data, dict):
+        return jsonify({"error": "Invalid JSON payload, expected an object"}), 400
+
+    # Basic validation for required fields
+    errors = {}
+    experiment_id = data.get("experiment_id")
+    if experiment_id is None:
+        errors["experiment_id"] = "experiment_id is required"
+    status = data.get("status")
+    if status is None:
+        errors["status"] = "status is required"
+
+    if errors:
+        return jsonify({"error": "Invalid request", "details": errors}), 400
 
     bottleneck = data.get("bottleneck_state", {})
     contextual_tree = data.get("contextual_tree", {})
@@ -60,10 +74,10 @@ def add_results():
 
     result = models.Result(
         result_id=str(uuid.uuid4()),
-        experiment_id=data.get("experiment_id"),
+        experiment_id=experiment_id,
         trial_number=data.get("trial_number", 1),
         application=c_app.get("application"),
-        status=data.get("status"),
+        status=status,
         configured_capacity=bottleneck.get("configured_capacity"),
         configured_latency=bottleneck.get("configured_latency"),
         measured_throughput=bottleneck.get("measured_throughput"),
