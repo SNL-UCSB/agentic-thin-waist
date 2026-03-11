@@ -42,6 +42,6 @@ class S3Client:
 
     def list_object_keys(self):
         resp = self.client.list_objects_v2(Bucket=self.bucket_name)
-        objects = resp["Contents", []]
+        objects = resp.get("Contents", [])
 
-        return [obj["key"] for obj in objects]
+        return [obj["Key"] for obj in objects]
