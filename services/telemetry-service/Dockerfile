@@ -3,9 +3,7 @@ FROM python:3.10-alpine
 WORKDIR /app
 
 # Install packages
-RUN apk add --no-cache make && \
-    pip install gunicorn
-
+RUN apk add --no-cache make
 # Copy requirements
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
