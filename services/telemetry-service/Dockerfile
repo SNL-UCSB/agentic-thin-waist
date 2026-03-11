@@ -1,21 +1,19 @@
-# Placeholder Dockerfile for service
-# Update this file with actual service implementation
-
-FROM python:3.10-slim
+FROM python:3.10-alpine
 
 WORKDIR /app
 
+# Install packages
+RUN apk add --no-cache make
 # Copy requirements
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
-COPY app/ app/
-COPY shared/ ../shared/
+COPY . .
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD python -c "import requests; requests.get('http://localhost:8000/health')"
+  CMD python -c "import requests; requests.get('http://localhost:8004/health')"
 
 # Run application
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "4", "app.main:app"]
+CMD ["make", "gunicorn-telemetry-app"]
