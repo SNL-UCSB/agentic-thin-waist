@@ -160,11 +160,23 @@ def get_results_artifacts_by_id(result_id):
 @routes_bp.route("/results/<result_id>/tags", methods=["POST"])
 def add_tags_to_results_by_id(result_id):
     result = models.Result.query.get_or_404(result_id)
-    data = request.get_json()
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "Invalid or missing JSON body"}), 400
+
     new_tags = data.get("tags", [])
+    if not isinstance(new_tags, list):
+        new_tags = []
 
     existing = result.tags or []
-    result.tags = list(set(existing + new_tags))
+    seen = set()
+    combined_tags = []
+    for tag in existing + new_tags:
+        if tag not in seen:
+            seen.add(tag)
+            combined_tags.append(tag)
+
+    result.tags = combined_tags
     db.session.commit()
 
     return jsonify({"result_id": result_id, "tags": result.tags}), 200
