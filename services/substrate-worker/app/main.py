@@ -442,7 +442,6 @@ def shape(cfg: ShapeRequest) -> ShapeResponse:
 
 @app.post("/capture", response_model=CaptureResponse)
 def start_capture(cfg: CaptureRequest) -> CaptureResponse:
-
     os.makedirs(CAPTURE_DIR, exist_ok=True)
     safe_name = os.path.basename(cfg.filename).strip()
     if not safe_name:
@@ -567,7 +566,6 @@ def delete_capture(capture_id: str):
 
 @app.get("/state")
 def get_state():
-
     if CURRENT_BOTTLENECK_STATE is None:
         return {"status": "no_state", "bottleneck_state": None}
 

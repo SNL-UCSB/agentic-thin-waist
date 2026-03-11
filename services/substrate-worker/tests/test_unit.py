@@ -99,7 +99,6 @@ class TestBottleneckStateModel:
 
 
 class TestHealthEndpoint:
-
     @patch(
         "app.main.HEALTH_CACHE",
         {
