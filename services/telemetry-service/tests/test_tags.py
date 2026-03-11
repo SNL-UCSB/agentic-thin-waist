@@ -6,7 +6,9 @@ class TestAddTags:
 
     def test_add_tags_persists(self, client, db, persisted_result):
         result_id = persisted_result["result_id"]
-        client.post(f"/results/{result_id}/tags", json={"tags": ["baseline", "production-run"]})
+        client.post(
+            f"/results/{result_id}/tags", json={"tags": ["baseline", "production-run"]}
+        )
         data = client.get(f"/results/{result_id}").get_json()
         assert "baseline" in data["tags"]
         assert "production-run" in data["tags"]

@@ -26,6 +26,7 @@ def app():
         from app.telemetry import db as _db
 
         from flask import Flask
+
         test_app = Flask(__name__)
         test_app.config["TESTING"] = True
         test_app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///:memory:"
@@ -34,12 +35,14 @@ def app():
         _db.init_app(test_app)
 
         from app.telemetry import routes, commands
+
         test_app.register_blueprint(routes.routes_bp)
         test_app.register_blueprint(commands.commands_bp)
 
         with test_app.app_context():
             from app.telemetry import models
             from sqlalchemy import JSON
+
             models.Result.qoe_metrics.property.columns[0].type = JSON()
             models.Result.transport_state.property.columns[0].type = JSON()
             models.Result.contextual_tree.property.columns[0].type = JSON()
@@ -58,6 +61,7 @@ def client(app):
 @pytest.fixture(scope="function")
 def db(app):
     from app.telemetry import db as _db
+
     with app.app_context():
         yield _db
         _db.session.rollback()
@@ -70,6 +74,7 @@ def db(app):
 def mock_s3(app):
     with app.app_context():
         import app.telemetry.routes as r
+
         mock = MagicMock()
         r.s3 = mock
         yield mock

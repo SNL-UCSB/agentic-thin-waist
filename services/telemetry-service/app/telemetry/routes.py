@@ -26,12 +26,17 @@ def _build_result_query(args):
         query = query.filter(models.Result.configured_latency <= float(latency_max))
     if congestion_control := args.get("congestion_control"):
         query = query.filter(
-            models.Result.contextual_tree["c_trans"]["congestion_control"].astext == congestion_control
+            models.Result.contextual_tree["c_trans"]["congestion_control"].astext
+            == congestion_control
         )
     if created_after := args.get("created_after"):
-        query = query.filter(models.Result.created_at >= datetime.fromisoformat(created_after))
+        query = query.filter(
+            models.Result.created_at >= datetime.fromisoformat(created_after)
+        )
     if created_before := args.get("created_before"):
-        query = query.filter(models.Result.created_at <= datetime.fromisoformat(created_before))
+        query = query.filter(
+            models.Result.created_at <= datetime.fromisoformat(created_before)
+        )
     if tags := args.get("tags"):
         query = query.filter(models.Result.tags.contains(tags.split(",")))
 
@@ -73,12 +78,17 @@ def add_results():
     db.session.add(result)
     db.session.commit()
 
-    return jsonify({
-        "result_id": result.result_id,
-        "experiment_id": result.experiment_id,
-        "status": "stored",
-        "created_at": result.created_at.isoformat() + "Z",
-    }), 201
+    return (
+        jsonify(
+            {
+                "result_id": result.result_id,
+                "experiment_id": result.experiment_id,
+                "status": "stored",
+                "created_at": result.created_at.isoformat() + "Z",
+            }
+        ),
+        201,
+    )
 
 
 @routes_bp.route("/results", methods=["GET"])
@@ -96,13 +106,18 @@ def get_results_by_filters():
     offset = int(args.get("offset", 0))
     results = query.limit(limit).offset(offset).all()
 
-    return jsonify({
-        "results": [r.to_dict() for r in results],
-        "total": total,
-        "limit": limit,
-        "offset": offset,
-        "returned": len(results),
-    }), 200
+    return (
+        jsonify(
+            {
+                "results": [r.to_dict() for r in results],
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+                "returned": len(results),
+            }
+        ),
+        200,
+    )
 
 
 @routes_bp.route("/results/<result_id>", methods=["GET"])
@@ -137,38 +152,70 @@ def get_results_as_csv_by_filters():
     total = query.count()
 
     if total > 10000:
-        return jsonify({
-            "error": f"Query returned {total} results, exceeding the 10,000 row export limit. Use filters to narrow results."
-        }), 400
+        return (
+            jsonify(
+                {
+                    "error": f"Query returned {total} results, exceeding the 10,000 row export limit. Use filters to narrow results."
+                }
+            ),
+            400,
+        )
 
     results = query.all()
 
     output = io.StringIO()
     writer = csv.writer(output)
 
-    writer.writerow([
-        "result_id", "experiment_id", "trial_number", "application", "status",
-        "created_at", "configured_capacity", "configured_latency",
-        "measured_throughput", "measured_rtt",
-        "video_startup_time_ms", "mean_bitrate_mbps", "bitrate_changes",
-        "rebuffer_events", "rebuffer_duration_ms",
-        "congestion_control", "protocol", "pcap_path", "tags",
-    ])
+    writer.writerow(
+        [
+            "result_id",
+            "experiment_id",
+            "trial_number",
+            "application",
+            "status",
+            "created_at",
+            "configured_capacity",
+            "configured_latency",
+            "measured_throughput",
+            "measured_rtt",
+            "video_startup_time_ms",
+            "mean_bitrate_mbps",
+            "bitrate_changes",
+            "rebuffer_events",
+            "rebuffer_duration_ms",
+            "congestion_control",
+            "protocol",
+            "pcap_path",
+            "tags",
+        ]
+    )
 
     for r in results:
         qoe = r.qoe_metrics or {}
         c_trans = (r.contextual_tree or {}).get("c_trans", {})
-        writer.writerow([
-            r.result_id, r.experiment_id, r.trial_number, r.application, r.status,
-            r.created_at.isoformat() + "Z" if r.created_at else None,
-            r.configured_capacity, r.configured_latency,
-            r.measured_throughput, r.measured_rtt,
-            qoe.get("video_startup_time_ms"), qoe.get("mean_bitrate_mbps"),
-            qoe.get("bitrate_changes"), qoe.get("rebuffer_events"),
-            qoe.get("rebuffer_duration_ms"),
-            c_trans.get("congestion_control"), c_trans.get("protocol"),
-            r.pcap_path, ",".join(r.tags or []),
-        ])
+        writer.writerow(
+            [
+                r.result_id,
+                r.experiment_id,
+                r.trial_number,
+                r.application,
+                r.status,
+                r.created_at.isoformat() + "Z" if r.created_at else None,
+                r.configured_capacity,
+                r.configured_latency,
+                r.measured_throughput,
+                r.measured_rtt,
+                qoe.get("video_startup_time_ms"),
+                qoe.get("mean_bitrate_mbps"),
+                qoe.get("bitrate_changes"),
+                qoe.get("rebuffer_events"),
+                qoe.get("rebuffer_duration_ms"),
+                c_trans.get("congestion_control"),
+                c_trans.get("protocol"),
+                r.pcap_path,
+                ",".join(r.tags or []),
+            ]
+        )
 
     response = make_response(output.getvalue())
     response.headers["Content-Type"] = "text/csv"
@@ -221,5 +268,7 @@ def get_artifacts_by_id(artifact_id):
 
     response = make_response(file_bytes)
     response.headers["Content-Type"] = "application/octet-stream"
-    response.headers["Content-Disposition"] = f"attachment; filename={artifact.filename}"
+    response.headers[
+        "Content-Disposition"
+    ] = f"attachment; filename={artifact.filename}"
     return response, 200

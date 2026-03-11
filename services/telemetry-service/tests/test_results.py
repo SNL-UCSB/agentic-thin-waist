@@ -56,7 +56,9 @@ class TestGetResults:
         data = client.get("/results?capacity_min=5&capacity_max=20").get_json()
         assert data["total"] >= 1
 
-    def test_get_results_filter_capacity_excludes_out_of_range(self, client, db, persisted_result):
+    def test_get_results_filter_capacity_excludes_out_of_range(
+        self, client, db, persisted_result
+    ):
         data = client.get("/results?capacity_min=50&capacity_max=100").get_json()
         assert data["total"] == 0
 

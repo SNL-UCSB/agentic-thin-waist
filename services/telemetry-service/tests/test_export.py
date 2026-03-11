@@ -19,7 +19,9 @@ class TestExportCsv:
         lines = resp.data.decode("utf-8").strip().splitlines()
         assert len(lines) >= 2  # header + at least 1 row
 
-    def test_export_csv_empty_filter_returns_header_only(self, client, db, persisted_result):
+    def test_export_csv_empty_filter_returns_header_only(
+        self, client, db, persisted_result
+    ):
         resp = client.get("/results/export/csv?application=netflix")
         lines = resp.data.decode("utf-8").strip().splitlines()
         assert len(lines) == 1  # header only

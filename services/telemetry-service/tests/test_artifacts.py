@@ -14,7 +14,9 @@ class TestPostArtifacts:
         resp = client.post("/artifacts", data=data, content_type="multipart/form-data")
         assert resp.status_code == 201
 
-    def test_upload_artifact_missing_file_returns_400(self, client, db, persisted_result):
+    def test_upload_artifact_missing_file_returns_400(
+        self, client, db, persisted_result
+    ):
         resp = client.post(
             "/artifacts",
             data={"result_id": persisted_result["result_id"]},
@@ -39,7 +41,9 @@ class TestPostArtifacts:
         resp = client.post("/artifacts", data=data, content_type="multipart/form-data")
         assert resp.status_code == 404
 
-    def test_upload_artifact_persists_to_db(self, client, db, persisted_result, mock_s3):
+    def test_upload_artifact_persists_to_db(
+        self, client, db, persisted_result, mock_s3
+    ):
         mock_s3.put_object.return_value = "artifacts/path/file.pcap"
         data = {
             "result_id": persisted_result["result_id"],
