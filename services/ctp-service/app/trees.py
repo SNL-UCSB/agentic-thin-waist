@@ -23,6 +23,7 @@ High-level flow
 
 4. :func:`post_process_trees` — reload raw trees and recompute medians.
 """
+
 from __future__ import annotations
 
 import ipaddress
@@ -37,10 +38,10 @@ import numpy as np
 from time_series_modules import Fragment, TimeSeries
 from tree_node import TreeNode
 
-
 # ---------------------------------------------------------------------------
 # I/O helpers
 # ---------------------------------------------------------------------------
+
 
 def save_tree_to_json(tree: TreeNode, output_file: str) -> None:
     """Serialise a ``TreeNode`` tree to a JSON file.
@@ -74,6 +75,7 @@ def load_tree_from_json(input_file: str) -> TreeNode:
 # User discovery
 # ---------------------------------------------------------------------------
 
+
 def filter_users(mask: str, path: str) -> list[ipaddress.IPv4Network]:
     """Return ``IPv4Network`` objects for each user directory matching *mask*.
 
@@ -98,6 +100,7 @@ def filter_users(mask: str, path: str) -> list[ipaddress.IPv4Network]:
 # ---------------------------------------------------------------------------
 # Time-series loading
 # ---------------------------------------------------------------------------
+
 
 def extract_time_series(
     user_ips: list[ipaddress.IPv4Network],
@@ -131,6 +134,7 @@ def extract_time_series(
 # ---------------------------------------------------------------------------
 # Tree construction — internal helpers
 # ---------------------------------------------------------------------------
+
 
 def _create_user_tree_nodes(
     user_ips: list[ipaddress.IPv4Network],
@@ -190,7 +194,9 @@ def _group_by_upper_subnet(
     """
     groups: dict[ipaddress.IPv4Network, list[TreeNode]] = defaultdict(list)
     for tree_node in tree_nodes:
-        upper_subnet = ipaddress.ip_network(tree_node.network).supernet(new_prefix=new_prefix)
+        upper_subnet = ipaddress.ip_network(tree_node.network).supernet(
+            new_prefix=new_prefix
+        )
         groups[upper_subnet].append(tree_node)
     return groups
 
@@ -279,6 +285,7 @@ def _recompute_medians(root: TreeNode, visited: set | None = None) -> None:
 # Public tree construction API
 # ---------------------------------------------------------------------------
 
+
 def construct_trees(
     user_ips: list[ipaddress.IPv4Network],
     time_series_dict: dict[str, TimeSeries],
@@ -346,11 +353,19 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Build CTP subnet trees.")
-    parser.add_argument("--directory", required=True, help="Path to per-user timeseries directories.")
-    parser.add_argument("--output", required=True, help="Directory to write tree JSON files.")
+    parser.add_argument(
+        "--directory", required=True, help="Path to per-user timeseries directories."
+    )
+    parser.add_argument(
+        "--output", required=True, help="Directory to write tree JSON files."
+    )
     parser.add_argument("--mask", default="", help="IP prefix filter, e.g. '169.231'.")
-    parser.add_argument("--time-limit", type=int, default=15, help="Number of time slices.")
-    parser.add_argument("--workers", type=int, default=mp.cpu_count(), help="Worker process count.")
+    parser.add_argument(
+        "--time-limit", type=int, default=15, help="Number of time slices."
+    )
+    parser.add_argument(
+        "--workers", type=int, default=mp.cpu_count(), help="Worker process count."
+    )
     args = parser.parse_args()
 
     user_ips = filter_users(args.mask, args.directory)

@@ -60,7 +60,6 @@ from scapy.utils import PcapReader
 
 from tree_node import TreeNode
 
-
 # ---------------------------------------------------------------------------
 # Configuration constants
 # ---------------------------------------------------------------------------
@@ -86,6 +85,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Profile pool construction
 # ---------------------------------------------------------------------------
+
 
 def create_selection_pool(
     root: TreeNode,
@@ -118,9 +118,9 @@ def create_selection_pool(
         node = queue.popleft()
         visited.add(node)
 
-        throughput_mbps = (
-            node.downlink_bytes * BITS_PER_BYTE
-        ) / (SECONDS_PER_MINUTE * MBPS_DIVISOR)
+        throughput_mbps = (node.downlink_bytes * BITS_PER_BYTE) / (
+            SECONDS_PER_MINUTE * MBPS_DIVISOR
+        )
 
         nodes[str(node.network)] = [
             throughput_mbps,
@@ -140,6 +140,7 @@ def create_selection_pool(
 # ---------------------------------------------------------------------------
 # ON/OFF burst analysis
 # ---------------------------------------------------------------------------
+
 
 def calculate_on_off_transitions(
     traffic_array: np.ndarray,
@@ -229,6 +230,7 @@ def create_selection_pool_on_off(
 # Profile selection
 # ---------------------------------------------------------------------------
 
+
 def select_profiles_by_on_off(
     nodes: Dict,
     on_count: int,
@@ -295,6 +297,7 @@ def select_profiles_by_throughput(
 # User extraction
 # ---------------------------------------------------------------------------
 
+
 def get_users_of_profile(root_node: TreeNode, subnet_ip: str) -> List[str]:
     """Return the IP strings of all leaf users under *subnet_ip*.
 
@@ -350,6 +353,7 @@ def append_users_to_profiles(
 # PCAP merging
 # ---------------------------------------------------------------------------
 
+
 def merge_pcaps_by_index(
     output_name: str,
     chosen_ips: List[str],
@@ -388,9 +392,7 @@ def merge_pcaps_by_index(
     for i in range(0, len(chosen_ips), batch_size):
         current_ips = chosen_ips[i : i + batch_size]
         args = [
-            str(Path(pcap_dir) / ip / pcap)
-            for ip in current_ips
-            for pcap in pcap_names
+            str(Path(pcap_dir) / ip / pcap) for ip in current_ips for pcap in pcap_names
         ]
         cmd = ["joincap", "-w", str(output_file)] + args
         if i != 0:
@@ -455,6 +457,7 @@ def merge_profile_pcaps(
 # PCAP ordering
 # ---------------------------------------------------------------------------
 
+
 def reorder_pcap_files(input_dir: str) -> None:
     """Reorder packets in all PCAP files in *input_dir* using ``reordercap``.
 
@@ -469,7 +472,9 @@ def reorder_pcap_files(input_dir: str) -> None:
     output_path.mkdir(exist_ok=True)
 
     for file in input_path.glob("*.pcap"):
-        subprocess.run(["reordercap", str(file), str(output_path / file.name)], check=True)
+        subprocess.run(
+            ["reordercap", str(file), str(output_path / file.name)], check=True
+        )
 
     for file in input_path.glob("*"):
         file.unlink()
@@ -481,6 +486,7 @@ def reorder_pcap_files(input_dir: str) -> None:
 # ---------------------------------------------------------------------------
 # PCAP padding
 # ---------------------------------------------------------------------------
+
 
 def pad_pcap_frames(input_pcap: str, temp_output: str) -> None:
     """Fix incorrect Ethernet frame lengths and pad short frames if needed.
@@ -506,7 +512,13 @@ def pad_pcap_frames(input_pcap: str, temp_output: str) -> None:
         modified.append(pkt)
     wrpcap(temp_output, modified)
     subprocess.run(
-        ["tcprewrite", "-F", "pad", f"--infile={temp_output}", f"--outfile={input_pcap}"],
+        [
+            "tcprewrite",
+            "-F",
+            "pad",
+            f"--infile={temp_output}",
+            f"--outfile={input_pcap}",
+        ],
         check=True,
     )
     os.remove(temp_output)
@@ -515,6 +527,7 @@ def pad_pcap_frames(input_pcap: str, temp_output: str) -> None:
 # ---------------------------------------------------------------------------
 # PCAP trimming
 # ---------------------------------------------------------------------------
+
 
 def trim_pcap_by_rate(
     pcap_file: str,
@@ -570,6 +583,7 @@ def trim_pcap_by_rate(
 # Parallel utilities
 # ---------------------------------------------------------------------------
 
+
 def parallel_process(
     func: Callable,
     args_list: List[Tuple],
@@ -592,6 +606,7 @@ def parallel_process(
 # PCAP validation
 # ---------------------------------------------------------------------------
 
+
 def validate_pcap_lengths(file_name: str) -> None:
     """Verify that every frame's Ethernet length exceeds its IP length.
 
@@ -606,10 +621,15 @@ def validate_pcap_lengths(file_name: str) -> None:
         subprocess.CalledProcessError: If the ``tshark`` invocation fails.
     """
     cmd = [
-        "tshark", "-r", file_name,
-        "-T", "fields",
-        "-e", "frame.len",
-        "-e", "ip.len",
+        "tshark",
+        "-r",
+        file_name,
+        "-T",
+        "fields",
+        "-e",
+        "frame.len",
+        "-e",
+        "ip.len",
     ]
     result = subprocess.run(cmd, capture_output=True, text=True, check=True)
 

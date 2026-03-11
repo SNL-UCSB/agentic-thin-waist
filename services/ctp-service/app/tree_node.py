@@ -7,6 +7,7 @@ time-series and computes derived metrics (burstiness, throughput, asymmetry,
 median).  Nodes are arranged in a hierarchy from /32 leaf nodes (individual
 users) up to a single /0 root.
 """
+
 from __future__ import annotations
 
 import ipaddress
@@ -121,30 +122,48 @@ class TreeNode:
             upload_burstiness_measure: Binary array for upload traffic.
             total_burstiness_measure: Binary array for combined traffic.
         """
-        total_fragment = self.download_fragment.container + self.upload_fragment.container
+        total_fragment = (
+            self.download_fragment.container + self.upload_fragment.container
+        )
 
         download_mean_bytes = np.mean(self.download_fragment.container)
         upload_mean_bytes = np.mean(self.upload_fragment.container)
         total_mean_bytes = np.mean(total_fragment)
 
-        self.download_burstiness_measure = np.full_like(self.download_fragment.container, 0)
+        self.download_burstiness_measure = np.full_like(
+            self.download_fragment.container, 0
+        )
         self.upload_burstiness_measure = np.full_like(self.upload_fragment.container, 0)
-        self.total_burstiness_measure = np.full_like(self.download_fragment.container, 0)
+        self.total_burstiness_measure = np.full_like(
+            self.download_fragment.container, 0
+        )
 
         for i in range(1, len(self.download_fragment.container)):
-            if self.download_fragment.container[i] >= 2 * download_mean_bytes or abs(
-                self.download_fragment.container[i - 1] - self.download_fragment.container[i]
-            ) >= 2 * download_mean_bytes:
+            if (
+                self.download_fragment.container[i] >= 2 * download_mean_bytes
+                or abs(
+                    self.download_fragment.container[i - 1]
+                    - self.download_fragment.container[i]
+                )
+                >= 2 * download_mean_bytes
+            ):
                 self.download_burstiness_measure[i] = 1
 
-            if self.upload_fragment.container[i] >= 2 * upload_mean_bytes or abs(
-                self.upload_fragment.container[i - 1] - self.upload_fragment.container[i]
-            ) >= 2 * upload_mean_bytes:
+            if (
+                self.upload_fragment.container[i] >= 2 * upload_mean_bytes
+                or abs(
+                    self.upload_fragment.container[i - 1]
+                    - self.upload_fragment.container[i]
+                )
+                >= 2 * upload_mean_bytes
+            ):
                 self.upload_burstiness_measure[i] = 1
 
-            if total_fragment[i] >= 2 * total_mean_bytes or abs(
-                total_fragment[i - 1] - total_fragment[i]
-            ) >= 2 * total_mean_bytes:
+            if (
+                total_fragment[i] >= 2 * total_mean_bytes
+                or abs(total_fragment[i - 1] - total_fragment[i])
+                >= 2 * total_mean_bytes
+            ):
                 self.total_burstiness_measure[i] = 1
 
     def compute_burstiness(self) -> None:
@@ -169,16 +188,21 @@ class TreeNode:
             )
         if downlink_mean_throughput != 0:
             self.downlink_burstiness = (
-                np.percentile(self.download_fragment.container, Configuration.PERCENTILE)
+                np.percentile(
+                    self.download_fragment.container, Configuration.PERCENTILE
+                )
                 / downlink_mean_throughput
             )
 
-        total_container = self.upload_fragment.container + self.download_fragment.container
+        total_container = (
+            self.upload_fragment.container + self.download_fragment.container
+        )
         total_mean_throughput = np.mean(total_container)
 
         if total_mean_throughput != 0:
             self.total_burstiness = (
-                np.percentile(total_container, Configuration.PERCENTILE) / total_mean_throughput
+                np.percentile(total_container, Configuration.PERCENTILE)
+                / total_mean_throughput
             )
 
     def compute_throughput(self) -> None:

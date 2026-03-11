@@ -43,6 +43,7 @@ Usage
         --tree-dir /data/trees \\
         --skip-timeseries
 """
+
 from __future__ import annotations
 
 import argparse
@@ -65,6 +66,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Pipeline stages
 # ---------------------------------------------------------------------------
+
 
 def run_timeseries_stage(
     pcap_dir: str,
@@ -153,6 +155,7 @@ def run_post_process_stage(
 # ---------------------------------------------------------------------------
 # CLI entry point
 # ---------------------------------------------------------------------------
+
 
 def main() -> None:
     """Parse command-line arguments and run the requested pipeline stages."""

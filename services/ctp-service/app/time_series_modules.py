@@ -22,6 +22,7 @@ Packets destined for an IP in ``network_prefixes`` are counted as *download*
 Pass a custom ``network_prefixes`` list to ``TimeSeriesProcessor`` to adapt the
 pipeline to networks other than the UCSB campus.
 """
+
 from __future__ import annotations
 
 import os
@@ -30,7 +31,6 @@ import subprocess
 import multiprocessing as mp
 
 import numpy as np
-
 
 #: Default IP prefixes used to identify download (inbound) traffic.
 #: These are UCSB campus subnets and should be overridden for other deployments.
@@ -169,7 +169,9 @@ class TimeSeriesProcessor:
 
     def __init__(self, network_prefixes: list[str] | None = None) -> None:
         self.network_prefixes: list[str] = (
-            network_prefixes if network_prefixes is not None else _DEFAULT_NETWORK_PREFIXES
+            network_prefixes
+            if network_prefixes is not None
+            else _DEFAULT_NETWORK_PREFIXES
         )
 
     # ------------------------------------------------------------------
@@ -230,11 +232,17 @@ class TimeSeriesProcessor:
         """
         try:
             tshark_cmd = [
-                "tshark", "-r", merged_pcap,
-                "-T", "fields",
-                "-e", "frame.time_epoch",
-                "-e", "ip.len",
-                "-e", "ip.dst",
+                "tshark",
+                "-r",
+                merged_pcap,
+                "-T",
+                "fields",
+                "-e",
+                "frame.time_epoch",
+                "-e",
+                "ip.len",
+                "-e",
+                "ip.dst",
             ]
             result = subprocess.run(tshark_cmd, capture_output=True, text=True)
 
@@ -389,7 +397,9 @@ class TimeSeriesProcessor:
         except Exception as e:
             print(f"Error: {e}")
             print(f"Failed to save the time series to PKL file for {output_file}")
-            self._log_error(f"Failed to save the time series to PKL file for {output_file}", e)
+            self._log_error(
+                f"Failed to save the time series to PKL file for {output_file}", e
+            )
             return False
 
     @staticmethod
