@@ -67,7 +67,7 @@ def add_results():
         transport_state=data.get("transport_state"),
         contextual_tree=contextual_tree,
         pcap_path=data.get("pcap_path"),
-        tags=[],
+        tags=None,
     )
 
     db.session.add(result)
