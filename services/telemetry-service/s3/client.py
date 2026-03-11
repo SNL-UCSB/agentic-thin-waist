@@ -41,7 +41,12 @@ class S3Client:
         return resp["Body"].read()
 
     def list_object_keys(self):
-        resp = self.client.list_objects_v2(Bucket=self.bucket_name)
-        objects = resp.get("Contents", [])
+        paginator = self.client.get_paginator("list_objects_v2")
+        page_iterator = paginator.paginate(Bucket=self.bucket_name)
 
-        return [obj["Key"] for obj in objects]
+        keys = []
+        for page in page_iterator:
+            for obj in page.get("Contents", []):
+                keys.append(obj["Key"])
+
+        return keys
