@@ -102,8 +102,18 @@ def get_results_by_filters():
     sort_col = getattr(models.Result, sort_by, models.Result.created_at)
     query = query.order_by(sort_col.desc() if sort_order == "desc" else sort_col.asc())
 
-    limit = min(int(args.get("limit", 50)), 500)
-    offset = int(args.get("offset", 0))
+    limit_raw = args.get("limit", "50")
+    offset_raw = args.get("offset", "0")
+    try:
+        limit = int(limit_raw)
+        offset = int(offset_raw)
+    except ValueError:
+        return jsonify({"error": "limit and offset must be integers"}), 400
+
+    if limit < 0 or offset < 0:
+        return jsonify({"error": "limit and offset must be non-negative"}), 400
+
+    limit = min(limit, 500)
     results = query.limit(limit).offset(offset).all()
 
     return (
