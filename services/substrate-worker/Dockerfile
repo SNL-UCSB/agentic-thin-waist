@@ -22,7 +22,4 @@ COPY . .
 
 EXPOSE 8002
 
-# Run topology setup once, then start the HTTP service
-# CMD ["bash", "-lc", "cd app && chmod +x setup.sh && ./setup.sh && python3 main.py"]
-
-CMD ["bash", "-lc", "cd app && chmod +x setup.sh && ./setup.sh && uvicorn main:app --host 0.0.0.0 --port 8002 --reload"]
+CMD ["bash", "-lc", "cd app && chmod +x setup.sh && ./setup.sh && uvicorn main:app --host 0.0.0.0 --port 8002"]

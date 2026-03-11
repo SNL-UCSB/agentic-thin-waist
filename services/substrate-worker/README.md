@@ -294,27 +294,61 @@ Never hardcode passwords in configuration files.
 **Performance Targets**: POST /shape < 500ms, POST /capture < 100ms, POST /replay < 200ms, GET /state < 50ms, GET /health < 100ms.
 
 ## Docker Configuration
+The Dockerfile executes `setup.sh` and runs the service on port 8002.
 
+### Build and Run
+
+Navigate to the service directory and build the image:
+
+```bash
+cd agentic-thin-waist/services/substrate-worker
+sudo docker build -t substrate-worker .
+```
+
+Run the container with the required privileges and volume mounts:
+
+```bash
+sudo docker run -it \
+  --name substrate-worker \
+  --privileged \
+  --cap-add=NET_ADMIN \
+  --cap-add=SYS_ADMIN \
+  --sysctl net.ipv4.ip_forward=1 \
+  -p 8002:8002 \
+  -v /home/netreplica/config/captures:/home/netreplica/config/captures \
+  -v /home/netreplica/config/ctp:/home/netreplica/config/ctp \
+  -e CAPTURE_DIR=/home/netreplica/config/captures \
+  -e CTP_DIR=/home/netreplica/config/ctp \
+  substrate-worker
+```
+ 
 **Dockerfile**:
 ```dockerfile
 FROM ubuntu:22.04
 
+ENV DEBIAN_FRONTEND=noninteractive
+
 RUN apt-get update && apt-get install -y \
-    iproute2 \
-    iputils-ping \
-    tshark \
-    tcpreplay \
-    python3-flask \
-    python3-requests \
-    sudo
+    python3 python3-pip python-is-python3 \
+    tshark iputils-ping iproute2 \
+    net-tools iperf3 \
+    curl wget iptables byobu nano \
+    speedtest-cli tcpreplay \
+    python3-flask python3-requests \
+    sudo \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
+
 COPY requirements.txt .
 RUN pip3 install -r requirements.txt
 
 COPY . .
+
+
 EXPOSE 8002
-CMD ["python3", "app/main.py"]
+
+CMD ["bash", "-lc", "cd app && chmod +x setup.sh && ./setup.sh && uvicorn main:app --host 0.0.0.0 --port 8002"]
 ```
 
 **Docker Compose**:

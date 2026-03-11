@@ -1,93 +1,244 @@
-# Docker for netreplica Solo Version
-
-This project builds a privileged Ubuntu 22.04 container that creates two Linux network namespaces connected through a bridge. It is designed for controlled networking experiments using `ip netns`, `veth`, `tc`, and `iptables`.
-
-
-
-## Project Structure
-
-- `Dockerfile` – Builds the container image  
-- `setup.sh` – Creates namespaces, veth pairs, routing, NAT, and bridge  
-- `cleanup.sh` – Removes namespaces, bridge, veth interfaces, and flushes NAT rules  
-
-
-## 1. Create Docker Network
-
-The subnet must **not** be `172.16.0.0/16`.
-
-```bash
-docker network create --subnet 192.168.40.0/24 docBr
-```
-
-
-## 2. Build Image
-Move to the `src` directory and run the following command:
-```bash
-docker build -t netreplica-solo .
-```
-
-## 3. Run Container
-
-```bash
-
-docker run -it \
-  --name solo \
-  --network docBr \
-  --privileged \
-  --cap-add=NET_ADMIN \
-  --cap-add=SYS_ADMIN \
-  --sysctl net.ipv4.ip_forward=1 \
-  netreplica-solo
-```
-
-
-## 4. Setup Networking
-
-Inside the container:
-
-```bash
-./setup.sh
-```
-
-This creates:
-
-- Namespace `ns1` (downstream)  
-- Namespace `ns2` (upstream)  
-- Bridge `netrepBr`  
-- veth pairs between namespaces and root  
-- Routing configuration  
-- NAT rules  
-
-Verify setup:
-
-```bash
-ip netns list
-ip link show
-ip netns exec ns1 ping 8.8.8.8 -c 5
-```
-
-## 5. Connect to jupyter inside the containerr
-Connect the the jupyter notebook inside the container and load `/workspace/example.ipynb` and configure the network using the provided functions. 
-
-## 6. Cleanup
-
-If you like the clean up the interfaces inside the container:
-
-```bash
-/cleanup.sh
-```
-
-This removes:
-
-- All namespaces  
-- Bridge  
-- veth interfaces  
-- NAT rules  
+# Network Shaping API Documentation
 
 ---
 
-## Requirements
+## POST `/shape`
 
-- Docker installed  
-- Container must run with `--privileged`  
-- Uses `iproute2`, `iptables`, and `tc`  
+**What it does:**
+Applies traffic shaping to the network interfaces — sets bandwidth limits and latency.
+
+**Takes:**
+```json
+{
+  "upstream_iface": "veth4",
+  "downstream_iface": "veth2",
+  "download_mbps": 10.0,
+  "upload_mbps": 5.0,
+  "latency_ms": 20,
+  "qdisc": "pfifo",
+  "buffer_packets": 1000
+}
+```
+
+**Returns:**
+```json
+{
+  "status": "shaped",
+  "bottleneck_state": {
+    "download_mbps": 10.0,
+    "upload_mbps": 5.0,
+    "latency_ms": 20,
+    "qdisc": "pfifo",
+    "verified": true,
+    "buffer_packets": 1000,
+    "loss_rate_percent": 0.0,
+    "verification_log": ["upload: measured=....", "PASS: upload", "PASS: download"]
+  },
+  "applied_commands": ["tc qdisc add dev veth2 root handle 1: htb ..."]
+}
+```
+
+---
+
+## GET `/state`
+
+**What it does:**
+Returns the currently active traffic shaping configuration.
+
+**Takes:** Nothing
+
+**Returns:**
+```json
+{
+  "status": "ok",
+  "bottleneck_state": {
+    "download_mbps": 10.0,
+    "upload_mbps": 5.0,
+    "latency_ms": 20,
+    "qdisc": "pfifo",
+    "verified": true,
+    "buffer_packets": 1000,
+    "loss_rate_percent": 0.0,
+    "verification_log": ["upload: measured=....", "PASS: upload", "PASS: download"]
+  }
+}
+```
+
+If no shaping has been applied yet, returns `"status": "no_state"` with `"bottleneck_state": null`.
+
+---
+
+## GET `/health`
+
+**What it does:**
+Reports whether the service and all its dependencies are available and working.
+
+**Takes:** Nothing
+
+**Returns:**
+```json
+{
+  "status": "ok",
+  "root_privileges": true,
+  "tc_available": true,
+  "tshark_available": true,
+  "tcpreplay_available": true,
+  "qdisc_support": true,
+  "interfaces": ["veth1", "veth2", "veth4"],
+  "timestamp": "2024-01-01T00:00:00"
+}
+```
+
+`status` is `"ok"` only if all checks pass, otherwise `"degraded"`.
+
+---
+
+## POST `/capture`
+
+**What it does:**
+Starts a live packet capture on a given interface and saves it as a `.pcap` file.
+
+**Takes:**
+```json
+{
+  "interface": "veth2",
+  "capture_filter": "tcp port 443",
+  "filename": "my_capture",
+  "duration_seconds": 30
+}
+```
+
+`capture_filter` is optional (captures all traffic if omitted). `duration_seconds` is optional (runs until manually stopped if omitted).
+
+**Returns:**
+```json
+{
+  "capture_id": "d290f1ee-6c54-4b01-90e6-d701748f0851",
+  "status": "started",
+  "pcap_path": "/home/netreplica/config/captures/my_capture.pcap",
+  "interface": "veth2",
+  "capture_filter": "tcp port 443"
+}
+```
+
+Use the returned `capture_id` to check status or stop the capture.
+
+---
+
+## GET `/capture/{capture_id}`
+
+**What it does:**
+Returns the current status of a running or completed capture session.
+
+**Takes:** `capture_id` as a URL parameter
+
+**Returns:**
+```json
+{
+  "capture_id": "d290f1ee-6c54-4b01-90e6-d701748f0851",
+  "status": "running",
+  "pcap_path": "/home/netreplica/config/captures/my_capture.pcap",
+  "interface": "veth2",
+  "capture_filter": "tcp port 443",
+  "start_time": "2024-01-01T00:00:00",
+  "exit_code": null
+}
+```
+
+`status` is either `"running"` or `"finished"`. Returns 404 if the `capture_id` is not found.
+
+---
+
+## DELETE `/capture/{capture_id}`
+
+**What it does:**
+Stops a running capture. The `.pcap` file on disk is kept.
+
+**Takes:** `capture_id` as a URL parameter
+
+**Returns:**
+```json
+{
+  "capture_id": "d290f1ee-6c54-4b01-90e6-d701748f0851",
+  "status": "stopped"
+}
+```
+
+Returns 404 if the `capture_id` is not found.
+
+---
+
+## POST `/replay`
+
+**What it does:**
+Replays a pre-recorded `.pcap` file through a network interface.
+
+**Takes:**
+```json
+{
+  "ctp_file": "youtube_10mbps",
+  "interface": "veth1",
+  "rate": "10",
+  "loop": false,
+  "duration_seconds": 60,
+  "pnat": "169.231.0.0/16:172.16.1.1"
+}
+```
+
+`rate`, `loop`, `duration_seconds`, and `pnat` are all optional. `pnat` rewrites IP addresses in the replayed packets to match the current network topology.
+
+**Returns:**
+```json
+{
+  "replay_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "status": "started",
+  "ctp_file": "youtube_10mbps",
+  "interface": "veth1",
+  "rate": "10"
+}
+```
+
+Returns 400 if the `ctp_file` does not exist. Use the returned `replay_id` to check status or stop the replay.
+
+---
+
+## GET `/replay/{replay_id}`
+
+**What it does:**
+Returns the current status of a running or completed replay session.
+
+**Takes:** `replay_id` as a URL parameter
+
+**Returns:**
+```json
+{
+  "replay_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "status": "running",
+  "ctp_file": "youtube_10mbps",
+  "interface": "veth1",
+  "rate": "10",
+  "pnat": null,
+  "start_time": "2024-01-01T00:00:00"
+}
+```
+
+`status` is either `"running"` or `"finished"`. Returns 404 if the `replay_id` is not found.
+
+---
+
+## DELETE `/replay/{replay_id}`
+
+**What it does:**
+Stops a running replay session.
+
+**Takes:** `replay_id` as a URL parameter
+
+**Returns:**
+```json
+{
+  "replay_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "status": "stopped"
+}
+```
+
+Returns 404 if the `replay_id` is not found.
