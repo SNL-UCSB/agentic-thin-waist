@@ -1,5 +1,10 @@
 # Substrate Worker Requirements
 
+# API server
+fastapi==0.115.0
+uvicorn[standard]==0.30.0
+httpx>=0.24.0
+
 # Testing
 pytest==7.4.3
 pytest-cov==4.1.0

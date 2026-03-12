@@ -1,0 +1,689 @@
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, Field
+import subprocess
+import os
+from typing import List, Optional
+from datetime import datetime
+import uuid
+import time
+
+# =========================
+# Global variables
+# =========================
+
+app = FastAPI()
+
+CURRENT_BOTTLENECK_STATE = None  # will hold a BottleneckState
+CURRENT_INTERFACES = None  # {"downstream_iface": ..., "upstream_iface": ...}
+ACTIVE_REPLAYS: dict = {}  # replay_id → session dict
+ACTIVE_CAPTURES: dict = {}  # capture_id → session dict
+
+CAPTURE_DIR = os.environ.get("CAPTURE_DIR", "/home/netreplica/config/captures")
+CTP_DIR = os.environ.get("CTP_DIR", "/home/netreplica/config/ctp")
+
+HEALTH_CACHE: dict = {}
+
+
+@app.on_event("startup")
+def startup_check():
+    global HEALTH_CACHE
+    root = _check_root()
+    tc = _cmd_available("tc")
+    tshark = _cmd_available("tshark")
+    tcpreplay = _cmd_available("tcpreplay")
+    qdisc = _check_qdisc_support() if tc else False
+    interfaces = _get_interfaces()
+    healthy = all([root, tc, tshark, tcpreplay, qdisc])
+
+    HEALTH_CACHE = {
+        "status": "ok" if healthy else "degraded",
+        "root_privileges": root,
+        "tc_available": tc,
+        "tshark_available": tshark,
+        "tcpreplay_available": tcpreplay,
+        "qdisc_support": qdisc,
+        "interfaces": interfaces,
+    }
+
+
+# =========================
+# Data models (classes)
+# =========================
+
+
+class ShapeRequest(BaseModel):
+    upstream_iface: str = Field(
+        ..., description="Upload/egress interface (e.g., veth4)"
+    )
+    downstream_iface: str = Field(
+        ..., description="Download/ingress interface (e.g., veth2)"
+    )
+    download_mbps: float = Field(..., gt=0, description="Download capacity in Mbps")
+    upload_mbps: float = Field(..., gt=0, description="Upload capacity in Mbps")
+
+    latency_ms: float = Field(0, ge=0, description="One-way delay in ms (default: 0)")
+
+    qdisc: str = Field("pfifo", description="Queue discipline (default: pfifo)")
+
+    buffer_packets: int = Field(
+        1000, ge=1, description="Queue depth / limit in packets (default: 1000)"
+    )
+
+
+class BottleneckState(BaseModel):
+    download_mbps: float
+    upload_mbps: float
+    latency_ms: float
+    qdisc: str
+    verified: bool = False
+    buffer_packets: int = 1000
+    loss_rate_percent: float = 0.0
+    verification_log: List[str] = []
+
+
+class ShapeResponse(BaseModel):
+    status: str
+    bottleneck_state: BottleneckState
+    applied_commands: List[str]
+
+
+class CaptureRequest(BaseModel):
+    interface: str = Field(..., description="Interface to capture on (e.g., veth2)")
+    capture_filter: str = Field(
+        "", description="tcpdump-style filter (e.g., 'tcp port 443')"
+    )
+    filename: str = Field(
+        ..., description="Output pcap filename (e.g., 'youtube_10mbps')"
+    )
+    duration_seconds: Optional[int] = Field(
+        None, description="Stop capture after N seconds"
+    )
+
+
+class CaptureResponse(BaseModel):
+    capture_id: str
+    status: str
+    pcap_path: str
+    interface: str
+    capture_filter: str
+
+
+class CaptureStatusResponse(BaseModel):
+    capture_id: str
+    status: str  # "running", "finished"
+    pcap_path: str
+    interface: str
+    capture_filter: str
+    start_time: str
+    exit_code: Optional[int] = None
+
+
+class HealthResponse(BaseModel):
+    status: str
+    root_privileges: bool
+    tc_available: bool
+    tshark_available: bool
+    tcpreplay_available: bool
+    qdisc_support: bool
+    interfaces: List[str]
+    timestamp: str
+
+
+class ReplayRequest(BaseModel):
+    ctp_file: str = Field(
+        ..., description="CTP pcap filename inside CTP_DIR (e.g., 'youtube_10mbps')"
+    )
+    interface: str = Field(..., description="Target interface (e.g., veth1)")
+    rate: Optional[str] = Field(
+        None,
+        description="Replay rate in Mbps (e.g., '10'). If omitted, use original rate.",
+    )
+    loop: bool = Field(False, description="Repeat replay indefinitely")
+    duration_seconds: Optional[int] = Field(None, description="Stop after N seconds")
+    pnat: Optional[str] = Field(
+        None,
+        description="PNAT rewrite rules e.g. '169.231.0.0/16:172.16.1.1,128.111.0.0/16:172.16.1.1'",
+    )
+
+
+class ReplayResponse(BaseModel):
+    replay_id: str
+    status: str
+    ctp_file: str
+    interface: str
+    rate: str
+
+
+class ReplayStatusResponse(BaseModel):
+    replay_id: str
+    status: str  # "running", "finished", "not_found"
+    ctp_file: str
+    interface: str
+    rate: str
+    pnat: Optional[str]
+    start_time: str
+
+
+# =========================
+# Helper functions
+# =========================
+
+
+def run_cmd(cmd: str) -> None:
+    subprocess.run(cmd, shell=True, check=True)
+
+
+def _build_qdisc_args(qdisc: str, buffer_packets: int) -> str:
+    if qdisc in ("fq_codel", "codel"):
+        return f"{qdisc} limit {buffer_packets}"
+    return qdisc
+
+
+def apply_shaping(
+    downstream_iface: str,
+    upstream_iface: str,
+    download_mbps: float,
+    upload_mbps: float,
+    latency_ms: float,
+    qdisc: str,
+    buffer_packets: int,
+) -> List[str]:
+    applied: List[str] = []
+    qdisc_args = _build_qdisc_args(qdisc, buffer_packets)
+
+    # -------------------------
+    # Bandwidth shaping (HTB)
+    # -------------------------
+    for iface, rate in [
+        (downstream_iface, download_mbps),
+        (upstream_iface, upload_mbps),
+    ]:
+        c0 = f"tc qdisc del dev {iface} root 2>/dev/null || true"
+        run_cmd(c0)
+        applied.append(c0)
+
+        # HTB root
+        c1 = f"tc qdisc add dev {iface} root handle 1: htb default 10 r2q 100"
+        run_cmd(c1)
+        applied.append(c1)
+
+        # HTB class
+        c2 = (
+            f"tc class add dev {iface} parent 1: classid 1:10 "
+            f"htb rate {rate}Mbit ceil {rate}Mbit"
+        )
+        run_cmd(c2)
+        applied.append(c2)
+
+        # AQM qdisc
+        c3 = f"tc qdisc add dev {iface} parent 1:10 handle 10: {qdisc_args}"
+        run_cmd(c3)
+        applied.append(c3)
+
+    # -------------------------
+    # Latency shaping (netem)
+    # -------------------------
+    if latency_ms == 0:
+        c4 = "tc qdisc del dev veth6 root 2>/dev/null || true"
+        run_cmd(c4)
+        applied.append(c4)
+    else:
+        c4 = (
+            "tc qdisc del dev veth6 root 2>/dev/null || true && "
+            f"tc qdisc add dev veth6 root netem delay {latency_ms}ms"
+        )
+        run_cmd(c4)
+        applied.append(c4)
+
+    return applied
+
+
+def _run_in_ns(ns: str, cmd: str, timeout: int = 30) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        f"ip netns exec {ns} {cmd}",
+        shell=True,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+
+
+def _kill_iperf3_servers() -> None:
+    subprocess.run(
+        "ip netns exec ns2 pkill -f 'iperf3 -s' 2>/dev/null || true", shell=True
+    )
+    import time
+
+    time.sleep(0.3)
+
+
+def _verify_bottleneck_state() -> None:
+    global CURRENT_BOTTLENECK_STATE, CURRENT_INTERFACES
+
+    if CURRENT_BOTTLENECK_STATE is None or CURRENT_INTERFACES is None:
+        return
+
+    TARGET_IP = "172.16.3.1"
+    IPERF_DURATION = 3
+    TOLERANCE_PCT = 20
+    verified = True
+    log: List[str] = []
+
+    try:
+        import time
+        import json as _json
+
+        # Upload test: ns1 → ns2
+        _kill_iperf3_servers()
+        subprocess.Popen(
+            "ip netns exec ns2 iperf3 -s -1 -D --logfile /tmp/iperf3_server_up.log",
+            shell=True,
+        )
+        time.sleep(0.5)
+
+        up = _run_in_ns(
+            "ns1",
+            f"iperf3 -c {TARGET_IP} -t {IPERF_DURATION} -J",
+            timeout=IPERF_DURATION + 10,
+        )
+        if up.returncode == 0:
+            upload_mbps = (
+                _json.loads(up.stdout)["end"]["sum_sent"]["bits_per_second"] / 1e6
+            )
+            expected = CURRENT_BOTTLENECK_STATE.upload_mbps
+            diff_pct = abs(upload_mbps - expected) / expected * 100
+            log.append(
+                f"upload: measured={upload_mbps:.2f}Mbps "
+                f"expected={expected}Mbps diff={diff_pct:.1f}%"
+            )
+            if diff_pct > TOLERANCE_PCT:
+                log.append(f"FAIL: upload out of ±{TOLERANCE_PCT}% range")
+                verified = False
+            else:
+                log.append("PASS: upload")
+        else:
+            log.append(f"FAIL: iperf3 upload error: {up.stderr.strip()}")
+            verified = False
+
+        # Download test: ns2 → ns1
+        _kill_iperf3_servers()
+        subprocess.Popen(
+            "ip netns exec ns2 iperf3 -s -1 -D --logfile /tmp/iperf3_server_down.log",
+            shell=True,
+        )
+        time.sleep(0.5)
+
+        down = _run_in_ns(
+            "ns1",
+            f"iperf3 -c {TARGET_IP} -t {IPERF_DURATION} -R -J",
+            timeout=IPERF_DURATION + 10,
+        )
+        if down.returncode == 0:
+            download_mbps = (
+                _json.loads(down.stdout)["end"]["sum_received"]["bits_per_second"] / 1e6
+            )
+            expected = CURRENT_BOTTLENECK_STATE.download_mbps
+            diff_pct = abs(download_mbps - expected) / expected * 100
+            log.append(
+                f"download: measured={download_mbps:.2f}Mbps "
+                f"expected={expected}Mbps diff={diff_pct:.1f}%"
+            )
+            if diff_pct > TOLERANCE_PCT:
+                log.append(f"FAIL: download out of ±{TOLERANCE_PCT}% range")
+                verified = False
+            else:
+                log.append("PASS: download")
+        else:
+            log.append(f"FAIL: iperf3 download error: {down.stderr.strip()}")
+            verified = False
+
+    except Exception as e:
+        log.append(f"FAIL: exception: {e}")
+        verified = False
+
+    CURRENT_BOTTLENECK_STATE.verified = verified
+    CURRENT_BOTTLENECK_STATE.verification_log = log
+
+
+def _cmd_available(cmd: str) -> bool:
+    result = subprocess.run(f"which {cmd}", shell=True, capture_output=True)
+    return result.returncode == 0
+
+
+def _check_root() -> bool:
+    return os.geteuid() == 0
+
+
+def _check_qdisc_support() -> bool:
+    result = subprocess.run(
+        "tc qdisc add dev lo root fq_codel 2>&1",
+        shell=True,
+        capture_output=True,
+        text=True,
+    )
+    # Clean up immediately
+    subprocess.run(
+        "tc qdisc del dev lo root 2>/dev/null || true",
+        shell=True,
+        capture_output=True,
+    )
+    # If error mentions "fq_codel" not found it's unsupported; any other error is fine
+    return "No such file" not in result.stdout and "Unknown qdisc" not in result.stdout
+
+
+def _get_interfaces() -> List[str]:
+    result = subprocess.run(
+        "ip -o link show | awk -F': ' '{print $2}' | cut -d'@' -f1",
+        shell=True,
+        capture_output=True,
+        text=True,
+    )
+    ifaces = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    return [i for i in ifaces if i != "lo"]
+
+
+# =========================
+# API endpoints
+# =========================
+
+
+@app.post("/shape", response_model=ShapeResponse)
+def shape(cfg: ShapeRequest) -> ShapeResponse:
+    global CURRENT_BOTTLENECK_STATE, CURRENT_INTERFACES
+
+    try:
+        applied_commands: List[str] = []
+        applied_commands.extend(
+            apply_shaping(
+                downstream_iface=cfg.downstream_iface,
+                upstream_iface=cfg.upstream_iface,
+                download_mbps=cfg.download_mbps,
+                upload_mbps=cfg.upload_mbps,
+                latency_ms=cfg.latency_ms,
+                qdisc=cfg.qdisc,
+                buffer_packets=cfg.buffer_packets,
+            )
+        )
+    except subprocess.CalledProcessError as exc:
+        raise HTTPException(status_code=500, detail=f"tc command failed: {exc}")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    state = BottleneckState(
+        download_mbps=cfg.download_mbps,
+        upload_mbps=cfg.upload_mbps,
+        latency_ms=cfg.latency_ms,
+        qdisc=cfg.qdisc,
+        verified=False,  # will be set by verification logic
+        buffer_packets=cfg.buffer_packets,
+    )
+
+    CURRENT_BOTTLENECK_STATE = state
+    CURRENT_INTERFACES = {
+        "downstream_iface": cfg.downstream_iface,
+        "upstream_iface": cfg.upstream_iface,
+    }
+
+    # Run verification immediately after applying shaping
+    _verify_bottleneck_state()
+
+    return ShapeResponse(
+        status="shaped",
+        bottleneck_state=state,
+        applied_commands=applied_commands,
+    )
+
+
+# =========================
+# Capture endpoints
+# =========================
+
+
+@app.post("/capture", response_model=CaptureResponse)
+def start_capture(cfg: CaptureRequest) -> CaptureResponse:
+    os.makedirs(CAPTURE_DIR, exist_ok=True)
+    safe_name = os.path.basename(cfg.filename).strip()
+    if not safe_name:
+        raise HTTPException(status_code=400, detail="filename must be non-empty")
+
+    interfaces = _get_interfaces()
+    if cfg.interface not in interfaces:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown interface '{cfg.interface}'. Available: {interfaces}",
+        )
+
+    pcap_path = os.path.join(CAPTURE_DIR, f"{safe_name}.pcap")
+
+    cmd_parts: List[str] = [
+        "tshark",
+        "-i",
+        cfg.interface,
+        "-w",
+        pcap_path,
+    ]
+
+    if cfg.capture_filter:
+        cmd_parts.extend(["-f", cfg.capture_filter])
+
+    if cfg.duration_seconds:
+        cmd_parts.extend(["-a", f"duration:{cfg.duration_seconds}"])
+
+    try:
+        proc = subprocess.Popen(
+            cmd_parts,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to start tshark: {exc}")
+
+    # If tshark fails immediately (permissions / bad iface), surface stderr right away.
+    time.sleep(0.2)
+    if proc.poll() is not None and proc.returncode not in (0, None):
+        try:
+            _out, _err = proc.communicate(timeout=1)
+        except Exception:
+            _out, _err = "", ""
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "message": "tshark exited immediately",
+                "exit_code": proc.returncode,
+                "stdout": (_out or "").strip(),
+                "stderr": (_err or "").strip(),
+                "pcap_path": pcap_path,
+                "root_privileges": _check_root(),
+            },
+        )
+
+    capture_id = str(uuid.uuid4())
+    ACTIVE_CAPTURES[capture_id] = {
+        "capture_id": capture_id,
+        "pcap_path": pcap_path,
+        "interface": cfg.interface,
+        "capture_filter": cfg.capture_filter,
+        "process": proc,
+        "start_time": datetime.utcnow().isoformat(),
+    }
+
+    return CaptureResponse(
+        capture_id=capture_id,
+        status="started",
+        pcap_path=pcap_path,
+        interface=cfg.interface,
+        capture_filter=cfg.capture_filter,
+    )
+
+
+@app.get("/capture/{capture_id}", response_model=CaptureStatusResponse)
+def get_capture(capture_id: str) -> CaptureStatusResponse:
+    session = ACTIVE_CAPTURES.get(capture_id)
+
+    if session is None:
+        raise HTTPException(
+            status_code=404, detail=f"Capture session not found: {capture_id}"
+        )
+
+    proc: subprocess.Popen = session["process"]
+    status = "running" if proc.poll() is None else "finished"
+
+    return CaptureStatusResponse(
+        capture_id=capture_id,
+        status=status,
+        pcap_path=session["pcap_path"],
+        interface=session["interface"],
+        capture_filter=session["capture_filter"],
+        start_time=session["start_time"],
+        exit_code=proc.returncode,
+    )
+
+
+@app.delete("/capture/{capture_id}")
+def delete_capture(capture_id: str):
+    session = ACTIVE_CAPTURES.get(capture_id)
+
+    if session is None:
+        raise HTTPException(
+            status_code=404, detail=f"Capture session not found: {capture_id}"
+        )
+
+    proc: subprocess.Popen = session["process"]
+
+    if proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+    del ACTIVE_CAPTURES[capture_id]
+
+    return {"capture_id": capture_id, "status": "stopped"}
+
+
+@app.get("/state")
+def get_state():
+    if CURRENT_BOTTLENECK_STATE is None:
+        return {"status": "no_state", "bottleneck_state": None}
+
+    return {
+        "status": "ok",
+        "bottleneck_state": CURRENT_BOTTLENECK_STATE,
+    }
+
+
+@app.get("/health", response_model=HealthResponse)
+def health() -> HealthResponse:
+    return HealthResponse(
+        **HEALTH_CACHE,
+        timestamp=datetime.utcnow().isoformat(),
+    )
+
+
+@app.post("/replay", response_model=ReplayResponse)
+def start_replay(cfg: ReplayRequest) -> ReplayResponse:
+    ctp_path = f"{CTP_DIR}/{cfg.ctp_file}.pcap"
+
+    if not os.path.exists(ctp_path):
+        raise HTTPException(status_code=400, detail=f"CTP file not found: {ctp_path}")
+
+    # Use tcpreplay-edit when pnat rewriting is needed, plain tcpreplay otherwise
+    binary = "tcpreplay-edit" if cfg.pnat else "tcpreplay"
+
+    cmd_parts = [
+        f"ip netns exec ns1 {binary}",
+        f"-i {cfg.interface}",
+    ]
+
+    # Add rate only if provided
+    if cfg.rate:
+        cmd_parts.append(f"--mbps={cfg.rate}")
+
+    if cfg.pnat:
+        cmd_parts.append(f"--pnat={cfg.pnat}")
+
+    if cfg.loop:
+        cmd_parts.append("--loop=0")
+
+    if cfg.duration_seconds:
+        cmd_parts.append(f"--duration={cfg.duration_seconds}")
+
+    cmd_parts.append(ctp_path)
+    cmd = " ".join(cmd_parts)
+
+    try:
+        proc = subprocess.Popen(
+            cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to start tcpreplay: {exc}")
+
+    replay_id = str(uuid.uuid4())
+    ACTIVE_REPLAYS[replay_id] = {
+        "replay_id": replay_id,
+        "ctp_file": cfg.ctp_file,
+        "interface": cfg.interface,
+        "rate": cfg.rate,
+        "pnat": cfg.pnat,
+        "process": proc,
+        "start_time": datetime.utcnow().isoformat(),
+    }
+
+    return ReplayResponse(
+        replay_id=replay_id,
+        status="started",
+        ctp_file=cfg.ctp_file,
+        interface=cfg.interface,
+        rate=cfg.rate,
+    )
+
+
+@app.get("/replay/{replay_id}", response_model=ReplayStatusResponse)
+def get_replay(replay_id: str) -> ReplayStatusResponse:
+    session = ACTIVE_REPLAYS.get(replay_id)
+
+    if session is None:
+        raise HTTPException(
+            status_code=404, detail=f"Replay session not found: {replay_id}"
+        )
+
+    # Poll the process to check if it's still running
+    proc: subprocess.Popen = session["process"]
+    status = "running" if proc.poll() is None else "finished"
+
+    return ReplayStatusResponse(
+        replay_id=replay_id,
+        status=status,
+        ctp_file=session["ctp_file"],
+        interface=session["interface"],
+        rate=session["rate"],
+        pnat=session.get("pnat"),
+        start_time=session["start_time"],
+    )
+
+
+@app.delete("/replay/{replay_id}")
+def delete_replay(replay_id: str):
+    session = ACTIVE_REPLAYS.get(replay_id)
+
+    if session is None:
+        raise HTTPException(
+            status_code=404, detail=f"Replay session not found: {replay_id}"
+        )
+
+    proc: subprocess.Popen = session["process"]
+
+    # Only terminate if still running
+    if proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()  # force kill if terminate didn't work
+
+    del ACTIVE_REPLAYS[replay_id]
+
+    return {"replay_id": replay_id, "status": "stopped"}
