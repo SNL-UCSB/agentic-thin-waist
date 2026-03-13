@@ -18,6 +18,7 @@ Orchestration Service accepts:
 - Context parameters: number of trials, default latency, duration
 - Preferences: capture PCAP, desired congestion control algorithms, execution strategy
 
+
 ## Output
 
 Orchestration Service produces:
@@ -150,7 +151,7 @@ Submit a natural language research intent. Claude reasons through the intent, ge
   "generated_experiments": 6,
   "estimated_duration_minutes": 10,
   "estimated_completion": "2026-03-04T11:30:00Z",
-  "claude_model": "claude-opus-4-6"
+  "claude_model": "claude-sonnet-4-6"
 }
 ```
 
@@ -396,7 +397,7 @@ Submit a natural language research intent. Claude reasons through the intent, ge
       "reasoning": "Cartesian product of [youtube, zoom] × [10, 25, 50] = 6 experiments"
     }
   ],
-  "claude_model": "claude-opus-4-6",
+  "claude_model": "claude-sonnet-4-6",
   "total_tokens_used": 2341
 }
 ```
@@ -417,7 +418,7 @@ Submit a natural language research intent. Claude reasons through the intent, ge
     "telemetry_service": "reachable",
     "ctp_service": "reachable"
   },
-  "model": "claude-opus-4-6"
+  "model": "claude-sonnet-4-6"
 }
 ```
 
@@ -710,7 +711,7 @@ from anthropic import Anthropic
 class ClaudeOrchestrator:
     def __init__(self, api_key: str):
         self.client = Anthropic(api_key=api_key)
-        self.model = "claude-opus-4-6"
+        self.model = "claude-sonnet-4-6"
 
     def parse_intent(self, intent: str) -> Dict:
         """Use Claude to interpret natural language intent."""

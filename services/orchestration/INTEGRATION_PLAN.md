@@ -147,7 +147,7 @@ class OrchestrationResponse(BaseModel):
     intent: str
     generated_experiments: int
     estimated_duration_minutes: Optional[float] = None
-    claude_model: str = "claude-opus-4-6"
+    claude_model: str = "claude-sonnet-4-6"
 
 class ReasoningStep(BaseModel):
     step: int
@@ -206,7 +206,7 @@ class ClaudeClient:
 ```
 
 **Key decisions**:
-- Default to `claude-sonnet-4-6` for development (faster, cheaper). Switch to `claude-opus-4-6` for production.
+- Default to `claude-sonnet-4-6` for development (faster, cheaper). Switch to `claude-sonnet-4-6` for production.
 - API key from environment variable, never hardcoded.
 - Start simple — no tool use, no streaming, no conversation history. Those come later.
 
