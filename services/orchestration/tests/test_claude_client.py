@@ -27,22 +27,21 @@ class DummyAnthropicClient:
 
 
 def test_claude_client_requires_api_key(monkeypatch):
-    # Ensure env var is not set
+    # Ensure neither env var is set
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("CLAUDE_API_KEY", raising=False)
 
     with pytest.raises(ValueError) as excinfo:
         ClaudeClient()
 
-    assert "ANTHROPIC_API_KEY not set" in str(excinfo.value)
+    assert "CLAUDE_API_KEY or ANTHROPIC_API_KEY must be set" in str(excinfo.value)
 
 
 def test_claude_client_uses_env_api_key(monkeypatch):
-    # Patch Anthropic to our dummy client
-    from app import engine as engine_pkg  # type: ignore[import]
-
+    # CLAUDE_API_KEY takes precedence when both are set (compose uses CLAUDE_API_KEY)
+    monkeypatch.delenv("CLAUDE_API_KEY", raising=False)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "env-key")
 
-    # Monkeypatch the Anthropic class in the claude_client module
     import app.engine.claude_client as cc
 
     monkeypatch.setattr(cc, "Anthropic", DummyAnthropicClient)
@@ -50,6 +49,19 @@ def test_claude_client_uses_env_api_key(monkeypatch):
     client = cc.ClaudeClient()
     assert isinstance(client.client, DummyAnthropicClient)
     assert client.client.api_key == "env-key"
+
+
+def test_claude_client_prefers_claude_api_key(monkeypatch):
+    """When both CLAUDE_API_KEY and ANTHROPIC_API_KEY are set, CLAUDE_API_KEY is used (compose)."""
+    monkeypatch.setenv("CLAUDE_API_KEY", "compose-key")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-key")
+
+    import app.engine.claude_client as cc
+
+    monkeypatch.setattr(cc, "Anthropic", DummyAnthropicClient)
+
+    client = cc.ClaudeClient()
+    assert client.client.api_key == "compose-key"
 
 
 def test_claude_client_send_returns_text(monkeypatch):

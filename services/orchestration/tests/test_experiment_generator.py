@@ -187,7 +187,7 @@ def test_experiment_id_naming_convention():
 
 
 def test_defaults_applied_for_unspecified_parameters():
-    """Verify defaults: capacities=[25], latencies=[50], cc=cubic, aqm=fq_codel, duration=60, num_trials=1."""
+    """Verify defaults: capacities=[25], latencies=[50], cc=cubic, aqm=fq_codel, duration from app default (youtube=60), num_trials=1."""
     generator = ExperimentGenerator()
     parsed = {
         "applications": ["youtube"],
@@ -201,6 +201,25 @@ def test_defaults_applied_for_unspecified_parameters():
     assert e.latency_ms == 50
     assert e.cc_algorithm == "cubic"
     assert e.aqm_policy == "fq_codel"
-    assert e.duration_seconds == 60
+    assert e.duration_seconds == 60  # youtube default per application_defaults.md
     assert e.num_trials == 1
     assert e.loss_rate == 0.0
+
+
+def test_per_application_duration_defaults():
+    """When duration_seconds is unspecified, use per-application defaults from application_defaults.md."""
+    generator = ExperimentGenerator()
+    # Zoom/Discord/Google Meet default 120s; YouTube/Netflix/Twitch 60s; ndt/ping/iperf3 30s
+    for app, expected_duration in [("youtube", 60), ("zoom", 120), ("google-meet", 120), ("ndt", 30)]:
+        parsed = {
+            "applications": [app],
+            "capacities": [25],
+            "reasoning": "",
+        }
+        experiments = generator.generate(parsed)
+        assert len(experiments) == 1
+        assert experiments[0].duration_seconds == expected_duration, f"{app} should default to {expected_duration}s"
+    # Multiple apps: use max of defaults (youtube=60, zoom=120 -> 120)
+    parsed = {"applications": ["youtube", "zoom"], "capacities": [25], "reasoning": ""}
+    experiments = generator.generate(parsed)
+    assert all(e.duration_seconds == 120 for e in experiments)
