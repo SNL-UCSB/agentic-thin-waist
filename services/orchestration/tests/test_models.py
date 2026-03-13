@@ -70,7 +70,7 @@ def test_orchestration_response_valid():
     )
     assert resp.status == OrchestrationStatus.pending
     assert resp.generated_experiments == 0
-    assert resp.claude_model == "claude-opus-4-6"
+    assert resp.claude_model == "claude-sonnet-4-6"
     assert resp.estimated_duration_minutes is None
 
 
