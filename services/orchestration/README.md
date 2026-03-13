@@ -17,6 +17,7 @@ Orchestration Service accepts:
 - Natural language research intent: "Compare YouTube vs Zoom at 10, 25, 50 Mbps with 50ms latency"
 - Context parameters: number of trials, default latency, duration
 - Preferences: capture PCAP, desired congestion control algorithms, execution strategy
+echo 'export ANTHROPIC_API_KEY="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"' >> ~/.bashrc
 
 ## Output
 

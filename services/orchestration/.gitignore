@@ -1,0 +1,12 @@
+junk/
+run_step6_examples.py
+.pytest_cache/
+__pycache__/
+.DS_Store
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+app/experiment_outputs
+
