@@ -35,8 +35,8 @@ from collections import defaultdict
 
 import numpy as np
 
-from time_series_modules import Fragment, TimeSeries
-from tree_node import TreeNode
+from app.time_series_modules import Fragment, TimeSeries
+from app.tree_node import TreeNode
 
 # ---------------------------------------------------------------------------
 # I/O helpers
@@ -194,9 +194,7 @@ def _group_by_upper_subnet(
     """
     groups: dict[ipaddress.IPv4Network, list[TreeNode]] = defaultdict(list)
     for tree_node in tree_nodes:
-        upper_subnet = ipaddress.ip_network(tree_node.network).supernet(
-            new_prefix=new_prefix
-        )
+        upper_subnet = ipaddress.ip_network(tree_node.network).supernet(new_prefix=new_prefix)
         groups[upper_subnet].append(tree_node)
     return groups
 
@@ -356,25 +354,17 @@ if __name__ == "__main__":
     parser.add_argument(
         "--directory", required=True, help="Path to per-user timeseries directories."
     )
-    parser.add_argument(
-        "--output", required=True, help="Directory to write tree JSON files."
-    )
+    parser.add_argument("--output", required=True, help="Directory to write tree JSON files.")
     parser.add_argument("--mask", default="", help="IP prefix filter, e.g. '169.231'.")
-    parser.add_argument(
-        "--time-limit", type=int, default=15, help="Number of time slices."
-    )
-    parser.add_argument(
-        "--workers", type=int, default=mp.cpu_count(), help="Worker process count."
-    )
+    parser.add_argument("--time-limit", type=int, default=15, help="Number of time slices.")
+    parser.add_argument("--workers", type=int, default=mp.cpu_count(), help="Worker process count.")
     args = parser.parse_args()
 
     user_ips = filter_users(args.mask, args.directory)
     time_series_dict = extract_time_series(user_ips, args.directory)
     os.makedirs(args.output, exist_ok=True)
 
-    task_args = [
-        (user_ips, time_series_dict, args.output, t) for t in range(args.time_limit)
-    ]
+    task_args = [(user_ips, time_series_dict, args.output, t) for t in range(args.time_limit)]
     with mp.Pool(processes=args.workers) as pool:
         pool.starmap(construct_trees, task_args)
 
