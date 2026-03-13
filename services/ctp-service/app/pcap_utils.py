@@ -58,7 +58,7 @@ import pandas as pd
 from scapy.all import rdpcap, wrpcap, IP
 from scapy.utils import PcapReader
 
-from tree_node import TreeNode
+from app.tree_node import TreeNode
 
 # ---------------------------------------------------------------------------
 # Configuration constants
@@ -205,9 +205,7 @@ def create_selection_pool_on_off(
         node = queue.popleft()
         visited.add(node)
 
-        ons = calculate_on_off_transitions(
-            np.array(node.download_fragment.container), burst_size
-        )
+        ons = calculate_on_off_transitions(np.array(node.download_fragment.container), burst_size)
         on_count = int(np.sum(ons == 1))
 
         nodes[f"{node.network}_{start_index}"] = [
@@ -391,9 +389,7 @@ def merge_pcaps_by_index(
 
     for i in range(0, len(chosen_ips), batch_size):
         current_ips = chosen_ips[i : i + batch_size]
-        args = [
-            str(Path(pcap_dir) / ip / pcap) for ip in current_ips for pcap in pcap_names
-        ]
+        args = [str(Path(pcap_dir) / ip / pcap) for ip in current_ips for pcap in pcap_names]
         cmd = ["joincap", "-w", str(output_file)] + args
         if i != 0:
             os.rename(output_file, tmp_file)
@@ -472,9 +468,7 @@ def reorder_pcap_files(input_dir: str) -> None:
     output_path.mkdir(exist_ok=True)
 
     for file in input_path.glob("*.pcap"):
-        subprocess.run(
-            ["reordercap", str(file), str(output_path / file.name)], check=True
-        )
+        subprocess.run(["reordercap", str(file), str(output_path / file.name)], check=True)
 
     for file in input_path.glob("*"):
         file.unlink()

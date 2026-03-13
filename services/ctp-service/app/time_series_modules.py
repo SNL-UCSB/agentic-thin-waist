@@ -169,9 +169,7 @@ class TimeSeriesProcessor:
 
     def __init__(self, network_prefixes: list[str] | None = None) -> None:
         self.network_prefixes: list[str] = (
-            network_prefixes
-            if network_prefixes is not None
-            else _DEFAULT_NETWORK_PREFIXES
+            network_prefixes if network_prefixes is not None else _DEFAULT_NETWORK_PREFIXES
         )
 
     # ------------------------------------------------------------------
@@ -282,9 +280,7 @@ class TimeSeriesProcessor:
             time_series.download_fragments = self.process_time_frame(
                 time_series.download_time_frames
             )
-            time_series.upload_fragments = self.process_time_frame(
-                time_series.upload_time_frames
-            )
+            time_series.upload_fragments = self.process_time_frame(time_series.upload_time_frames)
 
             time_series.total_fwd_packets = total_fwd_packets
             time_series.total_bwd_packets = total_bwd_packets
@@ -397,9 +393,7 @@ class TimeSeriesProcessor:
         except Exception as e:
             print(f"Error: {e}")
             print(f"Failed to save the time series to PKL file for {output_file}")
-            self._log_error(
-                f"Failed to save the time series to PKL file for {output_file}", e
-            )
+            self._log_error(f"Failed to save the time series to PKL file for {output_file}", e)
             return False
 
     @staticmethod
