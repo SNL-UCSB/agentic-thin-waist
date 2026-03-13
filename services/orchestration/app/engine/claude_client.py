@@ -8,9 +8,13 @@ class ClaudeClient:
     """Thin wrapper around the Anthropic SDK for Steps 3–4."""
 
     def __init__(self, api_key: str | None = None, model: str = "claude-sonnet-4-6"):
-        self.api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
+        self.api_key = (
+            api_key
+            or os.environ.get("CLAUDE_API_KEY")
+            or os.environ.get("ANTHROPIC_API_KEY")
+        )
         if not self.api_key:
-            raise ValueError("ANTHROPIC_API_KEY not set")
+            raise ValueError("CLAUDE_API_KEY or ANTHROPIC_API_KEY must be set")
         self.client = Anthropic(api_key=self.api_key)
         self.model = model
 

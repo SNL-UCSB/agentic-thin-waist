@@ -40,7 +40,7 @@ class OrchestrationResponse(BaseModel):
     intent: str
     generated_experiments: int
     estimated_duration_minutes: Optional[float] = None
-    claude_model: str = "claude-opus-4-6"
+    claude_model: str = "claude-sonnet-4-6"
 
 
 class ReasoningStep(BaseModel):

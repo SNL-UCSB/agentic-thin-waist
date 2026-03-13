@@ -9,6 +9,19 @@ from typing import List
 
 from app.models.schemas import GeneratedExperiment
 
+# Per-application default durations (from app/knowledge/application_defaults.md)
+APP_DEFAULT_DURATIONS = {
+    "youtube": 60,
+    "netflix": 60,
+    "zoom": 120,
+    "twitch": 60,
+    "discord": 120,
+    "google-meet": 120,
+    "ndt": 30,
+    "ping": 30,
+    "iperf3": 30,
+}
+
 
 class ExperimentGenerator:
     def generate(self, parsed_intent: dict) -> List[GeneratedExperiment]:
@@ -18,7 +31,7 @@ class ExperimentGenerator:
         latencies = parsed_intent.get("latencies") or [50]
         cc_algorithms = parsed_intent.get("cc_algorithms") or ["cubic"]
         aqm_policy = parsed_intent.get("aqm_policy") or "fq_codel"
-        duration = parsed_intent.get("duration_seconds") or 60
+        explicit_duration = parsed_intent.get("duration_seconds")
         num_trials = parsed_intent.get("num_trials", 1) or 1
         reasoning = parsed_intent.get("reasoning") or ""
         ctp_cluster = parsed_intent.get("ctp_cluster") or "ctp_low_background"
@@ -26,6 +39,11 @@ class ExperimentGenerator:
         experiments: List[GeneratedExperiment] = []
         counter = 1
         for app, cap, lat, cc in product(apps, capacities, latencies, cc_algorithms):
+            duration = (
+                int(explicit_duration)
+                if explicit_duration is not None
+                else APP_DEFAULT_DURATIONS.get(app, 60)
+            )
             exp = GeneratedExperiment(
                 experiment_id=f"{app}-{cap}mbps-{lat}ms-{cc}-{counter:03d}",
                 capacity_mbps=float(cap),
@@ -33,7 +51,7 @@ class ExperimentGenerator:
                 application=app,
                 cc_algorithm=cc,
                 aqm_policy=aqm_policy,
-                duration_seconds=int(duration),
+                duration_seconds=duration,
                 num_trials=int(num_trials),
                 reasoning=reasoning,
                 ctp_cluster=ctp_cluster,
