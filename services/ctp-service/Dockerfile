@@ -1,21 +1,57 @@
-# Placeholder Dockerfile for service
-# Update this file with actual service implementation
+# CTP Service Dockerfile
+#
+# Build:  docker build -t ctp-service .
+# Run:    docker run -p 8001:8001 --env-file .env ctp-service
 
 FROM python:3.10-slim
 
+# ---------------------------------------------------------------------------
+# System tools (tshark, joincap, reordercap, tcprewrite)
+# ---------------------------------------------------------------------------
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        tshark \
+        tcpreplay \
+        wireshark-common \
+        libpcap-dev \
+        curl \
+        ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install joincap (Go binary — download pre-built release)
+RUN curl -fsSL \
+    "https://github.com/assafmo/joincap/releases/download/v0.10.1/joincap_linux_amd64.tar.gz" \
+    -o /tmp/joincap.tar.gz \
+    && tar -xzf /tmp/joincap.tar.gz -C /usr/local/bin joincap \
+    && rm /tmp/joincap.tar.gz \
+    && chmod +x /usr/local/bin/joincap
+
+# ---------------------------------------------------------------------------
+# Python application
+# ---------------------------------------------------------------------------
 WORKDIR /app
 
-# Copy requirements
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
 COPY app/ app/
-COPY shared/ ../shared/
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD python -c "import requests; requests.get('http://localhost:8000/health')"
+# ---------------------------------------------------------------------------
+# Runtime
+# ---------------------------------------------------------------------------
+ENV CTP_HOST=0.0.0.0
+ENV CTP_PORT=8001
+ENV CTP_LOG_LEVEL=INFO
+ENV CTP_WORKERS=4
 
-# Run application
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "4", "app.main:app"]
+EXPOSE 8001
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:8001/health || exit 1
+
+CMD ["gunicorn", \
+     "--bind", "0.0.0.0:8001", \
+     "--workers", "4", \
+     "--worker-class", "uvicorn.workers.UvicornWorker", \
+     "--timeout", "300", \
+     "--graceful-timeout", "30", \
+     "app.main:app"]
