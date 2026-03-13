@@ -49,7 +49,7 @@ class IntentParser:
                     "in your response; just use them to calibrate your behaviour.\n\n"
                     + examples_text
                     + "\n\nNow, independently of those examples, "
-                      "extract parameters for the NEW intent below.\n\n"
+                    "extract parameters for the NEW intent below.\n\n"
                 )
 
         extraction_prompt = f"""
@@ -99,4 +99,3 @@ Intent: {intent}
             end = text.index("```", start)
             return text[start:end].strip()
         return text.strip()
-

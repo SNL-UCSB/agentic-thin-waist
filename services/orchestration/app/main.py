@@ -9,4 +9,3 @@ app.include_router(intent_router)
 @app.get("/health")
 def health():
     return {"status": "healthy", "checks": {}}
-

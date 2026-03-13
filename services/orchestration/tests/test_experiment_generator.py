@@ -17,30 +17,18 @@ def test_youtube_at_three_capacities_returns_three_experiments():
     #     "reasoning": "",
     # }
 
-    parsed ={
-   
-  "applications": [
-    "youtube"
-  ],
-  "capacities": [
-    10,
-    25,
-    50
-  ],
-  "latencies": None,
-  "cc_algorithms": None,
-  "aqm_policy": None,
-  "ctp_cluster": None,
-  "duration_seconds": None,
-  "num_trials": 1,
-  "clarification_needed": [],
-  "design_type": [
-    "isolated",
-    "isolated",
-    "isolated"
-  ],
-  "reasoning": "The intent clearly specifies a capacity sweep for YouTube at three distinct capacity values: 10, 25, and 50 Mbps. All three are within the valid range [0.1, 10000] Mbps and comfortably above the 3 Mbps minimum recommended for YouTube, so no constraint warnings apply. No latency, CC algorithm, AQM policy, cross-traffic, or duration were specified, so defaults will be applied: latency_ms=50, cc_algorithm=cubic, aqm_policy=fq_codel, duration_seconds=60 (YouTube default). Each capacity value results in one isolated experiment (single application, no concurrent traffic). num_trials defaults to 1. No clarification is needed as the intent is unambiguous."
-
+    parsed = {
+        "applications": ["youtube"],
+        "capacities": [10, 25, 50],
+        "latencies": None,
+        "cc_algorithms": None,
+        "aqm_policy": None,
+        "ctp_cluster": None,
+        "duration_seconds": None,
+        "num_trials": 1,
+        "clarification_needed": [],
+        "design_type": ["isolated", "isolated", "isolated"],
+        "reasoning": "The intent clearly specifies a capacity sweep for YouTube at three distinct capacity values: 10, 25, and 50 Mbps. All three are within the valid range [0.1, 10000] Mbps and comfortably above the 3 Mbps minimum recommended for YouTube, so no constraint warnings apply. No latency, CC algorithm, AQM policy, cross-traffic, or duration were specified, so defaults will be applied: latency_ms=50, cc_algorithm=cubic, aqm_policy=fq_codel, duration_seconds=60 (YouTube default). Each capacity value results in one isolated experiment (single application, no concurrent traffic). num_trials defaults to 1. No clarification is needed as the intent is unambiguous.",
     }
     experiments = generator.generate(parsed)
     assert len(experiments) == 3
@@ -92,9 +80,15 @@ def test_youtube_zoom_at_10_25_50_mbps_from_examples():
             "It is ambiguous whether YouTube and Zoom should run in isolation or concurrently.",
         ],
         "design_type": [
-            "isolated", "isolated", "isolated",
-            "isolated", "isolated", "isolated",
-            "concurrent", "concurrent", "concurrent",
+            "isolated",
+            "isolated",
+            "isolated",
+            "isolated",
+            "isolated",
+            "isolated",
+            "concurrent",
+            "concurrent",
+            "concurrent",
         ],
         "reasoning": "Two applications, three capacity values; Cartesian comparison.",
     }
@@ -109,8 +103,12 @@ def test_youtube_zoom_at_10_25_50_mbps_from_examples():
     assert len(experiments) == 6
     app_cap = [(e.application, e.capacity_mbps) for e in experiments]
     assert set(app_cap) == {
-        ("youtube", 10), ("youtube", 25), ("youtube", 50),
-        ("zoom", 10), ("zoom", 25), ("zoom", 50),
+        ("youtube", 10),
+        ("youtube", 25),
+        ("youtube", 50),
+        ("zoom", 10),
+        ("zoom", 25),
+        ("zoom", 50),
     }
     for e in experiments:
         assert e.latency_ms == 50
@@ -133,35 +131,26 @@ def test_youtube_cubic_bbr_one_capacity_returns_two_experiments():
     #     "reasoning": "",
     # }
 
-
-    parsed={
-  "applications": [
-    "youtube"
-  ],
-  "capacities": [
-    10
-  ],
-  "latencies": None,
-  "cc_algorithms": [
-    "cubic",
-    "bbr"
-  ],
-  "aqm_policy": None,
-  "ctp_cluster": None,
-  "duration_seconds": None,
-  "num_trials": 1,
-  "clarification_needed": [],
-  "design_type": [
-    "isolated",
-    "isolated"
-  ],
-  "reasoning": "The intent is a classic CC algorithm comparison: CUBIC vs BBR for YouTube at a fixed 10 Mbps capacity. This maps directly to the 'CC Algorithm Comparisons' design pattern in the knowledge files. Applications: [youtube] (explicitly stated). Capacities: [10] Mbps (explicitly stated). CC algorithms: [cubic, bbr] (explicitly stated). Latency is not specified, so the default of 50 ms will be used at experiment generation time. AQM policy is not specified, so the default fq_codel will be applied. No cross-traffic is mentioned, so ctp_cluster is null. Duration is not specified, so the YouTube application default of 60s will be used. num_trials defaults to 1 since not specified. The two experiments are 'isolated' because each CC algorithm run is a separate, independent configuration (not concurrent). No clarification is needed \u2014 the intent is unambiguous and well-constrained."
+    parsed = {
+        "applications": ["youtube"],
+        "capacities": [10],
+        "latencies": None,
+        "cc_algorithms": ["cubic", "bbr"],
+        "aqm_policy": None,
+        "ctp_cluster": None,
+        "duration_seconds": None,
+        "num_trials": 1,
+        "clarification_needed": [],
+        "design_type": ["isolated", "isolated"],
+        "reasoning": "The intent is a classic CC algorithm comparison: CUBIC vs BBR for YouTube at a fixed 10 Mbps capacity. This maps directly to the 'CC Algorithm Comparisons' design pattern in the knowledge files. Applications: [youtube] (explicitly stated). Capacities: [10] Mbps (explicitly stated). CC algorithms: [cubic, bbr] (explicitly stated). Latency is not specified, so the default of 50 ms will be used at experiment generation time. AQM policy is not specified, so the default fq_codel will be applied. No cross-traffic is mentioned, so ctp_cluster is null. Duration is not specified, so the YouTube application default of 60s will be used. num_trials defaults to 1 since not specified. The two experiments are 'isolated' because each CC algorithm run is a separate, independent configuration (not concurrent). No clarification is needed \u2014 the intent is unambiguous and well-constrained.",
     }
     experiments = generator.generate(parsed)
     assert len(experiments) == 2
     algs = [e.cc_algorithm for e in experiments]
     assert set(algs) == {"cubic", "bbr"}
-    assert all(e.application == "youtube" and e.capacity_mbps == 10 for e in experiments)
+    assert all(
+        e.application == "youtube" and e.capacity_mbps == 10 for e in experiments
+    )
 
 
 def test_experiment_id_naming_convention():
@@ -210,7 +199,12 @@ def test_per_application_duration_defaults():
     """When duration_seconds is unspecified, use per-application defaults from application_defaults.md."""
     generator = ExperimentGenerator()
     # Zoom/Discord/Google Meet default 120s; YouTube/Netflix/Twitch 60s; ndt/ping/iperf3 30s
-    for app, expected_duration in [("youtube", 60), ("zoom", 120), ("google-meet", 120), ("ndt", 30)]:
+    for app, expected_duration in [
+        ("youtube", 60),
+        ("zoom", 120),
+        ("google-meet", 120),
+        ("ndt", 30),
+    ]:
         parsed = {
             "applications": [app],
             "capacities": [25],
@@ -218,7 +212,9 @@ def test_per_application_duration_defaults():
         }
         experiments = generator.generate(parsed)
         assert len(experiments) == 1
-        assert experiments[0].duration_seconds == expected_duration, f"{app} should default to {expected_duration}s"
+        assert (
+            experiments[0].duration_seconds == expected_duration
+        ), f"{app} should default to {expected_duration}s"
     # Multiple apps: use max of defaults (youtube=60, zoom=120 -> 120)
     parsed = {"applications": ["youtube", "zoom"], "capacities": [25], "reasoning": ""}
     experiments = generator.generate(parsed)

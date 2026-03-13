@@ -64,4 +64,3 @@ def test_intent_parser_extracts_json_from_code_block():
     assert result["latencies"] == [500]
     assert result["design_type"] == ["needs_clarification"]
     assert "Zoom" in result["reasoning"] or "zoom" in result["reasoning"]
-

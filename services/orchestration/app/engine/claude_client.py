@@ -45,4 +45,3 @@ class ClaudeClient:
         """Send a message using the default thin-waist system prompt."""
         system_prompt = self._load_system_prompt()
         return self.send(user_message=user_message, system_prompt=system_prompt)
-

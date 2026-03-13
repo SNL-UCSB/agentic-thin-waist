@@ -108,4 +108,3 @@ def test_orchestration_result_valid():
     )
     assert result.status == OrchestrationStatus.complete
     assert result.summary["conclusion"].startswith("YouTube performs well")
-

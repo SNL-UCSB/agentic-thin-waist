@@ -15,9 +15,7 @@ class DummyMessagesClient:
         self.last_args = args
         self.last_kwargs = kwargs
         # Minimal object with the shape used in ClaudeClient.send
-        return SimpleNamespace(
-            content=[SimpleNamespace(text="dummy-response")]
-        )
+        return SimpleNamespace(content=[SimpleNamespace(text="dummy-response")])
 
 
 class DummyAnthropicClient:
@@ -80,5 +78,6 @@ def test_claude_client_send_returns_text(monkeypatch):
     assert msgs.last_kwargs["model"] == "claude-sonnet-4-6"
     assert msgs.last_kwargs["max_tokens"] == 2048
     assert msgs.last_kwargs["system"] == "You are a test."
-    assert msgs.last_kwargs["messages"] == [{"role": "user", "content": "Hello, Claude"}]
-
+    assert msgs.last_kwargs["messages"] == [
+        {"role": "user", "content": "Hello, Claude"}
+    ]
