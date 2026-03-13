@@ -1,8 +1,10 @@
 """End-to-end test: API → IntentParser → ExperimentGenerator → config + orchestration_id.
 
-WARNING: This test uses the REAL API and real Claude (IntentParser). It requires
-ANTHROPIC_API_KEY to be set and will make live API calls. Run with:
-  pytest services/orchestration/tests/test_end_to_end_real_api_warning.py -v -s
+WARNING: This test uses the REAL API and real Claude (IntentParser). It is opt-in only.
+To run it:
+  1. Set RUN_REAL_CLAUDE_TESTS=1 (or any non-empty value).
+  2. Set at least one of CLAUDE_API_KEY or ANTHROPIC_API_KEY (ClaudeClient supports either).
+  3. Run: pytest services/orchestration/tests/test_end_to_end_real_api_warning.py -v -s
 
 The -s flag is required to see printed output (parser result, experiment config, id).
 """
@@ -22,10 +24,24 @@ from app.engine.experiment_generator import ExperimentGenerator
 # Intent used for the full flow
 INTENT = "Discord and Youtube at 50 Mbps and 100ms"
 
-# Require API key for this module (real API warning)
+
+def _should_skip_real_api_tests() -> bool:
+    """Skip unless explicitly opt-in and API key is available (matches ClaudeClient)."""
+    if not os.environ.get("RUN_REAL_CLAUDE_TESTS"):
+        return True
+    has_key = bool(
+        os.environ.get("CLAUDE_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")
+    )
+    return not has_key
+
+
+# Opt-in only: require RUN_REAL_CLAUDE_TESTS=1 and (CLAUDE_API_KEY or ANTHROPIC_API_KEY)
 pytestmark = pytest.mark.skipif(
-    not os.environ.get("ANTHROPIC_API_KEY"),
-    reason="ANTHROPIC_API_KEY not set; this test uses real Claude API",
+    _should_skip_real_api_tests(),
+    reason=(
+        "Set RUN_REAL_CLAUDE_TESTS=1 and CLAUDE_API_KEY or ANTHROPIC_API_KEY to run "
+        "real Claude API tests"
+    ),
 )
 
 
