@@ -1,0 +1,546 @@
+openapi: 3.0.3
+info:
+  title: Telemetry Service API
+  version: 1.0.0
+  description: >
+    API for storing and querying network experiment results and artifacts.
+    Results capture bottleneck state, QoE metrics, transport state, and
+    contextual metadata. Artifacts (logs, pcaps, etc.) can be uploaded
+    and associated with individual results.
+
+# TODO: change this part after deployment
+servers:
+  - url: http://localhost:8004
+    description: Local development server
+
+paths:
+  /health:
+    get:
+      summary: Health check
+      operationId: healthcheck
+      tags: [Health]
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: Success
+
+  /results:
+    post:
+      summary: Store a new experiment result
+      operationId: addResults
+      tags: [Results]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - experiment_id
+                - status
+              properties:
+                experiment_id:
+                  type: string
+                  description: Identifier of the experiment this result belongs to.
+                status:
+                  type: string
+                  description: Outcome status of the trial (e.g. "success", "failed").
+                trial_number:
+                  type: integer
+                  default: 1
+                  description: Trial number within the experiment.
+                bottleneck_state:
+                  type: object
+                  description: Configured and measured bottleneck parameters.
+                  properties:
+                    configured_capacity:
+                      type: number
+                    configured_latency:
+                      type: number
+                    measured_throughput:
+                      type: number
+                    measured_rtt:
+                      type: number
+                contextual_tree:
+                  type: object
+                  description: >
+                    Hierarchical context metadata. The c_app sub-object should
+                    contain an "application" field. The c_trans sub-object may
+                    contain "congestion_control" and "protocol" fields.
+                qoe_metrics:
+                  type: object
+                  description: Quality-of-experience measurements.
+                transport_state:
+                  type: object
+                  description: Transport-layer state snapshot.
+                pcap_path:
+                  type: string
+                  description: Path to an associated packet capture file.
+      responses:
+        "201":
+          description: Result stored successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result_id:
+                    type: string
+                    format: uuid
+                  experiment_id:
+                    type: string
+                  status:
+                    type: string
+                    example: stored
+                  created_at:
+                    type: string
+                    format: date-time
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+    get:
+      summary: Query results with filters
+      operationId: getResultsByFilters
+      tags: [Results]
+      parameters:
+        - name: experiment_id
+          in: query
+          description: Filter by experiment ID.
+          schema:
+            type: string
+        - name: application
+          in: query
+          description: Filter by application name.
+          schema:
+            type: string
+        - name: capacity_min
+          in: query
+          description: Minimum configured capacity (inclusive).
+          schema:
+            type: number
+        - name: capacity_max
+          in: query
+          description: Maximum configured capacity (inclusive).
+          schema:
+            type: number
+        - name: latency_min
+          in: query
+          description: Minimum configured latency (inclusive).
+          schema:
+            type: number
+        - name: latency_max
+          in: query
+          description: Maximum configured latency (inclusive).
+          schema:
+            type: number
+        - name: congestion_control
+          in: query
+          description: Filter by congestion control algorithm.
+          schema:
+            type: string
+        - name: created_after
+          in: query
+          description: Only results created at or after this ISO 8601 timestamp.
+          schema:
+            type: string
+            format: date-time
+        - name: created_before
+          in: query
+          description: Only results created at or before this ISO 8601 timestamp.
+          schema:
+            type: string
+            format: date-time
+        - name: tags
+          in: query
+          description: Comma-separated list of tags. Results must contain all specified tags.
+          schema:
+            type: string
+        - name: sort_by
+          in: query
+          description: Column to sort by.
+          schema:
+            type: string
+            default: created_at
+        - name: sort_order
+          in: query
+          description: Sort direction.
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
+        - name: limit
+          in: query
+          description: Maximum number of results to return (capped at 500).
+          schema:
+            type: integer
+            default: 50
+            maximum: 500
+        - name: offset
+          in: query
+          description: Number of results to skip for pagination.
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: Paginated list of results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Result"
+                  total:
+                    type: integer
+                    description: Total number of results matching the filters.
+                  limit:
+                    type: integer
+                  offset:
+                    type: integer
+                  returned:
+                    type: integer
+                    description: Number of results in this response.
+        "400":
+          description: Invalid limit or offset
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /results/{result_id}:
+    get:
+      summary: Get a single result by ID
+      operationId: getResultsById
+      tags: [Results]
+      parameters:
+        - name: result_id
+          in: path
+          required: true
+          description: UUID of the result.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The requested result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Result"
+        "404":
+          description: Result not found
+
+  /results/{result_id}/artifacts:
+    get:
+      summary: List artifacts for a result
+      operationId: getResultsArtifactsById
+      tags: [Results, Artifacts]
+      parameters:
+        - name: result_id
+          in: path
+          required: true
+          description: UUID of the result.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: List of artifacts associated with the result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  artifacts:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Artifact"
+        "404":
+          description: Result not found
+
+  /results/{result_id}/tags:
+    post:
+      summary: Add tags to a result
+      operationId: addTagsToResultsById
+      tags: [Results]
+      parameters:
+        - name: result_id
+          in: path
+          required: true
+          description: UUID of the result.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                tags:
+                  type: array
+                  items:
+                    type: string
+                  description: Tags to add. Duplicates with existing tags are ignored.
+      responses:
+        "200":
+          description: Updated tag list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result_id:
+                    type: string
+                    format: uuid
+                  tags:
+                    type: array
+                    items:
+                      type: string
+        "400":
+          description: Invalid or missing JSON body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Result not found
+
+  /results/export/csv:
+    get:
+      summary: Export filtered results as CSV
+      operationId: getResultsAsCsvByFilters
+      description: >
+        Applies the same filters as GET /results and returns matching rows
+        as a CSV file download. Limited to 10,000 rows.
+      tags: [Results]
+      parameters:
+        - name: experiment_id
+          in: query
+          description: Filter by experiment ID.
+          schema:
+            type: string
+        - name: application
+          in: query
+          description: Filter by application name.
+          schema:
+            type: string
+        - name: capacity_min
+          in: query
+          description: Minimum configured capacity (inclusive).
+          schema:
+            type: number
+        - name: capacity_max
+          in: query
+          description: Maximum configured capacity (inclusive).
+          schema:
+            type: number
+        - name: latency_min
+          in: query
+          description: Minimum configured latency (inclusive).
+          schema:
+            type: number
+        - name: latency_max
+          in: query
+          description: Maximum configured latency (inclusive).
+          schema:
+            type: number
+        - name: congestion_control
+          in: query
+          description: Filter by congestion control algorithm.
+          schema:
+            type: string
+        - name: created_after
+          in: query
+          description: Only results created at or after this ISO 8601 timestamp.
+          schema:
+            type: string
+            format: date-time
+        - name: created_before
+          in: query
+          description: Only results created at or before this ISO 8601 timestamp.
+          schema:
+            type: string
+            format: date-time
+        - name: tags
+          in: query
+          description: Comma-separated list of tags. Results must contain all specified tags.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: CSV file download
+          content:
+            text/csv:
+              schema:
+                type: string
+                format: binary
+          headers:
+            Content-Disposition:
+              description: Suggested filename for the download.
+              schema:
+                type: string
+                example: attachment; filename=results.csv
+        "400":
+          description: Query exceeds the 10,000 row export limit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /artifacts:
+    post:
+      summary: Upload an artifact file
+      operationId: addArtifacts
+      tags: [Artifacts]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - result_id
+                - file
+              properties:
+                result_id:
+                  type: string
+                  description: UUID of the result to associate the artifact with.
+                artifact_type:
+                  type: string
+                  default: log
+                  description: Type of artifact (e.g. "log", "pcap").
+                file:
+                  type: string
+                  format: binary
+                  description: The file to upload.
+      responses:
+        "201":
+          description: Artifact stored successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Artifact"
+        "400":
+          description: Missing result_id or file
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Associated result not found
+
+  /artifacts/{artifact_id}:
+    get:
+      summary: Download an artifact file
+      operationId: getArtifactsById
+      tags: [Artifacts]
+      parameters:
+        - name: artifact_id
+          in: path
+          required: true
+          description: UUID of the artifact.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: File download
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+          headers:
+            Content-Disposition:
+              description: Original filename of the artifact.
+              schema:
+                type: string
+                example: attachment; filename=capture.pcap
+        "404":
+          description: Artifact not found
+
+components:
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Human-readable error message.
+        details:
+          type: object
+          description: Field-level validation errors (when applicable).
+
+    Result:
+      type: object
+      properties:
+        result_id:
+          type: string
+          format: uuid
+        experiment_id:
+          type: string
+        trial_number:
+          type: integer
+        application:
+          type: string
+        status:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        configured_capacity:
+          type: number
+        configured_latency:
+          type: number
+        measured_throughput:
+          type: number
+        measured_rtt:
+          type: number
+        qoe_metrics:
+          type: object
+        transport_state:
+          type: object
+        contextual_tree:
+          type: object
+        pcap_path:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+
+    Artifact:
+      type: object
+      properties:
+        artifact_id:
+          type: string
+          format: uuid
+        result_id:
+          type: string
+        artifact_type:
+          type: string
+        filename:
+          type: string
+        size_bytes:
+          type: integer
+        storage_path:
+          type: string
+        created_at:
+          type: string
+          format: date-time
