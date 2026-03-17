@@ -1,4 +1,4 @@
-from s3.client import S3Client
+from shared.s3.client import S3Client
 
 from flask_sqlalchemy import SQLAlchemy
 
