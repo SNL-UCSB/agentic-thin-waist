@@ -1,0 +1,22 @@
+---
+# =============================================================================
+# verify.yml — End-to-end verification of the netReplica distributed setup
+#
+# Checks on every server:
+#   - Systemd services are active
+#   - Kernel modules are loaded
+#   - Network interfaces and namespaces exist
+#   - iptables rules are in place
+#   - Inter-server connectivity (ping tests)
+#
+# Usage:
+#   ansible-playbook -i inventory/hosts.yml playbooks/verify.yml
+# =============================================================================
+
+- name: Verify netReplica distributed setup
+  hosts: all
+  become: true
+  gather_facts: true
+
+  roles:
+    - verify

@@ -1,0 +1,18 @@
+---
+# =============================================================================
+# libreqos.yml — Configure the LibreQoS server (Traffic Shaper)
+#
+# NOTE: LibreQoS must be pre-installed per https://libreqos.readthedocs.io
+#
+# Usage (standalone):
+#   ansible-playbook -i inventory/hosts.yml playbooks/libreqos.yml
+# =============================================================================
+
+- name: Configure LibreQoS server
+  hosts: libreqos
+  become: true
+  gather_facts: true
+
+  roles:
+    - common
+    - libreqos
