@@ -61,8 +61,8 @@ services:
   # D1: Experiment API - Orchestration Layer
   experiment-api:
     build:
-      context: ./services/experiment-api
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./services/experiment-api/Dockerfile
     container_name: experiment-api
     ports:
       - "8000:8000"
@@ -90,8 +90,8 @@ services:
   # D1: CTP Service - Network Representation
   ctp-service:
     build:
-      context: ./services/ctp-service
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./services/ctp-service/Dockerfile
     container_name: ctp-service
     ports:
       - "8001:8001"
@@ -110,8 +110,8 @@ services:
   # D1: Substrate Worker - Network Execution
   substrate-worker:
     build:
-      context: ./services/substrate-worker
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./services/substrate-worker/Dockerfile
     container_name: substrate-worker
     ports:
       - "8002:8002"
@@ -139,8 +139,8 @@ services:
   # D2: NetGent Service - Application Execution
   netgent-service:
     build:
-      context: ./services/netgent-service
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./services/netgent-service/Dockerfile
     container_name: netgent-service
     ports:
       - "8003:8003"
@@ -200,8 +200,8 @@ services:
   # D5: Orchestration Service - Claude + OpenClaw
   orchestration:
     build:
-      context: ./services/orchestration
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./services/orchestration/Dockerfile
     container_name: orchestration
     ports:
       - "8005:8005"
