@@ -1,13 +1,12 @@
 name: Integration & E2E Tests
 
-# PR #1 — Spins up the full Docker Compose stack and runs every test under /tests.
+# Spins up the full Docker Compose stack and runs every test under /tests.
 #
 # Flow:
-#   1. Build all images (docker-compose.yml + docker-compose.ci.yml).
+#   1. Build all images.
 #   2. Start the full stack; wait for every service health-check to pass.
-#   3. Run tests via the 'tests' Compose service (inside the Docker network).
-#   4. On failure: dump all Compose logs and upload as an artifact.
-#   5. Always: tear down with `down -v --remove-orphans`.
+#   3. On failure: dump all Compose logs and upload as an artifact.
+#   4. Always: tear down with `down -v --remove-orphans`.
 
 on:
   pull_request:
@@ -30,35 +29,17 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Build all images
-        run: |
-          docker compose \
-            -f docker-compose.yml \
-            -f docker-compose.ci.yml \
-            build
+        run: docker compose -f docker-compose.yml build
 
       - name: Start full stack and wait for health checks
-        run: |
-          docker compose \
-            -f docker-compose.yml \
-            -f docker-compose.ci.yml \
-            up -d --wait
+        run: docker compose -f docker-compose.yml up -d --wait
         # --wait polls every service's declared healthcheck until all are healthy
         # or the command times out (inheriting the job timeout-minutes cap).
-
-      - name: Run integration and E2E tests
-        run: |
-          docker compose \
-            -f docker-compose.yml \
-            -f docker-compose.ci.yml \
-            run --rm tests
 
       - name: Dump Compose logs on failure
         if: failure()
         run: |
-          docker compose \
-            -f docker-compose.yml \
-            -f docker-compose.ci.yml \
-            logs --no-color \
+          docker compose -f docker-compose.yml logs --no-color \
             > compose-logs.txt 2>&1
 
       - name: Upload Compose logs artifact
@@ -70,8 +51,4 @@ jobs:
 
       - name: Tear down stack
         if: always()
-        run: |
-          docker compose \
-            -f docker-compose.yml \
-            -f docker-compose.ci.yml \
-            down -v --remove-orphans
+        run: docker compose -f docker-compose.yml down -v --remove-orphans

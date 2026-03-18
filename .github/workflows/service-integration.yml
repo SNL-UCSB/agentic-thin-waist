@@ -1,6 +1,6 @@
 name: Service-Scoped Integration Tests (Matrix)
 
-# PR #2 — Runs service-scoped integration tests from /tests using a matrix strategy.
+# Runs service-scoped integration tests from /tests using a matrix strategy.
 #
 # Each matrix entry brings up only the relevant service(s) and their required
 # dependencies, then runs the corresponding tests from the root /tests folder.
@@ -63,16 +63,12 @@ jobs:
 
       - name: Build images for ${{ matrix.name }}
         run: |
-          docker compose \
-            -f docker-compose.yml \
-            -f docker-compose.ci.yml \
+          docker compose -f docker-compose.yml \
             build ${{ matrix.compose_services }}
 
       - name: Start services for ${{ matrix.name }} and wait for health checks
         run: |
-          docker compose \
-            -f docker-compose.yml \
-            -f docker-compose.ci.yml \
+          docker compose -f docker-compose.yml \
             up -d --wait ${{ matrix.compose_services }}
         # --wait polls each started service's healthcheck until healthy or timeout.
 
@@ -94,10 +90,7 @@ jobs:
       - name: Dump Compose logs on failure
         if: failure()
         run: |
-          docker compose \
-            -f docker-compose.yml \
-            -f docker-compose.ci.yml \
-            logs --no-color \
+          docker compose -f docker-compose.yml logs --no-color \
             ${{ matrix.compose_services }} \
             > compose-logs-${{ matrix.name }}.txt 2>&1
 
@@ -111,7 +104,4 @@ jobs:
       - name: Tear down services
         if: always()
         run: |
-          docker compose \
-            -f docker-compose.yml \
-            -f docker-compose.ci.yml \
-            down -v --remove-orphans
+          docker compose -f docker-compose.yml down -v --remove-orphans
