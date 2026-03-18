@@ -186,13 +186,16 @@ class CTPTransformer:
             upload_pcap, bin_width_ms=bin_ms, window_sec=window_sec
         )
 
-        new_intensity, new_burstiness, new_correlation, new_structure = (
-            compute_all_metrics(
-                upload_ts=new_upload_ts,
-                download_ts=new_download_ts,
-                bin_width_sec=bin_sec,
-                contributor_ips=leaf_ips,
-            )
+        (
+            new_intensity,
+            new_burstiness,
+            new_correlation,
+            new_structure,
+        ) = compute_all_metrics(
+            upload_ts=new_upload_ts,
+            download_ts=new_download_ts,
+            bin_width_sec=bin_sec,
+            contributor_ips=leaf_ips,
         )
 
         # ---- Build transformed CTP descriptor ----
