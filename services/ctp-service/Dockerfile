@@ -22,8 +22,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN curl -fsSL \
     "https://github.com/assafmo/joincap/releases/download/v0.10.1/joincap-linux64-v0.10.1.zip" \
     -o /tmp/joincap.zip \
-    && unzip /tmp/joincap.zip -d /usr/local/bin \
+    && unzip /tmp/joincap.zip -d /tmp \
     && rm /tmp/joincap.zip \
+    && mv /tmp/joincap* /usr/local/bin/joincap \
     && chmod +x /usr/local/bin/joincap
 
 # ---------------------------------------------------------------------------
