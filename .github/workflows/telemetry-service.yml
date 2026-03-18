@@ -28,3 +28,6 @@ jobs:
             -v ${{ github.workspace }}/services/telemetry-service/tests:/app/tests \
             telemetry-service \
             python -m pytest tests/ -v --tb=short
+
+      - name: Start service via Docker Compose
+        run: docker compose up -d --wait telemetry-service

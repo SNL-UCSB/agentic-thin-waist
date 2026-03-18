@@ -31,3 +31,6 @@ jobs:
             -v ${{ github.workspace }}/services/orchestration/tests:/app/tests \
             orchestration \
             python -m pytest tests/ -v --tb=short
+
+      - name: Start service via Docker Compose
+        run: docker compose up -d --wait orchestration
