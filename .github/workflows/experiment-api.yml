@@ -13,17 +13,14 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: services/experiment-api
+        working-directory: .
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Copy shared module into build context
-        run: cp -r ../../shared ./shared
-
       - name: Build Docker image
-        run: docker build -t experiment-api .
+        run: docker build -f services/experiment-api/Dockerfile -t experiment-api .
 
       - name: Run tests
         run: |
