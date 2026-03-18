@@ -26,6 +26,7 @@ def within_tolerance(measured: float, expected: float, tol: float = TOLERANCE) -
 
 # ── /health ───────────────────────────────────────────────────────────────────
 
+
 @pytest.mark.skip(reason="Not ready yet.")
 class TestHealthIntegration:
     @pytest.fixture(autouse=True, scope="class")
