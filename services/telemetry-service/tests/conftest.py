@@ -20,7 +20,7 @@ class JsonEncodedList(TypeDecorator):
 
 @pytest.fixture(scope="session")
 def app():
-    with patch("s3.client.S3Client") as mock_s3_class:
+    with patch("shared.s3.client.S3Client") as mock_s3_class:
         mock_s3_class.return_value = MagicMock()
 
         from app.telemetry import db as _db

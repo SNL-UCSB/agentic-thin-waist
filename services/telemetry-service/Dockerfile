@@ -5,11 +5,12 @@ WORKDIR /app
 # Install packages
 RUN apk add --no-cache make
 # Copy requirements
-COPY requirements.txt .
+COPY services/telemetry-service/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
-COPY . .
+COPY services/telemetry-service/ .
+COPY shared/ shared/
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
