@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 import subprocess
 import os
-from typing import Dict, List, Optional
+from typing import Dict, List, Literal, Optional
 from datetime import datetime
 import uuid
 import time
@@ -259,6 +259,7 @@ def apply_shaping(
     qdisc: str,
     buffer_packets: int,
     qdisc_params: Optional[Dict[str, str]] = None,
+    latency_location: Optional[str] = None,
 ) -> List[str]:
     applied: List[str] = []
     qdisc_args = _build_qdisc_args(qdisc, buffer_packets, qdisc_params)
@@ -490,6 +491,7 @@ def shape(cfg: ShapeRequest) -> ShapeResponse:
                 qdisc=cfg.qdisc,
                 buffer_packets=cfg.buffer_packets,
                 qdisc_params=cfg.qdisc_params,
+                latency_location=cfg.latency_location,
             )
         )
     except subprocess.CalledProcessError as exc:
