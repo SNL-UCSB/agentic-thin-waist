@@ -1,2 +1,2 @@
-def test_shared_dummy():
+def test_placeholder():
     assert True
