@@ -13,17 +13,14 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: services/netgent-service
+        working-directory: .
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Copy shared module into build context
-        run: cp -r ../../shared ./shared
-
       - name: Build Docker image
-        run: docker build -t netgent-service .
+        run: docker build -f services/netgent-service/Dockerfile -t netgent-service .
 
       - name: Run tests
         run: |

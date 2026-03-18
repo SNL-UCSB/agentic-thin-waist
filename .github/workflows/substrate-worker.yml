@@ -13,17 +13,14 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: services/substrate-worker
+        working-directory: .
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Copy shared module into build context
-        run: cp -r ../../shared ./shared
-
       - name: Build Docker image
-        run: docker build -t substrate-worker .
+        run: docker build -f services/substrate-worker/Dockerfile -t substrate-worker .
 
       - name: Run tests
         run: |
