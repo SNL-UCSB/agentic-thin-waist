@@ -22,13 +22,13 @@ jobs:
       - name: Build Docker image
         run: docker build -f services/ctp-service/Dockerfile -t ctp-service .
 
-      - name: Start service via Docker Compose
-        working-directory: ${{ github.workspace }}
-        run: docker compose up -d --wait ctp-service
-
       - name: Run tests
         run: |
           docker run --rm \
             -v ${{ github.workspace }}/services/ctp-service/tests:/app/tests \
             ctp-service \
             python -m pytest tests/ -v --tb=short
+
+      - name: Start service via Docker Compose
+        working-directory: ${{ github.workspace }}
+        run: docker compose up -d --wait ctp-service

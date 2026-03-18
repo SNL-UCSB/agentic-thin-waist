@@ -22,16 +22,13 @@ jobs:
       - name: Build Docker image
         run: docker build -f services/experiment-api/Dockerfile -t experiment-api .
 
-      - name: Start service via Docker Compose
-        working-directory: ${{ github.workspace }}
-        run: |
-          test -d shared
-          cp -r shared services/experiment-api/shared
-          docker compose up -d --wait experiment-api
-
       - name: Run tests
         run: |
           docker run --rm \
             -v ${{ github.workspace }}/services/experiment-api/tests:/app/tests \
             experiment-api \
             python -m pytest tests/ -v --tb=short
+
+      - name: Start service via Docker Compose
+        working-directory: ${{ github.workspace }}
+        run: docker compose up -d --wait experiment-api
