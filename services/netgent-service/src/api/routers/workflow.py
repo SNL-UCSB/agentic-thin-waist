@@ -33,7 +33,12 @@ router = APIRouter()
 def execute_workflow(
     request: ExecuteWorkflowRequest,
 ) -> ExecuteWorkflowResponse:
-    return ExecuteWorkflowResponse(workflow_id="wf-executed-abc123", status="completed", start_time="2026-03-04T10:00:00Z", estimated_completion="2026-03-04T10:02:05Z")
+    return ExecuteWorkflowResponse(
+        workflow_id="wf-executed-abc123",
+        status="completed",
+        start_time="2026-03-04T10:00:00Z",
+        estimated_completion="2026-03-04T10:02:05Z",
+    )
 
 
 @router.post(
@@ -88,15 +93,16 @@ def compile_workflow(
 def validate_workflow(
     request: ValidateWorkflowRequest,
 ) -> ValidateWorkflowResponse:
-    return ValidateWorkflowResponse(valid=True, errors=[], warnings=[], estimated_duration_seconds=62, state_count=3)
+    return ValidateWorkflowResponse(
+        valid=True, errors=[], warnings=[], estimated_duration_seconds=62, state_count=3
+    )
 
 
 @router.get(
     "/available",
     response_model=AvailableWorkflowsResponse,
 )
-def get_available_workflows(
-) -> AvailableWorkflowsResponse:
+def get_available_workflows() -> AvailableWorkflowsResponse:
     return AvailableWorkflowsResponse(
         applications=[
             AvailableWorkflowItem(

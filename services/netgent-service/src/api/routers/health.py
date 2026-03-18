@@ -15,8 +15,7 @@ router = APIRouter()
     response_model=HealthResponse,
     tags=["health"],
 )
-def health_check(
-) -> HealthResponse:
+def health_check() -> HealthResponse:
     return HealthResponse(
         status="ok",
         checks=HealthChecks(
