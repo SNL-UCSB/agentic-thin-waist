@@ -25,6 +25,9 @@ jobs:
       - name: Build Docker image
         run: docker build -t telemetry-service .
 
+      - name: Start service via Docker Compose
+        run: docker compose -f ../../docker-compose.yml up -d --wait telemetry-service
+
       - name: Run tests
         run: |
           docker run --rm \
