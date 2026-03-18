@@ -277,7 +277,9 @@ def _prefix_diversity(ips: List[str], prefix_octets: int = 3) -> float:
 
     n = len(ips)
     entropy = -sum(
-        (count / n) * math.log2(count / n) for count in prefix_counts.values() if count > 0
+        (count / n) * math.log2(count / n)
+        for count in prefix_counts.values()
+        if count > 0
     )
     max_entropy = math.log2(len(prefix_counts)) if len(prefix_counts) > 1 else 1.0
     return entropy / max_entropy if max_entropy > 0 else 0.0

@@ -142,7 +142,9 @@ def run_timeseries_stage(
 
     logger.info("=== Legacy Stage 1: pcap -> timeseries ===")
     processor = TimeSeriesProcessor(network_prefixes=network_prefixes)
-    folders = [f for f in os.listdir(pcap_dir) if os.path.isdir(os.path.join(pcap_dir, f))]
+    folders = [
+        f for f in os.listdir(pcap_dir) if os.path.isdir(os.path.join(pcap_dir, f))
+    ]
     args = [(folder, pcap_dir, ts_dir) for folder in folders]
     with mp.Pool(processes=workers) as pool:
         pool.starmap(processor.load_pcap, args)
@@ -224,7 +226,8 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["extract", "legacy"],
         default="extract",
         help=(
-            "'extract': full pipeline PCAP → PostgreSQL. " "'legacy': original JSON-tree pipeline."
+            "'extract': full pipeline PCAP → PostgreSQL. "
+            "'legacy': original JSON-tree pipeline."
         ),
     )
 
@@ -367,10 +370,14 @@ def main() -> None:
             parser.error("Legacy mode requires --pcap-dir, --ts-dir, and --tree-dir.")
 
         if not args.skip_timeseries:
-            run_timeseries_stage(args.pcap_dir, args.ts_dir, args.network_prefixes, args.workers)
+            run_timeseries_stage(
+                args.pcap_dir, args.ts_dir, args.network_prefixes, args.workers
+            )
 
         if not args.skip_trees:
-            run_tree_stage(args.ts_dir, args.tree_dir, args.mask, args.time_limit, args.workers)
+            run_tree_stage(
+                args.ts_dir, args.tree_dir, args.mask, args.time_limit, args.workers
+            )
 
         if not args.skip_post_process:
             processed_dir = args.processed_tree_dir or f"{args.tree_dir}_processed"

@@ -33,6 +33,9 @@ from typing import List, Optional, Tuple
 from app.config import Settings, get_settings
 from app.database.postgres import Database
 from app.models.ctp import CrossTrafficProfile
+from app.pcap_utils import (
+    _reorder_single_pcap,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +84,7 @@ class CTPExporter:
             raise ValueError(f"CTP '{ctp_id}' not found in corpus.")
 
         safe_id = ctp_id.replace("/", "_").replace(":", "-")
-        dataset_out = Path(replay_dir) / ctp.dataset_name
+        dataset_out = Path(replay_dir) / f"{ctp.dataset_name}_replay"
         downlink_dir = dataset_out / "downlink"
         uplink_dir = dataset_out / "uplink"
         downlink_dir.mkdir(parents=True, exist_ok=True)
@@ -92,7 +95,9 @@ class CTPExporter:
 
         # Return cached files if they already exist
         if download_pcap.exists() and upload_pcap.exists():
-            logger.info("Replay PCAPs already exist for '%s'; returning cached files.", ctp_id)
+            logger.info(
+                "Replay PCAPs already exist for '%s'; returning cached files.", ctp_id
+            )
             return download_pcap, upload_pcap
 
         # Resolve leaf user IPs
@@ -120,6 +125,7 @@ class CTPExporter:
             )
             if pcap_files:
                 _joincap_merge(pcap_files, out_path)
+                _reorder_single_pcap(out_path)
             else:
                 logger.warning(
                     "No %s PCAPs found for CTP '%s'; output will be missing.",

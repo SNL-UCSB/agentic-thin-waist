@@ -47,10 +47,21 @@ CREATE TABLE IF NOT EXISTS ctp_nodes (
     temporal_correlation JSONB NOT NULL DEFAULT '{}',
     structure            JSONB NOT NULL DEFAULT '{}',
 
+    -- Transform metadata
+    is_transformed          BOOLEAN     NOT NULL DEFAULT FALSE,
+    throughput_threshold_mbps FLOAT8,
+    download_pcap           TEXT,
+    upload_pcap             TEXT,
+
+    -- Merge metadata
+    is_merged               BOOLEAN     NOT NULL DEFAULT FALSE,
+    merge_start_index       INTEGER,
+    merge_end_index         INTEGER,
+
     -- Housekeeping
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
-    PRIMARY KEY (dataset_name, subnet, window_index)
+    PRIMARY KEY (ctp_id)
 );
 
 COMMENT ON TABLE ctp_nodes IS

@@ -76,7 +76,9 @@ class CTPSelector:
             offset=offset,
             order_by=order_by,
         )
-        logger.info("Select returned %d/%d CTP(s) matching the query.", len(ctps), total)
+        logger.info(
+            "Select returned %d/%d CTP(s) matching the query.", len(ctps), total
+        )
         return total, ctps
 
     def get_by_id(self, ctp_id: str) -> Optional[CrossTrafficProfile]:

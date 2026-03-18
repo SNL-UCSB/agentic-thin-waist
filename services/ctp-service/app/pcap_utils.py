@@ -205,7 +205,9 @@ def create_selection_pool_on_off(
         node = queue.popleft()
         visited.add(node)
 
-        ons = calculate_on_off_transitions(np.array(node.download_fragment.container), burst_size)
+        ons = calculate_on_off_transitions(
+            np.array(node.download_fragment.container), burst_size
+        )
         on_count = int(np.sum(ons == 1))
 
         nodes[f"{node.network}_{start_index}"] = [
@@ -389,7 +391,9 @@ def merge_pcaps_by_index(
 
     for i in range(0, len(chosen_ips), batch_size):
         current_ips = chosen_ips[i : i + batch_size]
-        args = [str(Path(pcap_dir) / ip / pcap) for ip in current_ips for pcap in pcap_names]
+        args = [
+            str(Path(pcap_dir) / ip / pcap) for ip in current_ips for pcap in pcap_names
+        ]
         cmd = ["joincap", "-w", str(output_file)] + args
         if i != 0:
             os.rename(output_file, tmp_file)
@@ -468,7 +472,9 @@ def reorder_pcap_files(input_dir: str) -> None:
     output_path.mkdir(exist_ok=True)
 
     for file in input_path.glob("*.pcap"):
-        subprocess.run(["reordercap", str(file), str(output_path / file.name)], check=True)
+        subprocess.run(
+            ["reordercap", str(file), str(output_path / file.name)], check=True
+        )
 
     for file in input_path.glob("*"):
         file.unlink()
@@ -631,6 +637,33 @@ def validate_pcap_lengths(file_name: str) -> None:
 
     if not all(data.iloc[:, 0] > data.iloc[:, 1]):
         logger.error(f"Invalid frame lengths in {file_name}")
+
+
+def _reorder_single_pcap(pcap_path: Path) -> None:
+    """Reorder packets in a single PCAP file using ``reordercap``.
+
+    Writes to a temporary file then replaces the original.
+
+    Args:
+        pcap_path: Path to the PCAP to reorder (modified in-place).
+    """
+    tmp = pcap_path.with_suffix(".reorder_tmp.pcap")
+    try:
+        subprocess.run(
+            ["reordercap", str(pcap_path), str(tmp)],
+            check=True,
+            capture_output=True,
+        )
+        tmp.rename(pcap_path)
+    except subprocess.CalledProcessError as exc:
+        logger.error(
+            "reordercap failed for '%s': %s",
+            pcap_path,
+            exc.stderr.decode(errors="replace"),
+        )
+        if tmp.exists():
+            tmp.unlink()
+        raise
 
 
 # ---------------------------------------------------------------------------

@@ -56,7 +56,8 @@ def get_db() -> Database:
     """
     if _db is None:
         raise RuntimeError(
-            "Database not initialised. " "Ensure the FastAPI app lifespan has completed startup."
+            "Database not initialised. "
+            "Ensure the FastAPI app lifespan has completed startup."
         )
     return _db
 

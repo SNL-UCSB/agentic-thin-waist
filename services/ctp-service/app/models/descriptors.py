@@ -81,16 +81,24 @@ class SelectQuery(BaseModel):
 
     dataset_name: Optional[str] = None
     subnet_prefix_len: Optional[int] = Field(None, ge=1, le=32)
-    intensity_range_mbps: Optional[List[float]] = Field(None, min_length=2, max_length=2)
-    burstiness_pmr_range: Optional[List[float]] = Field(None, min_length=2, max_length=2)
-    burstiness_cov_range: Optional[List[float]] = Field(None, min_length=2, max_length=2)
+    intensity_range_mbps: Optional[List[float]] = Field(
+        None, min_length=2, max_length=2
+    )
+    burstiness_pmr_range: Optional[List[float]] = Field(
+        None, min_length=2, max_length=2
+    )
+    burstiness_cov_range: Optional[List[float]] = Field(
+        None, min_length=2, max_length=2
+    )
     temporal_correlation_min: Optional[float] = Field(None, ge=-1.0, le=1.0)
     contributor_count_min: Optional[int] = Field(None, ge=0)
     contributor_count_max: Optional[int] = Field(None, ge=0)
     upload_download_ratio_max: Optional[float] = Field(None, ge=0)
     window_index_range: Optional[List[int]] = Field(None, min_length=2, max_length=2)
 
-    @field_validator("intensity_range_mbps", "burstiness_pmr_range", "burstiness_cov_range")
+    @field_validator(
+        "intensity_range_mbps", "burstiness_pmr_range", "burstiness_cov_range"
+    )
     @classmethod
     def _validate_range(cls, v: Optional[List[float]]) -> Optional[List[float]]:
         if v is not None and v[0] > v[1]:
@@ -136,18 +144,17 @@ class TransformRequest(BaseModel):
 
     Attributes:
         ctp_id: ID of the CTP to transform.
-        target_capacity_mbps: Desired mean throughput after scaling.
         output_dir: Directory to write the transformed PCAP files.
-        throughput_threshold_mbps: Optional hard cap (burst trimming).
+        throughput_threshold_mbps:hard cap (burst trimming).
             Packets in intervals exceeding this rate are randomly dropped.
         preserve_structure: When ``True`` (default), temporal shape and
             contributor structure are preserved; only intensity scales.
     """
 
     ctp_id: str
-    target_capacity_mbps: float = Field(..., gt=0)
     output_dir: str
-    throughput_threshold_mbps: Optional[float] = Field(None, gt=0)
+    users_root: str
+    throughput_threshold_mbps: float = Field(..., gt=0)
     preserve_structure: bool = True
 
 
@@ -156,9 +163,7 @@ class TransformResponse(BaseModel):
 
     original_ctp_id: str
     transformed_ctp_id: str
-    original_intensity_mbps: float
-    target_capacity_mbps: float
-    scale_factor: float
+    throughput_threshold_mbps: float
     download_pcap: str
     upload_pcap: str
     notes: Optional[str] = None
@@ -172,27 +177,32 @@ class TransformResponse(BaseModel):
 class MergeRequest(BaseModel):
     """Request body for ``POST /ctps/merge``.
 
-    Merges consecutive time windows into a longer profile, or composes
-    multiple CTP timeseries with weights.
+    Merges all /32 leaf CTPs under *subnet* across windows
+    ``[start_index, end_index]`` into a single merged CTP with output PCAPs.
 
     Attributes:
-        ctp_ids: CTP IDs to merge (must share the same subnet and dataset).
-        weights: Per-CTP weights.  Must sum to 1.0.  If ``None``, equal
-            weights are applied.
-        output_dir: Where to write the merged PCAP (for window merges).
+        dataset_name: Dataset label.
+        subnet: Parent CIDR subnet whose leaf nodes will be merged.
+        start_index: First window index to include (inclusive).
+        end_index: Last window index to include (inclusive).
+        output_dir: Root directory for merged PCAP output.
+            Files are written to ``<output_dir>/<dataset_name>_merged/``.
+        users_root: Root of the per-user PCAP directory tree from extraction.
     """
 
-    ctp_ids: List[str] = Field(..., min_length=2)
-    weights: Optional[List[float]] = None
-    output_dir: Optional[str] = None
+    dataset_name: str
+    subnet: str
+    start_index: int = Field(..., ge=0)
+    end_index: int = Field(..., ge=0)
+    output_dir: str
+    users_root: str
 
-    @field_validator("weights")
+    @field_validator("end_index")
     @classmethod
-    def _validate_weights(cls, v: Optional[List[float]]) -> Optional[List[float]]:
-        if v is not None:
-            total = sum(v)
-            if abs(total - 1.0) > 1e-6:
-                raise ValueError(f"Weights must sum to 1.0; got {total}")
+    def _validate_index_range(cls, v: int, info) -> int:
+        start = info.data.get("start_index")
+        if start is not None and v < start:
+            raise ValueError("end_index must be >= start_index")
         return v
 
 
@@ -200,8 +210,13 @@ class MergeResponse(BaseModel):
     """Response body for ``POST /ctps/merge``."""
 
     merged_ctp_id: str
-    source_ctps: int
-    weights: List[float]
+    dataset_name: str
+    subnet: str
+    start_index: int
+    end_index: int
+    leaf_count: int
     merged_intensity_mbps: float
     merged_contributor_count: int
+    download_pcap: str
+    upload_pcap: str
     notes: Optional[str] = None

@@ -41,20 +41,23 @@ import subprocess
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+import numpy as np
+
 from app.config import Settings, get_settings
 from app.database.postgres import Database
-from app.models.ctp import CTPIntensity, CrossTrafficProfile
+from app.models.ctp import CrossTrafficProfile
+from app.operations.extract import build_timeseries_from_window
+from app.operations.metrics import compute_all_metrics
 from app.pcap_utils import (
     merge_pcaps_by_index,
     pad_pcap_frames,
-    reorder_pcap_files,
+    _reorder_single_pcap,
     trim_pcap_by_rate,
 )
 
 logger = logging.getLogger(__name__)
 
 # Threshold for burst trimming: 100 ms interval, 6 Mbps → bytes per interval
-_DEFAULT_TRIM_INTERVAL_SEC = 0.1
 
 
 class CTPTransformer:
@@ -72,20 +75,18 @@ class CTPTransformer:
     def transform(
         self,
         ctp_id: str,
-        target_capacity_mbps: float,
         output_dir: str,
         users_root: str,
-        throughput_threshold_mbps: Optional[float] = None,
+        throughput_threshold_mbps: float,
     ) -> Tuple[CrossTrafficProfile, Path, Path]:
         """Transform a CTP to the target capacity and produce merged PCAPs.
 
         Args:
             ctp_id: ID of the CTP to transform.
-            target_capacity_mbps: Desired mean throughput after scaling (Mbps).
             output_dir: Root directory for the output PCAP files.
             users_root: Root of the per-user PCAP directory produced by Step 1.
                 Used to locate per-user window PCAPs.
-            throughput_threshold_mbps: If provided, packets in intervals
+            throughput_threshold_mbps: packets in intervals
                 exceeding this rate are dropped (burst trimming).
 
         Returns:
@@ -99,19 +100,6 @@ class CTPTransformer:
         if original is None:
             raise ValueError(f"CTP '{ctp_id}' not found in corpus.")
 
-        original_mbps = original.intensity.mean_mbps
-        if original_mbps <= 0:
-            raise ValueError(f"CTP '{ctp_id}' has zero intensity; cannot compute scale factor.")
-
-        scale = target_capacity_mbps / original_mbps
-        logger.info(
-            "Transforming CTP '%s': %.2f Mbps → %.2f Mbps (scale=%.4f)",
-            ctp_id,
-            original_mbps,
-            target_capacity_mbps,
-            scale,
-        )
-
         # ---- Resolve leaf users ----
         leaf_ctps = self._db.get_leaf_ctps_for_subnet(
             original.dataset_name, original.subnet, original.window_index
@@ -123,10 +111,12 @@ class CTPTransformer:
             )
 
         leaf_ips = [str(c.subnet).split("/")[0] for c in leaf_ctps]
-        logger.debug("Found %d leaf IP(s) for subnet '%s'.", len(leaf_ips), original.subnet)
+        logger.debug(
+            "Found %d leaf IP(s) for subnet '%s'.", len(leaf_ips), original.subnet
+        )
 
         # ---- Prepare output directories ----
-        dataset_out = Path(output_dir) / original.dataset_name
+        dataset_out = Path(output_dir) / f"{original.dataset_name}_transformed"
         downlink_dir = dataset_out / "downlink"
         uplink_dir = dataset_out / "uplink"
         downlink_dir.mkdir(parents=True, exist_ok=True)
@@ -135,8 +125,13 @@ class CTPTransformer:
         safe_id = ctp_id.replace("/", "_").replace(":", "-")
 
         # ---- Merge per-user window PCAPs ----
-        download_pcap = downlink_dir / f"{safe_id}_download.pcap"
-        upload_pcap = uplink_dir / f"{safe_id}_upload.pcap"
+        download_pcap = (
+            downlink_dir
+            / f"{safe_id}_{throughput_threshold_mbps:.0f}mbps_download.pcap"
+        )
+        upload_pcap = (
+            uplink_dir / f"{safe_id}_{throughput_threshold_mbps:.0f}mbps_upload.pcap"
+        )
 
         self._merge_user_pcaps(
             leaf_ips=leaf_ips,
@@ -164,11 +159,13 @@ class CTPTransformer:
                 temp = pcap.with_suffix(".pad_tmp.pcap")
                 pad_pcap_frames(str(pcap), str(temp))
 
-        # ---- Burst trimming (optional) ----
+        bin_ms = self._cfg.burst_interval_ms
+        bin_sec = bin_ms / 1000.0
+        window_sec = original.duration_seconds
+
+        # ---- Burst trimming  ----
         if throughput_threshold_mbps is not None:
-            threshold_bytes = int(
-                throughput_threshold_mbps * 1_000_000 / 8 * _DEFAULT_TRIM_INTERVAL_SEC
-            )
+            threshold_bytes = int(throughput_threshold_mbps * 1_000_000 / 8 * bin_sec)
             for pcap in (download_pcap, upload_pcap):
                 if pcap.exists():
                     trimmed = pcap.with_suffix(".trimmed.pcap")
@@ -176,12 +173,33 @@ class CTPTransformer:
                         str(pcap),
                         str(trimmed),
                         threshold_bytes=threshold_bytes,
-                        interval_sec=_DEFAULT_TRIM_INTERVAL_SEC,
+                        interval_sec=bin_sec,
                     )
                     trimmed.rename(pcap)  # replace original with trimmed version
 
+        # ---- Recalculate timeseries and metrics from the trimmed PCAPs ----
+
+        new_download_ts = build_timeseries_from_window(
+            download_pcap, bin_width_ms=bin_ms, window_sec=window_sec
+        )
+        new_upload_ts = build_timeseries_from_window(
+            upload_pcap, bin_width_ms=bin_ms, window_sec=window_sec
+        )
+
+        (
+            new_intensity,
+            new_burstiness,
+            new_correlation,
+            new_structure,
+        ) = compute_all_metrics(
+            upload_ts=new_upload_ts,
+            download_ts=new_download_ts,
+            bin_width_sec=bin_sec,
+            contributor_ips=leaf_ips,
+        )
+
         # ---- Build transformed CTP descriptor ----
-        transformed_id = f"ctp-transform-{safe_id}-{target_capacity_mbps:.0f}mbps"
+        transformed_id = f"ctp-transform-{safe_id}-{throughput_threshold_mbps:.0f}mbps"
         transformed = CrossTrafficProfile(
             ctp_id=transformed_id,
             dataset_name=original.dataset_name,
@@ -189,20 +207,17 @@ class CTPTransformer:
             window_index=original.window_index,
             extracted_from=original.extracted_from,
             duration_seconds=original.duration_seconds,
-            # Scale timeseries by the amplitude factor
-            upload_timeseries=[v * scale for v in original.upload_timeseries],
-            download_timeseries=[v * scale for v in original.download_timeseries],
-            # Scale intensity
-            intensity=CTPIntensity(
-                mean_bps=original.intensity.mean_bps * scale,
-                peak_bps=original.intensity.peak_bps * scale,
-                mean_pps=original.intensity.mean_pps * scale,
-                peak_pps=original.intensity.peak_pps * scale,
-            ),
-            # Preserve temporal shape and structure
-            burstiness=original.burstiness,
-            temporal_correlation=original.temporal_correlation,
-            structure=original.structure,
+            upload_timeseries=new_upload_ts.tolist(),
+            download_timeseries=new_download_ts.tolist(),
+            intensity=new_intensity,
+            burstiness=new_burstiness,
+            temporal_correlation=new_correlation,
+            structure=new_structure,
+            # Transform metadata
+            is_transformed=True,
+            throughput_threshold_mbps=throughput_threshold_mbps,
+            download_pcap=str(download_pcap),
+            upload_pcap=str(upload_pcap),
         )
         self._db.upsert_ctp(transformed)
 
@@ -256,34 +271,11 @@ class CTPTransformer:
             return
 
         cmd = ["joincap", "-w", str(output_path)] + pcap_files
-        logger.debug("Merging %d %s PCAP(s) into '%s'", len(pcap_files), direction, output_path)
+        logger.debug(
+            "Merging %d %s PCAP(s) into '%s'", len(pcap_files), direction, output_path
+        )
         try:
             subprocess.run(cmd, check=True, capture_output=True)
         except subprocess.CalledProcessError as exc:
             logger.error("joincap failed: %s", exc.stderr.decode(errors="replace"))
             raise
-
-
-def _reorder_single_pcap(pcap_path: Path) -> None:
-    """Reorder packets in a single PCAP file using ``reordercap``.
-
-    Writes to a temporary file then replaces the original.
-
-    Args:
-        pcap_path: Path to the PCAP to reorder (modified in-place).
-    """
-    tmp = pcap_path.with_suffix(".reorder_tmp.pcap")
-    try:
-        subprocess.run(
-            ["reordercap", str(pcap_path), str(tmp)],
-            check=True,
-            capture_output=True,
-        )
-        tmp.rename(pcap_path)
-    except subprocess.CalledProcessError as exc:
-        logger.error(
-            "reordercap failed for '%s': %s", pcap_path, exc.stderr.decode(errors="replace")
-        )
-        if tmp.exists():
-            tmp.unlink()
-        raise
