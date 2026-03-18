@@ -6,6 +6,7 @@
 flask==3.0.0
 flask-restful==0.3.10
 requests==2.31.0
+uvicorn==0.23.0
 
 # Data validation and serialization
 pydantic==2.5.0
