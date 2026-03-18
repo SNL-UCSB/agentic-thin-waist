@@ -26,7 +26,8 @@ jobs:
         run: docker build -t orchestration .
 
       - name: Start service via Docker Compose
-        run: docker compose -f ../../docker-compose.yml up -d --wait orchestration
+        working-directory: ${{ github.workspace }}
+        run: docker compose up -d --wait orchestration
 
       - name: Run tests
         run: |

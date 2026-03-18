@@ -26,7 +26,8 @@ jobs:
         run: docker build -t telemetry-service .
 
       - name: Start service via Docker Compose
-        run: docker compose -f ../../docker-compose.yml up -d --wait telemetry-service
+        working-directory: ${{ github.workspace }}
+        run: docker compose up -d --wait telemetry-service
 
       - name: Run tests
         run: |

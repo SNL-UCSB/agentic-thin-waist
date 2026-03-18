@@ -23,6 +23,7 @@ jobs:
         run: docker build -f services/substrate-worker/Dockerfile -t substrate-worker .
 
       - name: Start service via Docker Compose
+        working-directory: ${{ github.workspace }}
         run: docker compose up -d --wait substrate-worker
 
       - name: Run tests
