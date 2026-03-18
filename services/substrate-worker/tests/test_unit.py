@@ -43,21 +43,46 @@ def reset_global_state():
 
 
 class TestBuildQdiscArgs:
-    def test_fq_codel_includes_limit(self):
-        assert _build_qdisc_args("fq_codel", 500) == "fq_codel limit 500"
+    # AQM qdiscs: limit is NOT injected automatically
+    def test_fq_codel_no_limit_by_default(self):
+        assert _build_qdisc_args("fq_codel", 500) == "fq_codel"
 
-    def test_codel_includes_limit(self):
-        assert _build_qdisc_args("codel", 200) == "codel limit 200"
+    def test_codel_no_limit_by_default(self):
+        assert _build_qdisc_args("codel", 200) == "codel"
 
-    def test_pfifo_passthrough(self):
-        assert _build_qdisc_args("pfifo", 1000) == "pfifo"
+    # Limit-based qdiscs: limit IS injected from buffer_packets
+    def test_pfifo_includes_limit(self):
+        assert _build_qdisc_args("pfifo", 1000) == "pfifo limit 1000"
 
+    def test_bfifo_includes_limit(self):
+        assert _build_qdisc_args("bfifo", 500) == "bfifo limit 500"
+
+    def test_sfq_includes_limit(self):
+        assert _build_qdisc_args("sfq", 200) == "sfq limit 200"
+
+    # Unknown qdiscs: no limit injected
     def test_tbf_passthrough(self):
         assert _build_qdisc_args("tbf", 500) == "tbf"
 
-    def test_fq_codel_different_buffer_sizes(self):
-        assert _build_qdisc_args("fq_codel", 1) == "fq_codel limit 1"
-        assert _build_qdisc_args("fq_codel", 9999) == "fq_codel limit 9999"
+    # qdisc_params are appended verbatim for any qdisc
+    def test_codel_with_qdisc_params(self):
+        result = _build_qdisc_args(
+            "codel", 1000, {"target": "5ms", "interval": "100ms"}
+        )
+        assert result == "codel target 5ms interval 100ms"
+
+    def test_fq_codel_with_qdisc_params(self):
+        result = _build_qdisc_args("fq_codel", 1000, {"target": "5ms"})
+        assert result == "fq_codel target 5ms"
+
+    def test_pfifo_with_extra_qdisc_params(self):
+        # limit from buffer_packets + any extra params
+        result = _build_qdisc_args("pfifo", 500, {"quantum": "1514"})
+        assert result == "pfifo limit 500 quantum 1514"
+
+    def test_no_qdisc_params_leaves_output_unchanged(self):
+        assert _build_qdisc_args("pfifo", 100, None) == "pfifo limit 100"
+        assert _build_qdisc_args("fq_codel", 100, None) == "fq_codel"
 
 
 class TestBottleneckStateModel:
@@ -328,6 +353,73 @@ class TestShapeEndpoint:
         resp = client.post("/shape", json=VALID_SHAPE_PAYLOAD)
         assert resp.status_code == 500
         assert "tc command failed" in resp.json()["detail"]
+
+    # ── qdisc_params validation ────────────────────────────────────────────────
+
+    def test_shape_acm_qdisc_nondefault_buffer_packets_rejected(self):
+        """buffer_packets != default is meaningless for AQM qdiscs — reject it."""
+        resp = client.post(
+            "/shape",
+            json={**VALID_SHAPE_PAYLOAD, "qdisc": "fq_codel", "buffer_packets": 500},
+        )
+        assert resp.status_code == 422
+        assert "buffer_packets" in resp.json()["detail"]
+
+    def test_shape_limit_in_qdisc_params_for_limit_qdisc_rejected(self):
+        """Passing 'limit' in qdisc_params for a limit-based qdisc conflicts with buffer_packets."""
+        resp = client.post(
+            "/shape",
+            json={
+                **VALID_SHAPE_PAYLOAD,
+                "qdisc": "pfifo",
+                "qdisc_params": {"limit": "200"},
+            },
+        )
+        assert resp.status_code == 422
+        assert "limit" in resp.json()["detail"]
+
+    @patch("app.main._verify_bottleneck_state")
+    @patch("subprocess.run", return_value=MagicMock(returncode=0))
+    def test_shape_qdisc_params_stored_in_state(self, _run, _verify):
+        params = {"target": "5ms", "interval": "100ms"}
+        resp = client.post(
+            "/shape",
+            json={**VALID_SHAPE_PAYLOAD, "qdisc": "fq_codel", "qdisc_params": params},
+        )
+        assert resp.status_code == 200
+        state = resp.json()["bottleneck_state"]
+        assert state["qdisc_params"] == params
+
+    @patch("app.main._verify_bottleneck_state")
+    @patch("subprocess.run", return_value=MagicMock(returncode=0))
+    def test_shape_qdisc_params_none_by_default(self, _run, _verify):
+        resp = client.post("/shape", json=VALID_SHAPE_PAYLOAD)
+        assert resp.status_code == 200
+        assert resp.json()["bottleneck_state"]["qdisc_params"] is None
+
+    @patch("app.main._verify_bottleneck_state")
+    @patch("subprocess.run", return_value=MagicMock(returncode=0))
+    def test_shape_acm_qdisc_default_buffer_packets_allowed(self, _run, _verify):
+        """Default buffer_packets (1000) with AQM qdisc is fine — no error."""
+        resp = client.post(
+            "/shape",
+            json={**VALID_SHAPE_PAYLOAD, "qdisc": "fq_codel", "buffer_packets": 1000},
+        )
+        assert resp.status_code == 200
+
+    @patch("app.main._verify_bottleneck_state")
+    @patch("subprocess.run", return_value=MagicMock(returncode=0))
+    def test_shape_limit_in_qdisc_params_for_acm_qdisc_allowed(self, _run, _verify):
+        """Explicit 'limit' in qdisc_params for AQM is allowed (advanced use)."""
+        resp = client.post(
+            "/shape",
+            json={
+                **VALID_SHAPE_PAYLOAD,
+                "qdisc": "fq_codel",
+                "qdisc_params": {"limit": "2000"},
+            },
+        )
+        assert resp.status_code == 200
 
 
 # ── /capture endpoint ─────────────────────────────────────────────────────────
