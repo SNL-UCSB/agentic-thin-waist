@@ -23,18 +23,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install dependencies
-        run: |
-          if [ -f requirements.txt ]; then
-            pip install -r requirements.txt
-          else
-            echo 'requirements.txt not found at repository root.'
-            exit 1
-          fi
+        run: pip install -r requirements.txt
 
       - name: Run shared tests
-        run: |
-          if [ -d shared/tests ] && find shared/tests -type f -name 'test_*.py' | grep -q .; then
-            python -m pytest shared/tests/ -v --tb=short
-          else
-            echo 'No shared tests found under shared/tests/. Skipping.'
-          fi
+        run: python -m pytest shared/tests/ -v --tb=short
