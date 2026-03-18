@@ -2,13 +2,14 @@ name: Service-Scoped Integration Tests (Matrix)
 
 # Runs service-scoped integration tests from /tests using a matrix strategy.
 #
-# Each matrix entry brings up only the relevant service(s) and their required
-# dependencies, then runs the corresponding tests from the root /tests folder.
+# Each matrix entry brings up only the target service; docker-compose.yml
+# declares depends_on for every service so Compose resolves and starts all
+# required dependencies automatically.
 # Tests are executed on the runner (accessing services via localhost) so that
 # no per-service test container image is needed.
 #
 # Flow per matrix entry:
-#   1. Bring up only the target service(s) and declared dependencies; wait for
+#   1. Bring up the target service (and its declared deps); wait for
 #      every started healthcheck to pass.
 #   2. Install Python test dependencies on the runner.
 #   3. Run pytest against the service-scoped test path.
@@ -29,29 +30,24 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # CTP Service — no external dependencies
           - name: ctp-service
             compose_services: "ctp-service"
             test_path: "tests/integration/ctp"
 
-          # Telemetry Service — depends on PostgreSQL and MinIO
           - name: telemetry-service
-            compose_services: "postgres minio minio-init telemetry-service"
+            compose_services: "telemetry-service"
             test_path: "tests/integration/telemetry"
 
-          # Substrate Worker — depends on Telemetry Service (and its deps)
           - name: substrate-worker
-            compose_services: "postgres minio minio-init telemetry-service substrate-worker"
+            compose_services: "substrate-worker"
             test_path: "tests/integration/substrate_worker"
 
-          # NetGent Service — depends on Substrate Worker + Telemetry Service
           - name: netgent-service
-            compose_services: "postgres minio minio-init telemetry-service substrate-worker netgent-service"
+            compose_services: "netgent-service"
             test_path: "tests/integration/netgent"
 
-          # Experiment API — depends on CTP, Substrate Worker, Telemetry Service
           - name: experiment-api
-            compose_services: "postgres minio minio-init telemetry-service ctp-service substrate-worker experiment-api"
+            compose_services: "experiment-api"
             test_path: "tests/integration/experiment_api"
 
     steps:
