@@ -1,0 +1,31 @@
+name: Shared Module Tests
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'shared/**'
+
+jobs:
+  test-shared:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run shared tests
+        run: |
+          if find shared/tests -type f -name 'test_*.py' | grep -q .; then
+            python -m pytest shared/tests/ -v --tb=short
+          else
+            echo 'No shared tests found under shared/tests/. Skipping.'
+          fi
