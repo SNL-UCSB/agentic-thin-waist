@@ -10,6 +10,7 @@ SHAPE_PAYLOAD = {
     "download_mbps": 10.0,
     "upload_mbps": 5.0,
     "latency_ms": 50,
+    "latency_location": "both",
     "qdisc": "fq_codel",
     "buffer_packets": 1000,
 }
@@ -121,6 +122,7 @@ class TestShapeIntegration:
             "download_mbps",
             "upload_mbps",
             "latency_ms",
+            "latency_location",
             "qdisc",
             "verified",
             "buffer_packets",
@@ -131,6 +133,7 @@ class TestShapeIntegration:
         assert self.state["download_mbps"] == SHAPE_PAYLOAD["download_mbps"]
         assert self.state["upload_mbps"] == SHAPE_PAYLOAD["upload_mbps"]
         assert self.state["latency_ms"] == SHAPE_PAYLOAD["latency_ms"]
+        assert self.state["latency_location"] == SHAPE_PAYLOAD["latency_location"]
         assert self.state["qdisc"] == SHAPE_PAYLOAD["qdisc"]
         assert self.state["buffer_packets"] == SHAPE_PAYLOAD["buffer_packets"]
 
@@ -158,6 +161,41 @@ class TestShapeIntegration:
         bad = {k: v for k, v in SHAPE_PAYLOAD.items() if k != "download_mbps"}
         r = requests.post(f"{BASE}/shape", json=bad, timeout=10)
         assert r.status_code == 422
+
+    def test_shape_invalid_latency_location_rejected(self):
+        r = requests.post(
+            f"{BASE}/shape",
+            json={**SHAPE_PAYLOAD, "latency_location": "invalid"},
+            timeout=10,
+        )
+        assert r.status_code == 422
+
+    def test_shape_no_latency_location_accepted(self):
+        r = requests.post(
+            f"{BASE}/shape",
+            json={**SHAPE_PAYLOAD, "latency_location": None},
+            timeout=30,
+        )
+        assert r.status_code == 200
+        assert r.json()["bottleneck_state"]["latency_location"] is None
+
+    def test_shape_upstream_latency_location(self):
+        r = requests.post(
+            f"{BASE}/shape",
+            json={**SHAPE_PAYLOAD, "latency_location": "upstream"},
+            timeout=30,
+        )
+        assert r.status_code == 200
+        assert r.json()["bottleneck_state"]["latency_location"] == "upstream"
+
+    def test_shape_downstream_latency_location(self):
+        r = requests.post(
+            f"{BASE}/shape",
+            json={**SHAPE_PAYLOAD, "latency_location": "downstream"},
+            timeout=30,
+        )
+        assert r.status_code == 200
+        assert r.json()["bottleneck_state"]["latency_location"] == "downstream"
 
     def test_shape_zero_latency_accepted(self):
         r = requests.post(
@@ -205,6 +243,12 @@ class TestStateAfterShape:
 
     def test_state_upload_mbps_matches(self):
         assert self.state["upload_mbps"] == SHAPE_PAYLOAD["upload_mbps"]
+
+    def test_state_latency_location_field_present(self):
+        assert "latency_location" in self.state
+
+    def test_state_latency_location_matches(self):
+        assert self.state["latency_location"] == SHAPE_PAYLOAD["latency_location"]
 
     def test_state_verified_field_present(self):
         assert "verified" in self.state

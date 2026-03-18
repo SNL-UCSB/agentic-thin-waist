@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 import subprocess
 import os
-from typing import Dict, List, Optional
+from typing import Dict, List, Literal, Optional
 from datetime import datetime
 import uuid
 import time
@@ -63,6 +63,14 @@ class ShapeRequest(BaseModel):
 
     latency_ms: float = Field(0, ge=0, description="One-way delay in ms (default: 0)")
 
+    latency_location: Optional[Literal["upstream", "downstream", "both"]] = Field(
+        None,
+        description=(
+            "Where to inject base latency: 'upstream' (veth3 in ns2), "
+            "'downstream' (veth1 in ns1), 'both', or omit/null for none"
+        ),
+    )
+
     qdisc: str = Field("pfifo", description="Queue discipline (default: pfifo)")
 
     buffer_packets: int = Field(
@@ -84,6 +92,7 @@ class BottleneckState(BaseModel):
     download_mbps: float
     upload_mbps: float
     latency_ms: float
+    latency_location: Optional[str] = None
     qdisc: str
     verified: bool = False
     buffer_packets: int = 1000
@@ -250,6 +259,7 @@ def apply_shaping(
     qdisc: str,
     buffer_packets: int,
     qdisc_params: Optional[Dict[str, str]] = None,
+    latency_location: Optional[str] = None,
 ) -> List[str]:
     applied: List[str] = []
     qdisc_args = _build_qdisc_args(qdisc, buffer_packets, qdisc_params)
@@ -286,17 +296,29 @@ def apply_shaping(
     # -------------------------
     # Latency shaping (netem)
     # -------------------------
-    if latency_ms == 0:
-        c4 = "tc qdisc del dev veth6 root 2>/dev/null || true"
-        run_cmd(c4)
-        applied.append(c4)
-    else:
-        c4 = (
-            "tc qdisc del dev veth6 root 2>/dev/null || true && "
-            f"tc qdisc add dev veth6 root netem delay {latency_ms}ms"
+    # Always clean up existing netem on both latency-injection interfaces,
+    # then add netem only where requested and latency_ms > 0.
+    for ns, iface, direction in [
+        ("ns1", "veth1", "downstream"),
+        ("ns2", "veth3", "upstream"),
+    ]:
+        apply = (
+            latency_ms > 0
+            and latency_location is not None
+            and (latency_location == direction or latency_location == "both")
         )
-        run_cmd(c4)
-        applied.append(c4)
+        del_cmd = (
+            f"ip netns exec {ns} tc qdisc del dev {iface} root 2>/dev/null || true"
+        )
+        run_cmd(del_cmd)
+        applied.append(del_cmd)
+        if apply:
+            add_cmd = (
+                f"ip netns exec {ns} tc qdisc add dev {iface} "
+                f"root netem delay {latency_ms}ms"
+            )
+            run_cmd(add_cmd)
+            applied.append(add_cmd)
 
     return applied
 
@@ -469,6 +491,7 @@ def shape(cfg: ShapeRequest) -> ShapeResponse:
                 qdisc=cfg.qdisc,
                 buffer_packets=cfg.buffer_packets,
                 qdisc_params=cfg.qdisc_params,
+                latency_location=cfg.latency_location,
             )
         )
     except subprocess.CalledProcessError as exc:
@@ -480,6 +503,7 @@ def shape(cfg: ShapeRequest) -> ShapeResponse:
         download_mbps=cfg.download_mbps,
         upload_mbps=cfg.upload_mbps,
         latency_ms=cfg.latency_ms,
+        latency_location=cfg.latency_location,
         qdisc=cfg.qdisc,
         verified=False,  # will be set by verification logic
         buffer_packets=cfg.buffer_packets,

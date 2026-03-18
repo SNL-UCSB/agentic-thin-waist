@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 with patch(
     "subprocess.run", return_value=MagicMock(returncode=0, stdout="", stderr="")
 ):
-    from app.main import app, _build_qdisc_args, BottleneckState
+    from app.main import app, _build_qdisc_args, apply_shaping, BottleneckState
     import app.main as main_module
 
 client = TestClient(app)
@@ -17,6 +17,7 @@ VALID_SHAPE_PAYLOAD = {
     "download_mbps": 10.0,
     "upload_mbps": 5.0,
     "latency_ms": 50,
+    "latency_location": "both",
     "qdisc": "fq_codel",
     "buffer_packets": 1000,
 }
@@ -94,12 +95,14 @@ class TestBottleneckStateModel:
         assert state.buffer_packets == 1000
         assert state.loss_rate_percent == 0.0
         assert state.verification_log == []
+        assert state.latency_location is None
 
     def test_all_fields_set(self):
         state = BottleneckState(
             download_mbps=100,
             upload_mbps=50,
             latency_ms=20,
+            latency_location="upstream",
             qdisc="pfifo",
             buffer_packets=500,
             verified=True,
@@ -108,6 +111,7 @@ class TestBottleneckStateModel:
         assert state.download_mbps == 100
         assert state.upload_mbps == 50
         assert state.latency_ms == 20
+        assert state.latency_location == "upstream"
         assert state.qdisc == "pfifo"
         assert state.buffer_packets == 500
         assert state.verified is True
@@ -252,6 +256,77 @@ class TestStateEndpoint:
         assert resp.json()["bottleneck_state"]["verified"] is False
 
 
+# ── apply_shaping latency logic ───────────────────────────────────────────────
+
+
+class TestApplyShapingLatency:
+    """Verify that netem commands target the correct namespaced interfaces."""
+
+    BASE_ARGS = dict(
+        downstream_iface="veth2",
+        upstream_iface="veth4",
+        download_mbps=10.0,
+        upload_mbps=5.0,
+        latency_ms=50,
+        qdisc="pfifo",
+        buffer_packets=1000,
+    )
+
+    @patch("app.main.run_cmd")
+    def test_both_adds_netem_on_veth1_and_veth3(self, mock_run):
+        cmds = apply_shaping(**self.BASE_ARGS, latency_location="both")
+        add_cmds = [c for c in cmds if "qdisc add" in c and "netem" in c]
+        assert any("ns1" in c and "veth1" in c for c in add_cmds)
+        assert any("ns2" in c and "veth3" in c for c in add_cmds)
+
+    @patch("app.main.run_cmd")
+    def test_downstream_adds_netem_only_on_veth1(self, mock_run):
+        cmds = apply_shaping(**self.BASE_ARGS, latency_location="downstream")
+        add_cmds = [c for c in cmds if "qdisc add" in c and "netem" in c]
+        assert any("ns1" in c and "veth1" in c for c in add_cmds)
+        assert not any("ns2" in c and "veth3" in c for c in add_cmds)
+
+    @patch("app.main.run_cmd")
+    def test_upstream_adds_netem_only_on_veth3(self, mock_run):
+        cmds = apply_shaping(**self.BASE_ARGS, latency_location="upstream")
+        add_cmds = [c for c in cmds if "qdisc add" in c and "netem" in c]
+        assert any("ns2" in c and "veth3" in c for c in add_cmds)
+        assert not any("ns1" in c and "veth1" in c for c in add_cmds)
+
+    @patch("app.main.run_cmd")
+    def test_no_location_does_not_add_netem(self, mock_run):
+        cmds = apply_shaping(**self.BASE_ARGS, latency_location=None)
+        add_cmds = [c for c in cmds if "netem" in c and "del" not in c]
+        assert add_cmds == []
+
+    @patch("app.main.run_cmd")
+    def test_zero_latency_does_not_add_netem(self, mock_run):
+        cmds = apply_shaping(
+            **{**self.BASE_ARGS, "latency_ms": 0}, latency_location="both"
+        )
+        add_cmds = [c for c in cmds if "netem" in c and "del" not in c]
+        assert add_cmds == []
+
+    @patch("app.main.run_cmd")
+    def test_always_cleans_up_both_interfaces(self, mock_run):
+        cmds = apply_shaping(**self.BASE_ARGS, latency_location=None)
+        del_cmds = [c for c in cmds if "tc qdisc del" in c]
+        assert any("ns1" in c and "veth1" in c for c in del_cmds)
+        assert any("ns2" in c and "veth3" in c for c in del_cmds)
+
+    @patch("app.main.run_cmd")
+    def test_netem_delay_value_in_command(self, mock_run):
+        cmds = apply_shaping(**self.BASE_ARGS, latency_location="both")
+        add_cmds = [c for c in cmds if "qdisc add" in c and "netem" in c]
+        assert len(add_cmds) == 2
+        assert all("50ms" in c for c in add_cmds)
+
+    @patch("app.main.run_cmd")
+    def test_no_veth6_in_any_command(self, mock_run):
+        cmds = apply_shaping(**self.BASE_ARGS, latency_location="both")
+        assert not any("veth6" in c for c in cmds)
+
+
 # ── /shape endpoint ───────────────────────────────────────────────────────────
 
 
@@ -271,6 +346,7 @@ class TestShapeEndpoint:
         assert state["download_mbps"] == 10.0
         assert state["upload_mbps"] == 5.0
         assert state["latency_ms"] == 50
+        assert state["latency_location"] == "both"
         assert state["qdisc"] == "fq_codel"
         assert state["buffer_packets"] == 1000
 
@@ -346,6 +422,34 @@ class TestShapeEndpoint:
         ):
             resp = client.post("/shape", json={**VALID_SHAPE_PAYLOAD, "latency_ms": 0})
             assert resp.status_code == 200
+
+    def test_shape_invalid_latency_location_rejected(self):
+        bad = {**VALID_SHAPE_PAYLOAD, "latency_location": "invalid"}
+        assert client.post("/shape", json=bad).status_code == 422
+
+    @patch("app.main._verify_bottleneck_state")
+    @patch("subprocess.run", return_value=MagicMock(returncode=0))
+    def test_shape_no_latency_location_accepted(self, _run, _verify):
+        payload = {**VALID_SHAPE_PAYLOAD, "latency_location": None}
+        resp = client.post("/shape", json=payload)
+        assert resp.status_code == 200
+        assert resp.json()["bottleneck_state"]["latency_location"] is None
+
+    @patch("app.main._verify_bottleneck_state")
+    @patch("subprocess.run", return_value=MagicMock(returncode=0))
+    def test_shape_upstream_latency_location(self, _run, _verify):
+        payload = {**VALID_SHAPE_PAYLOAD, "latency_location": "upstream"}
+        resp = client.post("/shape", json=payload)
+        assert resp.status_code == 200
+        assert resp.json()["bottleneck_state"]["latency_location"] == "upstream"
+
+    @patch("app.main._verify_bottleneck_state")
+    @patch("subprocess.run", return_value=MagicMock(returncode=0))
+    def test_shape_downstream_latency_location(self, _run, _verify):
+        payload = {**VALID_SHAPE_PAYLOAD, "latency_location": "downstream"}
+        resp = client.post("/shape", json=payload)
+        assert resp.status_code == 200
+        assert resp.json()["bottleneck_state"]["latency_location"] == "downstream"
 
     @patch("app.main._verify_bottleneck_state")
     @patch("subprocess.run", side_effect=subprocess.CalledProcessError(1, "tc"))
