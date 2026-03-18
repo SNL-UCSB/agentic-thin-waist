@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 import subprocess
 import os
-from typing import List, Literal, Optional
+from typing import Dict, List, Optional
 from datetime import datetime
 import uuid
 import time
@@ -77,6 +77,16 @@ class ShapeRequest(BaseModel):
         1000, ge=1, description="Queue depth / limit in packets (default: 1000)"
     )
 
+    qdisc_params: Optional[Dict[str, str]] = Field(
+        None,
+        description=(
+            "Extra qdisc-specific parameters passed verbatim to tc "
+            "(e.g. {'target': '5ms', 'interval': '100ms'} for codel/fq_codel). "
+            "For qdiscs in the limit-based family (pfifo, bfifo, sfq) the "
+            "buffer_packets field already sets 'limit'; use this for everything else."
+        ),
+    )
+
 
 class BottleneckState(BaseModel):
     download_mbps: float
@@ -86,6 +96,7 @@ class BottleneckState(BaseModel):
     qdisc: str
     verified: bool = False
     buffer_packets: int = 1000
+    qdisc_params: Optional[Dict[str, str]] = None
     loss_rate_percent: float = 0.0
     verification_log: List[str] = []
 
@@ -182,10 +193,61 @@ def run_cmd(cmd: str) -> None:
     subprocess.run(cmd, shell=True, check=True)
 
 
-def _build_qdisc_args(qdisc: str, buffer_packets: int) -> str:
-    if qdisc in ("fq_codel", "codel"):
-        return f"{qdisc} limit {buffer_packets}"
-    return qdisc
+# Qdiscs that use `limit` as their primary queue-depth knob.
+# AQMs like codel/fq_codel are intentionally excluded: they manage congestion
+# proactively via target/interval and do not rely on tail-drop via limit.
+_LIMIT_QDISCS = {"pfifo", "bfifo", "pfifo_fast", "sfq"}
+
+# Parameters that are meaningless (or actively misleading) for AQM qdiscs.
+_AQM_QDISCS = {"codel", "fq_codel"}
+
+
+def _validate_qdisc_request(
+    qdisc: str,
+    buffer_packets: int,
+    qdisc_params: Optional[Dict[str, str]],
+) -> None:
+    """Raise HTTPException for invalid or contradictory qdisc parameter combinations."""
+    if qdisc_params:
+        # Disallow keys that would silently override positional fields.
+        if "limit" in qdisc_params and qdisc in _LIMIT_QDISCS:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Do not set 'limit' in qdisc_params for '{qdisc}'; "
+                    "use buffer_packets instead."
+                ),
+            )
+        # Warn callers away from passing limit to AQM qdiscs via qdisc_params
+        # — it is legal but almost always unintentional.
+        # (We allow it so advanced users can still do it explicitly.)
+
+    # buffer_packets has no effect on AQM qdiscs unless the caller also
+    # passes limit via qdisc_params — flag the mismatch.
+    if qdisc in _AQM_QDISCS and buffer_packets != 1000:
+        # Non-default value was explicitly set; warn rather than silently ignore.
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"buffer_packets has no effect on '{qdisc}'. "
+                "Use qdisc_params to pass 'limit' explicitly if needed, "
+                "or rely on the qdisc's default."
+            ),
+        )
+
+
+def _build_qdisc_args(
+    qdisc: str,
+    buffer_packets: int,
+    qdisc_params: Optional[Dict[str, str]] = None,
+) -> str:
+    parts = [qdisc]
+    if qdisc in _LIMIT_QDISCS:
+        parts.append(f"limit {buffer_packets}")
+    if qdisc_params:
+        for key, value in qdisc_params.items():
+            parts.append(f"{key} {value}")
+    return " ".join(parts)
 
 
 def apply_shaping(
@@ -196,10 +258,10 @@ def apply_shaping(
     latency_ms: float,
     qdisc: str,
     buffer_packets: int,
-    latency_location: Optional[str] = None,
+    qdisc_params: Optional[Dict[str, str]] = None,
 ) -> List[str]:
     applied: List[str] = []
-    qdisc_args = _build_qdisc_args(qdisc, buffer_packets)
+    qdisc_args = _build_qdisc_args(qdisc, buffer_packets, qdisc_params)
 
     # -------------------------
     # Bandwidth shaping (HTB)
@@ -414,6 +476,8 @@ def _get_interfaces() -> List[str]:
 def shape(cfg: ShapeRequest) -> ShapeResponse:
     global CURRENT_BOTTLENECK_STATE, CURRENT_INTERFACES
 
+    _validate_qdisc_request(cfg.qdisc, cfg.buffer_packets, cfg.qdisc_params)
+
     try:
         applied_commands: List[str] = []
         applied_commands.extend(
@@ -425,7 +489,7 @@ def shape(cfg: ShapeRequest) -> ShapeResponse:
                 latency_ms=cfg.latency_ms,
                 qdisc=cfg.qdisc,
                 buffer_packets=cfg.buffer_packets,
-                latency_location=cfg.latency_location,
+                qdisc_params=cfg.qdisc_params,
             )
         )
     except subprocess.CalledProcessError as exc:
@@ -441,6 +505,7 @@ def shape(cfg: ShapeRequest) -> ShapeResponse:
         qdisc=cfg.qdisc,
         verified=False,  # will be set by verification logic
         buffer_packets=cfg.buffer_packets,
+        qdisc_params=cfg.qdisc_params,
     )
 
     CURRENT_BOTTLENECK_STATE = state
