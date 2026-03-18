@@ -104,7 +104,9 @@ def split_pcap_by_ip(
         raise FileNotFoundError(f"PCAP file not found: {pcap_input}")
 
     stem = pcap_input.stem
-    logger.info("Splitting '%s' by internal IP (subnets: %s)", pcap_input.name, internal_subnets)
+    logger.info(
+        "Splitting '%s' by internal IP (subnets: %s)", pcap_input.name, internal_subnets
+    )
 
     # (ip_str, direction) → open PcapWriter
     writers: Dict[Tuple[str, str], PcapWriter] = {}

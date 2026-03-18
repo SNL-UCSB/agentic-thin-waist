@@ -25,7 +25,7 @@ from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse, JSONResponse
-
+from pathlib import Path
 from app.config import Settings, get_settings
 from app.database.postgres import Database
 from app.models.descriptors import (
@@ -191,7 +191,9 @@ def extract_ctps(
         )
 
     window_indices = {c.window_index for c in ctps}
-    user_count = len({c.subnet for c in ctps if "/" in c.subnet and c.subnet.endswith("/32")})
+    user_count = len(
+        {c.subnet for c in ctps if "/" in c.subnet and c.subnet.endswith("/32")}
+    )
 
     return ExtractResponse(
         dataset_name=request.dataset_name,
@@ -249,9 +251,8 @@ def transform_ctp(
 
     Request body:
         ``ctp_id``: ID of the CTP to transform.
-        ``target_capacity_mbps``: Target mean throughput.
         ``output_dir``: Directory for output PCAP files.
-        ``throughput_threshold_mbps``: Optional hard cap (burst trimming).
+        ``throughput_threshold_mbps``: hard cap (burst trimming).
         ``preserve_structure``: Always ``true``; structure is never modified.
     """
     transformer = CTPTransformer(db=db, settings=cfg)
@@ -262,9 +263,8 @@ def transform_ctp(
     try:
         transformed, dl_path, ul_path = transformer.transform(
             ctp_id=request.ctp_id,
-            target_capacity_mbps=request.target_capacity_mbps,
             output_dir=request.output_dir,
-            users_root=request.output_dir,
+            users_root=request.users_root,
             throughput_threshold_mbps=request.throughput_threshold_mbps,
         )
     except ValueError as exc:
@@ -277,18 +277,13 @@ def transform_ctp(
         )
 
     original = db.get_ctp(request.ctp_id)
-    original_mbps = original.intensity.mean_mbps if original else 0.0
-    scale = request.target_capacity_mbps / original_mbps if original_mbps > 0 else 0.0
-
     return TransformResponse(
         original_ctp_id=request.ctp_id,
         transformed_ctp_id=transformed.ctp_id,
-        original_intensity_mbps=original_mbps,
-        target_capacity_mbps=request.target_capacity_mbps,
-        scale_factor=scale,
+        throughput_threshold_mbps=request.throughput_threshold_mbps,
         download_pcap=str(dl_path),
         upload_pcap=str(ul_path),
-        notes="Intensity rescaled; temporal structure and asymmetry preserved.",
+        notes="Trimming Done; temporal structure and asymmetry preserved.",
     )
 
 
@@ -303,34 +298,36 @@ def merge_ctps(
     db: DbDep,
     cfg: SettingsDep,
 ) -> MergeResponse:
-    """Compose multiple CTPs by window concatenation or weighted sum.
+    """Merge all /32 leaf CTPs under a subnet across a window index range.
 
-    When all CTPs have the same timeseries length, weighted composition is
-    used.  When they have different lengths, window concatenation is applied.
+    Finds every /32 leaf node under *subnet* for windows
+    ``[start_index, end_index]``, sums their timeseries per window,
+    concatenates across windows, merges the underlying PCAP files with
+    ``joincap``, and stores the resulting CTP in the corpus.
+
+    Output PCAPs are written to::
+
+        <output_dir>/<dataset_name>_merged/downlink/<ctp_id>_download.pcap
+        <output_dir>/<dataset_name>_merged/uplink/<ctp_id>_upload.pcap
 
     Request body:
-        ``ctp_ids``: List of CTP IDs (≥ 2).
-        ``weights``: Per-CTP weights summing to 1.0 (optional; equal by default).
-        ``output_dir``: Optional directory for merged PCAP output.
+        ``dataset_name``: Dataset label.
+        ``subnet``: Parent CIDR subnet.
+        ``start_index``: First window index (inclusive).
+        ``end_index``: Last window index (inclusive).
+        ``output_dir``: Root directory for merged PCAP output.
+        ``users_root``: Root of per-user PCAP directory from extraction.
     """
     merger = CTPMerger(db=db, settings=cfg)
     try:
-        # Choose merge strategy based on weight presence
-        if request.weights:
-            merged = merger.merge_weighted(
-                ctp_ids=request.ctp_ids,
-                weights=request.weights,
-            )
-        else:
-            # Default: try weighted first (same length), fall back to window concat
-            try:
-                merged = merger.merge_weighted(
-                    ctp_ids=request.ctp_ids,
-                    weights=None,
-                )
-            except ValueError:
-                merged = merger.merge_windows(ctp_ids=request.ctp_ids)
-
+        merged, dl_path, ul_path = merger.merge_subnet_range(
+            dataset_name=request.dataset_name,
+            subnet=request.subnet,
+            start_index=request.start_index,
+            end_index=request.end_index,
+            output_dir=request.output_dir,
+            users_root=request.users_root,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     except Exception as exc:
@@ -340,15 +337,21 @@ def merge_ctps(
             detail=f"Merge failed: {exc}",
         )
 
-    effective_weights = request.weights or [1.0 / len(request.ctp_ids)] * len(request.ctp_ids)
-
     return MergeResponse(
         merged_ctp_id=merged.ctp_id,
-        source_ctps=len(request.ctp_ids),
-        weights=effective_weights,
+        dataset_name=request.dataset_name,
+        subnet=request.subnet,
+        start_index=request.start_index,
+        end_index=request.end_index,
+        leaf_count=merged.structure.contributor_count,
         merged_intensity_mbps=merged.intensity.mean_mbps,
         merged_contributor_count=merged.structure.contributor_count,
-        notes=f"Merged {len(request.ctp_ids)} CTPs.",
+        download_pcap=str(dl_path),
+        upload_pcap=str(ul_path),
+        notes=(
+            f"Merged {merged.structure.contributor_count} leaf IP(s) across "
+            f"windows {request.start_index}–{request.end_index}."
+        ),
     )
 
 
@@ -398,8 +401,9 @@ def get_replay_data(
             detail=f"Replay PCAP for direction '{direction}' not found at '{pcap_path}'.",
         )
 
-    return FileResponse(
-        path=str(pcap_path),
-        media_type="application/vnd.tcpdump.pcap",
-        filename=pcap_path.name,
+    return JSONResponse(
+        content={
+            "download_pcap": str(dl_path),
+            "upload_pcap": str(ul_path),
+        }
     )

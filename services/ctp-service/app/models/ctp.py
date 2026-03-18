@@ -137,6 +137,10 @@ class CrossTrafficProfile:
         temporal_correlation: Autocorrelation at multiple lags.
         structure: Contributor composition metrics.
         created_at: Timestamp when this CTP was inserted into the corpus.
+        is_transformed: True if this CTP was produced by the transform operation.
+        throughput_threshold_mbps: Burst-trimming threshold used during transform (Mbps).
+        download_pcap: Path to the transformed download PCAP file.
+        upload_pcap: Path to the transformed upload PCAP file.
     """
 
     ctp_id: str
@@ -153,6 +157,13 @@ class CrossTrafficProfile:
     structure: CTPStructure
     start_time: Optional[datetime] = None
     created_at: Optional[datetime] = None
+    is_transformed: bool = False
+    throughput_threshold_mbps: Optional[float] = None
+    download_pcap: Optional[str] = None
+    upload_pcap: Optional[str] = None
+    is_merged: bool = False
+    merge_start_index: Optional[int] = None
+    merge_end_index: Optional[int] = None
 
     @property
     def timeseries_length(self) -> int:
@@ -207,4 +218,11 @@ class CrossTrafficProfile:
                 "prefix_diversity": self.structure.prefix_diversity,
             },
             "created_at": self.created_at,
+            "is_transformed": self.is_transformed,
+            "throughput_threshold_mbps": self.throughput_threshold_mbps,
+            "download_pcap": self.download_pcap,
+            "upload_pcap": self.upload_pcap,
+            "is_merged": self.is_merged,
+            "merge_start_index": self.merge_start_index,
+            "merge_end_index": self.merge_end_index,
         }

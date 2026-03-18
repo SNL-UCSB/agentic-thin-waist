@@ -115,7 +115,9 @@ def split_pcap_into_windows(
             current_writer.close()
 
     if not written_paths:
-        logger.debug("No packets found in '%s'; no window files written.", input_pcap.name)
+        logger.debug(
+            "No packets found in '%s'; no window files written.", input_pcap.name
+        )
     else:
         logger.debug(
             "Split '%s' into %d window(s) of %d s each.",
@@ -178,7 +180,9 @@ def _split_user_worker(args: Tuple) -> Optional[Tuple[List[str], List[str]]]:
         up, dl = split_user_windows(Path(user_dir_str), window_sec=window_sec)
         return [str(p) for p in up], [str(p) for p in dl]
     except Exception as exc:
-        logger.error("Window split failed for '%s': %s", user_dir_str, exc, exc_info=True)
+        logger.error(
+            "Window split failed for '%s': %s", user_dir_str, exc, exc_info=True
+        )
         return None
 
 
@@ -223,5 +227,7 @@ def split_all_users_parallel(
     if failed:
         logger.warning("%d user(s) failed during window split.", failed)
 
-    logger.info("Window split complete: %d/%d users succeeded.", succeeded, len(user_dirs))
+    logger.info(
+        "Window split complete: %d/%d users succeeded.", succeeded, len(user_dirs)
+    )
     return succeeded

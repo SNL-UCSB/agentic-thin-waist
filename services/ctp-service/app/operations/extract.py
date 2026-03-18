@@ -122,7 +122,9 @@ def build_timeseries_from_window(
     return ts
 
 
-def _build_user_timeseries_worker(args: Tuple) -> Optional[Tuple[str, int, np.ndarray, np.ndarray]]:
+def _build_user_timeseries_worker(
+    args: Tuple,
+) -> Optional[Tuple[str, int, np.ndarray, np.ndarray]]:
     """Worker: compute upload + download timeseries for one (user, window_index).
 
     Returns:
@@ -138,7 +140,9 @@ def _build_user_timeseries_worker(args: Tuple) -> Optional[Tuple[str, int, np.nd
         )
         return ip_str, window_index, upload_ts, download_ts
     except Exception as exc:
-        logger.error("Timeseries build failed for IP=%s window=%d: %s", ip_str, window_index, exc)
+        logger.error(
+            "Timeseries build failed for IP=%s window=%d: %s", ip_str, window_index, exc
+        )
         return None
 
 
@@ -495,7 +499,8 @@ class Extractor:
 
         for node in all_nodes:
             contributor_ips = [
-                str(leaf.network.network_address) for leaf in TreeNode.get_leaf_nodes(node)
+                str(leaf.network.network_address)
+                for leaf in TreeNode.get_leaf_nodes(node)
             ]
             ctp = _tree_node_to_ctp(
                 node=node,
@@ -542,7 +547,9 @@ class Extractor:
             if fixed_network is not None:
                 parent = fixed_network
             else:
-                parent = ipaddress.ip_network(node.network).supernet(new_prefix=new_prefix)
+                parent = ipaddress.ip_network(node.network).supernet(
+                    new_prefix=new_prefix
+                )
             groups[parent].append(node)
 
         parent_nodes: List[TreeNode] = []
@@ -559,7 +566,9 @@ class Extractor:
             )
             fwd = sum(c.fwd_packets for c in children)
             bwd = sum(c.bwd_packets for c in children)
-            parent_node = TreeNode.from_parameters(parent_net, dl, ul, fwd, bwd, children)
+            parent_node = TreeNode.from_parameters(
+                parent_net, dl, ul, fwd, bwd, children
+            )
             parent_nodes.append(parent_node)
 
         return parent_nodes
@@ -582,7 +591,9 @@ class Extractor:
         windows_root = user_dir / direction / "windows"
         pattern = f"*/window_{window_index:04d}.pcap"
         matches = sorted(windows_root.glob(pattern))
-        return matches[0] if matches else windows_root / f"window_{window_index:04d}.pcap"
+        return (
+            matches[0] if matches else windows_root / f"window_{window_index:04d}.pcap"
+        )
 
     @staticmethod
     def _find_max_window_index(user_dirs: List[Path]) -> int:

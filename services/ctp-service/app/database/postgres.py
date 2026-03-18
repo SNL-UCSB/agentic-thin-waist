@@ -78,7 +78,9 @@ class Database:
             self._url,
         )
         self._apply_schema()
-        logger.info("PostgreSQL pool ready (min=%d, max=%d)", self._pool_min, self._pool_max)
+        logger.info(
+            "PostgreSQL pool ready (min=%d, max=%d)", self._pool_min, self._pool_max
+        )
 
     def close(self) -> None:
         """Close all connections in the pool."""
@@ -125,33 +127,48 @@ class Database:
         """
         row = ctp.to_db_dict()
         sql = """
-            INSERT INTO ctp_nodes (
-                ctp_id, dataset_name, subnet, window_index,
-                extracted_from, start_time, duration_seconds,
-                upload_timeseries, download_timeseries,
-                contributor_count,
-                intensity, burstiness, temporal_correlation, structure,
-                created_at
-            ) VALUES (
-                %(ctp_id)s, %(dataset_name)s, %(subnet)s, %(window_index)s,
-                %(extracted_from)s, %(start_time)s, %(duration_seconds)s,
-                %(upload_timeseries)s, %(download_timeseries)s,
-                %(contributor_count)s,
-                %(intensity)s, %(burstiness)s, %(temporal_correlation)s, %(structure)s,
-                NOW()
-            )
-            ON CONFLICT (dataset_name, subnet, window_index) DO UPDATE SET
-                ctp_id               = EXCLUDED.ctp_id,
-                extracted_from       = EXCLUDED.extracted_from,
-                start_time           = EXCLUDED.start_time,
-                duration_seconds     = EXCLUDED.duration_seconds,
-                upload_timeseries    = EXCLUDED.upload_timeseries,
-                download_timeseries  = EXCLUDED.download_timeseries,
-                contributor_count    = EXCLUDED.contributor_count,
-                intensity            = EXCLUDED.intensity,
-                burstiness           = EXCLUDED.burstiness,
-                temporal_correlation = EXCLUDED.temporal_correlation,
-                structure            = EXCLUDED.structure;
+                INSERT INTO ctp_nodes (
+                    ctp_id, dataset_name, subnet, window_index,
+                    extracted_from, start_time, duration_seconds,
+                    upload_timeseries, download_timeseries,
+                    contributor_count,
+                    intensity, burstiness, temporal_correlation, structure,
+                    is_transformed, throughput_threshold_mbps,
+                    download_pcap, upload_pcap,
+                    is_merged, merge_start_index, merge_end_index,
+                    created_at
+                ) VALUES (
+                    %(ctp_id)s, %(dataset_name)s, %(subnet)s, %(window_index)s,
+                    %(extracted_from)s, %(start_time)s, %(duration_seconds)s,
+                    %(upload_timeseries)s, %(download_timeseries)s,
+                    %(contributor_count)s,
+                    %(intensity)s, %(burstiness)s, %(temporal_correlation)s, %(structure)s,
+                    %(is_transformed)s, %(throughput_threshold_mbps)s,
+                    %(download_pcap)s, %(upload_pcap)s,
+                    %(is_merged)s, %(merge_start_index)s, %(merge_end_index)s,
+                    NOW()
+                )
+                ON CONFLICT (ctp_id) DO UPDATE SET
+                    dataset_name              = EXCLUDED.dataset_name,
+                    subnet                    = EXCLUDED.subnet,
+                    window_index              = EXCLUDED.window_index,
+                    extracted_from            = EXCLUDED.extracted_from,
+                    start_time                = EXCLUDED.start_time,
+                    duration_seconds          = EXCLUDED.duration_seconds,
+                    upload_timeseries         = EXCLUDED.upload_timeseries,
+                    download_timeseries       = EXCLUDED.download_timeseries,
+                    contributor_count         = EXCLUDED.contributor_count,
+                    intensity                 = EXCLUDED.intensity,
+                    burstiness                = EXCLUDED.burstiness,
+                    temporal_correlation      = EXCLUDED.temporal_correlation,
+                    structure                 = EXCLUDED.structure,
+                    is_transformed            = EXCLUDED.is_transformed,
+                    throughput_threshold_mbps = EXCLUDED.throughput_threshold_mbps,
+                    download_pcap             = EXCLUDED.download_pcap,
+                    upload_pcap               = EXCLUDED.upload_pcap,
+                    is_merged                 = EXCLUDED.is_merged,
+                    merge_start_index         = EXCLUDED.merge_start_index,
+                    merge_end_index           = EXCLUDED.merge_end_index;
         """
         params = {**row}
         # Wrap dicts as JSONB
@@ -327,7 +344,9 @@ class Database:
         Returns:
             Tuple of ``(total_count, list_of_ctps)``.
         """
-        return self.query_ctps(SelectQuery(), limit=limit, offset=offset, order_by=order_by)
+        return self.query_ctps(
+            SelectQuery(), limit=limit, offset=offset, order_by=order_by
+        )
 
     def count_ctps(self, dataset_name: Optional[str] = None) -> int:
         """Return the total number of CTPs, optionally filtered by dataset.
@@ -368,10 +387,40 @@ class Database:
             WHERE dataset_name = %s
               AND window_index  = %s
               AND subnet        <<= %s::cidr
-              AND masklen(subnet) = 32;
+              AND masklen(subnet) = 32
+              AND is_transformed = FALSE
+              AND is_merged = FALSE;
         """
         with self._cursor() as cur:
             cur.execute(sql, (dataset_name, window_index, subnet))
+            rows = cur.fetchall()
+        return [_row_to_ctp(r) for r in rows if r]
+
+    def get_leaf_ctps_for_subnet_range(
+        self, dataset_name: str, subnet: str, start_index: int, end_index: int
+    ) -> List[CrossTrafficProfile]:
+        """Return all /32 leaf CTPs under *subnet* across a window index range.
+
+        Args:
+            dataset_name: Dataset to search.
+            subnet: Parent CIDR subnet (e.g. ``'169.231.10.0/24'``).
+            start_index: First window index (inclusive).
+            end_index: Last window index (inclusive).
+
+        Returns:
+            List of /32 leaf CTPs under *subnet* for windows in [start, end].
+        """
+        sql = """
+            SELECT * FROM ctp_nodes
+            WHERE dataset_name = %s
+              AND subnet        <<= %s::cidr
+              AND window_index  BETWEEN %s AND %s
+              AND masklen(subnet) = 32
+              AND is_transformed = FALSE
+              AND is_merged = FALSE;
+        """
+        with self._cursor() as cur:
+            cur.execute(sql, (dataset_name, subnet, start_index, end_index))
             rows = cur.fetchall()
         return [_row_to_ctp(r) for r in rows if r]
 
@@ -405,7 +454,9 @@ class Database:
             from urllib.parse import urlparse, urlunparse
 
             parsed = urlparse(self._url)
-            redacted = parsed._replace(netloc=parsed.netloc.replace(parsed.password or "", "****"))
+            redacted = parsed._replace(
+                netloc=parsed.netloc.replace(parsed.password or "", "****")
+            )
             return urlunparse(redacted)
         except Exception:
             return "<redacted>"
@@ -445,7 +496,9 @@ def _build_where(query: SelectQuery) -> tuple[list[str], list[Any]]:
 
     if query.burstiness_cov_range:
         lo, hi = query.burstiness_cov_range
-        clauses.append("(burstiness->>'coefficient_of_variation')::FLOAT8 BETWEEN %s AND %s")
+        clauses.append(
+            "(burstiness->>'coefficient_of_variation')::FLOAT8 BETWEEN %s AND %s"
+        )
         params.extend([lo, hi])
 
     if query.temporal_correlation_min is not None:
@@ -496,10 +549,14 @@ def _row_to_ctp(row: Dict[str, Any]) -> CrossTrafficProfile:
         Fully populated :class:`~app.models.ctp.CrossTrafficProfile`.
     """
     intensity_d = (
-        row["intensity"] if isinstance(row["intensity"], dict) else json.loads(row["intensity"])
+        row["intensity"]
+        if isinstance(row["intensity"], dict)
+        else json.loads(row["intensity"])
     )
     burst_d = (
-        row["burstiness"] if isinstance(row["burstiness"], dict) else json.loads(row["burstiness"])
+        row["burstiness"]
+        if isinstance(row["burstiness"], dict)
+        else json.loads(row["burstiness"])
     )
     corr_d = (
         row["temporal_correlation"]
@@ -507,7 +564,9 @@ def _row_to_ctp(row: Dict[str, Any]) -> CrossTrafficProfile:
         else json.loads(row["temporal_correlation"])
     )
     struct_d = (
-        row["structure"] if isinstance(row["structure"], dict) else json.loads(row["structure"])
+        row["structure"]
+        if isinstance(row["structure"], dict)
+        else json.loads(row["structure"])
     )
 
     return CrossTrafficProfile(
@@ -547,4 +606,11 @@ def _row_to_ctp(row: Dict[str, Any]) -> CrossTrafficProfile:
             prefix_diversity=struct_d.get("prefix_diversity", 0.0),
         ),
         created_at=row.get("created_at"),
+        is_transformed=row.get("is_transformed", False),
+        throughput_threshold_mbps=row.get("throughput_threshold_mbps"),
+        download_pcap=row.get("download_pcap"),
+        upload_pcap=row.get("upload_pcap"),
+        is_merged=row.get("is_merged", False),
+        merge_start_index=row.get("merge_start_index"),
+        merge_end_index=row.get("merge_end_index"),
     )

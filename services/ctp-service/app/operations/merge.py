@@ -1,30 +1,28 @@
 """
-merge.py — Merge operation: combine CTPs by concatenating windows or composing with weights.
+merge.py — Merge operation: combine all /32 leaf CTPs under a subnet across a
+window range into a single merged CTP with output PCAPs.
 
-Two merge modes are supported:
+The merge endpoint:
+1. Queries all /32 leaf CTPs for the given dataset/subnet across
+   ``[start_index, end_index]`` windows to collect leaf IPs.
+2. Gathers every ``window_XXXX.pcap`` for each leaf IP and direction.
+3. Merges all PCAPs with ``joincap`` (batched to avoid ARG_MAX limits).
+4. Reorders merged PCAPs with ``reordercap``.
+5. Computes timeseries and metrics from the merged PCAPs.
+6. Stores the merged CTP in the database and returns it.
 
-**Window concatenation** (``merge_windows``)
-    Concatenate consecutive time-window CTPs for the same subnet into a longer
-    profile.  The timeseries arrays are concatenated and all metrics are
-    recomputed over the combined series.  This produces a CTP spanning
-    ``N × window_duration`` seconds.
+Output layout::
 
-    Example: 4 × 30-second windows → one 2-minute profile.
-
-**Weighted composition** (``merge_weighted``)
-    Linearly combine the timeseries of multiple CTPs using scalar weights.
-    The resulting timeseries is the element-wise weighted sum (CTPs must share
-    the same length).  Metrics are recomputed on the combined series.
-
-    Example: mix two CTPs at 70 % / 30 % to create a synthetic workload.
-
-In both cases the merged CTP is stored in the database and returned.
+    <output_dir>/<dataset_name>_merged/
+        downlink/<ctp_id>_download.pcap
+        uplink/<ctp_id>_upload.pcap
 """
 
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+import subprocess
+from pathlib import Path
 from typing import List, Optional, Tuple
 
 import numpy as np
@@ -32,19 +30,22 @@ import numpy as np
 from app.config import Settings, get_settings
 from app.database.postgres import Database
 from app.models.ctp import (
-    CTPBurstiness,
-    CTPIntensity,
     CTPStructure,
-    CTPTemporalCorrelation,
     CrossTrafficProfile,
 )
+from app.operations.extract import build_timeseries_from_window
 from app.operations.metrics import compute_all_metrics
+from app.pcap_utils import (
+    _reorder_single_pcap,
+)
 
 logger = logging.getLogger(__name__)
 
+_JOINCAP_BATCH_SIZE = 30
+
 
 class CTPMerger:
-    """Combine CTPs by window concatenation or weighted composition.
+    """Merge all leaf CTPs under a subnet across a window range.
 
     Args:
         db: Initialised :class:`~app.database.postgres.Database` instance.
@@ -56,223 +57,218 @@ class CTPMerger:
         self._cfg = settings or get_settings()
 
     # ------------------------------------------------------------------ #
-    # Window concatenation
+    # Public API
     # ------------------------------------------------------------------ #
 
-    def merge_windows(
+    def merge_subnet_range(
         self,
-        ctp_ids: List[str],
-        new_ctp_id: Optional[str] = None,
-    ) -> CrossTrafficProfile:
-        """Concatenate consecutive windows into a single longer CTP.
-
-        All source CTPs must belong to the same dataset and subnet.  Their
-        timeseries are concatenated in the order provided by *ctp_ids*.
+        dataset_name: str,
+        subnet: str,
+        start_index: int,
+        end_index: int,
+        output_dir: str,
+        users_root: str,
+    ) -> Tuple[CrossTrafficProfile, Path, Path]:
+        """Merge all /32 leaf CTPs under *subnet* across windows
+        ``[start_index, end_index]``.
 
         Args:
-            ctp_ids: Ordered list of CTP IDs to concatenate.
-            new_ctp_id: Override the auto-generated ID for the merged CTP.
+            dataset_name: Dataset label.
+            subnet: Parent CIDR subnet (e.g. ``'169.231.10.0/24'``).
+            start_index: First window index to include (inclusive).
+            end_index: Last window index to include (inclusive).
+            output_dir: Root for output PCAP directories.
+            users_root: Root of the per-user PCAP directory tree produced
+                during extraction.
 
         Returns:
-            The merged :class:`~app.models.ctp.CrossTrafficProfile` (also stored in DB).
+            Tuple of ``(merged_ctp, download_pcap_path, upload_pcap_path)``.
 
         Raises:
-            ValueError: If any CTP is not found or if dataset/subnet mismatch.
+            ValueError: If no leaf CTPs are found for the given parameters.
         """
-        ctps = self._load_and_validate(ctp_ids, require_same_length=False)
+        # 1. Get all leaf CTPs to collect unique IPs
+        leaf_ctps = self._db.get_leaf_ctps_for_subnet_range(
+            dataset_name, subnet, start_index, end_index
+        )
+        if not leaf_ctps:
+            raise ValueError(
+                f"No /32 leaf CTPs found for dataset='{dataset_name}' "
+                f"subnet='{subnet}' windows {start_index}–{end_index}."
+            )
 
-        upload_ts = np.concatenate([np.array(c.upload_timeseries) for c in ctps])
-        download_ts = np.concatenate([np.array(c.download_timeseries) for c in ctps])
+        leaf_ips = sorted({str(c.subnet).split("/")[0] for c in leaf_ctps})
+        contributor_count = len(leaf_ips)
+        duration = (end_index - start_index + 1) * leaf_ctps[0].duration_seconds
 
-        return self._build_merged_ctp(
-            ctps=ctps,
-            upload_ts=upload_ts,
-            download_ts=download_ts,
-            new_ctp_id=new_ctp_id,
-            merge_mode="windows",
-            weights=[1.0 / len(ctps)] * len(ctps),
+        # 2. Build output paths
+        safe_subnet = subnet.replace("/", "_").replace(".", "-")
+        ctp_id = f"ctp-merged-{dataset_name}-{safe_subnet}-{start_index}-{end_index}"
+        dataset_out = Path(output_dir) / f"{dataset_name}_merged"
+        downlink_dir = dataset_out / "downlink"
+        uplink_dir = dataset_out / "uplink"
+        downlink_dir.mkdir(parents=True, exist_ok=True)
+        uplink_dir.mkdir(parents=True, exist_ok=True)
+
+        download_pcap = downlink_dir / f"{ctp_id}_download.pcap"
+        upload_pcap = uplink_dir / f"{ctp_id}_upload.pcap"
+
+        # 3. Merge + reorder PCAPs for each direction
+        for pcap_path, direction in (
+            (download_pcap, "download"),
+            (upload_pcap, "upload"),
+        ):
+            self._join_pcaps_for_range(
+                leaf_ips=leaf_ips,
+                start_index=start_index,
+                end_index=end_index,
+                users_root=Path(users_root),
+                output_path=pcap_path,
+                direction=direction,
+            )
+            if pcap_path.exists():
+                _reorder_single_pcap(pcap_path)
+
+        # 4. Compute timeseries and metrics from merged PCAPs
+        bin_ms = self._cfg.burst_interval_ms
+        bin_sec = bin_ms / 1000.0
+
+        download_ts = build_timeseries_from_window(
+            download_pcap, bin_width_ms=bin_ms, window_sec=duration
+        )
+        upload_ts = build_timeseries_from_window(
+            upload_pcap, bin_width_ms=bin_ms, window_sec=duration
         )
 
-    # ------------------------------------------------------------------ #
-    # Weighted composition
-    # ------------------------------------------------------------------ #
-
-    def merge_weighted(
-        self,
-        ctp_ids: List[str],
-        weights: Optional[List[float]] = None,
-        new_ctp_id: Optional[str] = None,
-    ) -> CrossTrafficProfile:
-        """Compose multiple CTPs with scalar weights.
-
-        Each CTP's timeseries is multiplied by its weight and the results are
-        summed element-wise.  All CTPs must have the same timeseries length.
-
-        Args:
-            ctp_ids: List of CTP IDs to compose.
-            weights: Per-CTP weights.  Must sum to 1.0.  Equal weights are
-                used when ``None``.
-            new_ctp_id: Override the auto-generated merged CTP ID.
-
-        Returns:
-            The merged :class:`~app.models.ctp.CrossTrafficProfile`.
-
-        Raises:
-            ValueError: If CTPs are not found, lengths differ, or weights are invalid.
-        """
-        ctps = self._load_and_validate(ctp_ids, require_same_length=True)
-
-        n = len(ctps)
-        if weights is None:
-            weights = [1.0 / n] * n
-        elif len(weights) != n:
-            raise ValueError(f"len(weights)={len(weights)} must equal len(ctp_ids)={n}.")
-
-        total_weight = sum(weights)
-        if abs(total_weight - 1.0) > 1e-6:
-            raise ValueError(f"Weights must sum to 1.0; got {total_weight:.6f}.")
-
-        upload_ts = sum(w * np.array(c.upload_timeseries) for w, c in zip(weights, ctps))
-        download_ts = sum(w * np.array(c.download_timeseries) for w, c in zip(weights, ctps))
-
-        return self._build_merged_ctp(
-            ctps=ctps,
-            upload_ts=upload_ts,
-            download_ts=download_ts,
-            new_ctp_id=new_ctp_id,
-            merge_mode="weighted",
-            weights=weights,
-        )
-
-    # ------------------------------------------------------------------ #
-    # Internal helpers
-    # ------------------------------------------------------------------ #
-
-    def _load_and_validate(
-        self,
-        ctp_ids: List[str],
-        require_same_length: bool,
-    ) -> List[CrossTrafficProfile]:
-        """Load CTPs from the DB and validate dataset/subnet consistency.
-
-        Args:
-            ctp_ids: CTP identifiers to load.
-            require_same_length: When ``True``, enforce that all timeseries
-                have the same number of bins.
-
-        Returns:
-            Ordered list of loaded CTPs.
-
-        Raises:
-            ValueError: If any CTP is missing or fails validation.
-        """
-        ctps: List[CrossTrafficProfile] = []
-        for cid in ctp_ids:
-            ctp = self._db.get_ctp(cid)
-            if ctp is None:
-                raise ValueError(f"CTP '{cid}' not found in corpus.")
-            ctps.append(ctp)
-
-        if not ctps:
-            raise ValueError("No CTPs provided for merge.")
-
-        # Validate same dataset and subnet
-        dataset = ctps[0].dataset_name
-        subnet = ctps[0].subnet
-        for ctp in ctps[1:]:
-            if ctp.dataset_name != dataset:
-                raise ValueError(
-                    f"All CTPs must share the same dataset; "
-                    f"got '{dataset}' and '{ctp.dataset_name}'."
-                )
-            if ctp.subnet != subnet:
-                raise ValueError(
-                    f"All CTPs must share the same subnet; " f"got '{subnet}' and '{ctp.subnet}'."
-                )
-
-        if require_same_length:
-            length = len(ctps[0].download_timeseries)
-            for ctp in ctps[1:]:
-                if len(ctp.download_timeseries) != length:
-                    raise ValueError(
-                        f"All CTPs must have the same timeseries length for weighted "
-                        f"merge; CTP '{ctps[0].ctp_id}' has {length} bins but "
-                        f"'{ctp.ctp_id}' has {len(ctp.download_timeseries)} bins."
-                    )
-        return ctps
-
-    def _build_merged_ctp(
-        self,
-        ctps: List[CrossTrafficProfile],
-        upload_ts: np.ndarray,
-        download_ts: np.ndarray,
-        new_ctp_id: Optional[str],
-        merge_mode: str,
-        weights: List[float],
-    ) -> CrossTrafficProfile:
-        """Compute metrics on the merged timeseries and store the result.
-
-        Args:
-            ctps: Source CTPs (for metadata inheritance).
-            upload_ts: Merged upload timeseries array.
-            download_ts: Merged download timeseries array.
-            new_ctp_id: Override auto-generated ID (or ``None``).
-            merge_mode: ``'windows'`` or ``'weighted'``.
-            weights: List of weights applied.
-
-        Returns:
-            Stored merged :class:`~app.models.ctp.CrossTrafficProfile`.
-        """
-        bin_sec = self._cfg.burst_interval_ms / 1000.0
         intensity, burstiness, correlation, _ = compute_all_metrics(
             upload_ts=upload_ts,
             download_ts=download_ts,
             bin_width_sec=bin_sec,
+            contributor_ips=leaf_ips,
         )
 
-        # Aggregate contributor IPs across all source CTPs
-        all_ips = list({str(c.subnet).split("/")[0] for c in ctps})
-        contributor_count = sum(c.structure.contributor_count for c in ctps)
         total_upload = float(np.sum(upload_ts))
         total_download = float(np.sum(download_ts))
-
         structure = CTPStructure(
             contributor_count=contributor_count,
-            unique_source_ips=len(all_ips),
-            unique_dest_ips=len(all_ips),
-            upload_download_ratio=(total_upload / total_download if total_download > 0 else -1.0),
-            prefix_diversity=ctps[0].structure.prefix_diversity,
+            unique_source_ips=contributor_count,
+            unique_dest_ips=contributor_count,
+            upload_download_ratio=(
+                total_upload / total_download if total_download > 0 else -1.0
+            ),
+            prefix_diversity=leaf_ctps[0].structure.prefix_diversity,
         )
 
-        first = ctps[0]
-        if new_ctp_id is None:
-            ts_now = datetime.now(tz=timezone.utc).strftime("%Y%m%dT%H%M%S")
-            new_ctp_id = (
-                f"ctp-merge-{merge_mode}-{first.dataset_name}-"
-                f"{first.subnet.replace('/', '_')}-{ts_now}"
-            )
-
+        # 5. Build and store merged CTP
         merged = CrossTrafficProfile(
-            ctp_id=new_ctp_id,
-            dataset_name=first.dataset_name,
-            subnet=first.subnet,
-            window_index=first.window_index,
-            extracted_from=",".join(c.ctp_id for c in ctps),
-            duration_seconds=sum(c.duration_seconds for c in ctps),
+            ctp_id=ctp_id,
+            dataset_name=dataset_name,
+            subnet=subnet,
+            window_index=start_index,
+            extracted_from=f"{dataset_name}/{subnet}/windows_{start_index}-{end_index}",
+            duration_seconds=duration,
             upload_timeseries=upload_ts.tolist(),
             download_timeseries=download_ts.tolist(),
             intensity=intensity,
             burstiness=burstiness,
             temporal_correlation=correlation,
             structure=structure,
+            is_merged=True,
+            merge_start_index=start_index,
+            merge_end_index=end_index,
+            download_pcap=str(download_pcap),
+            upload_pcap=str(upload_pcap),
         )
-
         self._db.upsert_ctp(merged)
         logger.info(
-            "Merged %d CTP(s) [%s] → '%s'  intensity=%.2f Mbps",
-            len(ctps),
-            merge_mode,
-            new_ctp_id,
+            "Merged %d leaf IP(s) windows %d–%d → '%s'  intensity=%.2f Mbps",
+            contributor_count,
+            start_index,
+            end_index,
+            ctp_id,
             merged.intensity.mean_mbps,
         )
-        return merged
+        return merged, download_pcap, upload_pcap
+
+    # ------------------------------------------------------------------ #
+    # Internal helpers
+    # ------------------------------------------------------------------ #
+
+    def _join_pcaps_for_range(
+        self,
+        leaf_ips: List[str],
+        start_index: int,
+        end_index: int,
+        users_root: Path,
+        output_path: Path,
+        direction: str,
+    ) -> None:
+        """Batch-merge per-user window PCAPs using ``joincap``.
+
+        Processes IPs in batches of :data:`_JOINCAP_BATCH_SIZE` to stay
+        within ``ARG_MAX``.  Each batch's output is accumulated into
+        *output_path* by feeding the previous result back into the next
+        ``joincap`` invocation via a temporary file.
+
+        PCAP files are located at::
+
+            <users_root>/<ip>/<direction>/windows/window_XXXX.pcap
+
+        Args:
+            leaf_ips: Sorted list of /32 IP address strings.
+            start_index: First window index (inclusive).
+            end_index: Last window index (inclusive).
+            users_root: Root of the per-user PCAP directory tree.
+            output_path: Destination merged PCAP path.
+            direction: ``'download'`` or ``'upload'``.
+        """
+        tmp_path = output_path.with_suffix(".tmp.pcap")
+
+        valid_patterns = {
+            f"window_{w:04d}.pcap" for w in range(start_index, end_index + 1)
+        }
+
+        for batch_start in range(0, len(leaf_ips), _JOINCAP_BATCH_SIZE):
+            batch_ips = leaf_ips[batch_start : batch_start + _JOINCAP_BATCH_SIZE]
+
+            pcap_files: List[str] = []
+            for ip in batch_ips:
+                base = users_root / ip / direction / "windows"
+
+                # Recursively find matching PCAPs
+                for p in base.rglob("window_*.pcap"):
+                    if p.name in valid_patterns:
+                        pcap_files.append(str(p))
+
+            if not pcap_files:
+                continue
+
+            pcap_files = sorted(set(pcap_files))
+
+            # Accumulate previous batch result into current joincap call
+            if batch_start != 0 and output_path.exists():
+                output_path.rename(tmp_path)
+                pcap_files.append(str(tmp_path))
+
+            cmd = ["joincap", "-w", str(output_path)] + pcap_files
+            logger.debug(
+                "joincap: %d %s PCAP(s) → '%s'", len(pcap_files), direction, output_path
+            )
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                if result.returncode != 0:
+                    logger.error("joincap stderr: %s", result.stderr)
+                    raise subprocess.CalledProcessError(
+                        result.returncode, cmd, result.stdout, result.stderr
+                    )
+            finally:
+                if tmp_path.exists():
+                    tmp_path.unlink()
+
+        if not output_path.exists():
+            logger.warning(
+                "No %s PCAP files found for windows %d–%d; output not created.",
+                direction,
+                start_index,
+                end_index,
+            )

@@ -45,8 +45,12 @@ class Settings(BaseSettings):
     # Service
     # ------------------------------------------------------------------ #
     host: str = Field("0.0.0.0", description="Bind address for the FastAPI server.")
-    port: int = Field(8001, ge=1, le=65535, description="TCP port for the FastAPI server.")
-    log_level: str = Field("INFO", description="Python logging level (DEBUG/INFO/WARNING/ERROR).")
+    port: int = Field(
+        8001, ge=1, le=65535, description="TCP port for the FastAPI server."
+    )
+    log_level: str = Field(
+        "INFO", description="Python logging level (DEBUG/INFO/WARNING/ERROR)."
+    )
 
     # ------------------------------------------------------------------ #
     # Database
