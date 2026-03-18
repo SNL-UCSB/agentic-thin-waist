@@ -1,2 +1,5 @@
 # Global code owners — automatically added as reviewers on every PR
 * @maybe-hello-world
+
+# Root integration/E2E tests — single codeowner for all tests
+/tests/ @maybe-hello-world

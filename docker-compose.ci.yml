@@ -1,0 +1,78 @@
+version: '3.8'
+
+# CI overrides for docker-compose.yml
+#
+# Usage (full stack):
+#   docker compose -f docker-compose.yml -f docker-compose.ci.yml build
+#   docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d --wait
+#   docker compose -f docker-compose.yml -f docker-compose.ci.yml run --rm tests
+#   docker compose -f docker-compose.yml -f docker-compose.ci.yml down -v --remove-orphans
+#
+# Usage (subset, e.g. ctp-service only):
+#   docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d --wait ctp-service
+#
+# Assumptions:
+# - The .env file supplies all required environment variables (DB_*, S3_*).
+# - CLAUDE_API_KEY is not required for integration/E2E tests; a placeholder is used.
+# - Bind-mount volumes from the base file are intentionally kept; they overlay the
+#   same source code that was built into the image, so CI sees identical code.
+# - substrate-worker retains privileged: true and the Docker socket mount because
+#   GitHub-hosted runners support both; service health-checks confirm readiness.
+
+services:
+  # Override FLASK_ENV to "testing" for all app services in CI
+  experiment-api:
+    environment:
+      - FLASK_ENV=testing
+
+  ctp-service:
+    environment:
+      - FLASK_ENV=testing
+
+  substrate-worker:
+    environment:
+      - FLASK_ENV=testing
+
+  netgent-service:
+    environment:
+      - FLASK_ENV=testing
+
+  telemetry-service:
+    environment:
+      - FLASK_ENV=testing
+
+  orchestration:
+    environment:
+      - FLASK_ENV=testing
+      # Provide a placeholder so the service starts without a real Claude key
+      - CLAUDE_API_KEY=ci-placeholder
+
+  # ---------------------------------------------------------------------------
+  # tests service — runs pytest against tests/ inside the Docker network
+  # ---------------------------------------------------------------------------
+  tests:
+    build:
+      context: .
+      dockerfile: tests/Dockerfile
+    environment:
+      - EXPERIMENT_API_URL=http://experiment-api:8000
+      - CTP_SERVICE_URL=http://ctp-service:8001
+      - SUBSTRATE_WORKER_URL=http://substrate-worker:8002
+      - NETGENT_SERVICE_URL=http://netgent-service:8003
+      - TELEMETRY_SERVICE_URL=http://telemetry-service:8004
+      - ORCHESTRATION_URL=http://orchestration:8005
+    depends_on:
+      experiment-api:
+        condition: service_healthy
+      ctp-service:
+        condition: service_healthy
+      substrate-worker:
+        condition: service_healthy
+      netgent-service:
+        condition: service_healthy
+      telemetry-service:
+        condition: service_healthy
+      orchestration:
+        condition: service_healthy
+    networks:
+      - agentic-network
