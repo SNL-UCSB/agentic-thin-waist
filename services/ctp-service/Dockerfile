@@ -14,15 +14,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         wireshark-common \
         libpcap-dev \
         curl \
+        unzip \
         ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # Install joincap (Go binary — download pre-built release)
 RUN curl -fsSL \
-    "https://github.com/assafmo/joincap/releases/download/v0.10.1/joincap_linux_amd64.tar.gz" \
-    -o /tmp/joincap.tar.gz \
-    && tar -xzf /tmp/joincap.tar.gz -C /usr/local/bin joincap \
-    && rm /tmp/joincap.tar.gz \
+    "https://github.com/assafmo/joincap/releases/download/v0.10.1/joincap-linux64-v0.10.1.zip" \
+    -o /tmp/joincap.zip \
+    && unzip /tmp/joincap.zip -d /tmp \
+    && rm /tmp/joincap.zip \
+    && mv /tmp/joincap* /usr/local/bin/joincap \
     && chmod +x /usr/local/bin/joincap
 
 # ---------------------------------------------------------------------------
@@ -30,10 +32,11 @@ RUN curl -fsSL \
 # ---------------------------------------------------------------------------
 WORKDIR /app
 
-COPY requirements.txt .
+COPY services/ctp-service/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY app/ app/
+COPY shared/ shared/
+COPY services/ctp-service/app/ app/
 
 # ---------------------------------------------------------------------------
 # Runtime
