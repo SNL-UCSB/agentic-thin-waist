@@ -66,7 +66,9 @@ class TestBuildQdiscArgs:
 
     # qdisc_params are appended verbatim for any qdisc
     def test_codel_with_qdisc_params(self):
-        result = _build_qdisc_args("codel", 1000, {"target": "5ms", "interval": "100ms"})
+        result = _build_qdisc_args(
+            "codel", 1000, {"target": "5ms", "interval": "100ms"}
+        )
         assert result == "codel target 5ms interval 100ms"
 
     def test_fq_codel_with_qdisc_params(self):
