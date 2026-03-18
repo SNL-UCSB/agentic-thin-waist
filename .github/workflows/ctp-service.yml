@@ -30,5 +30,4 @@ jobs:
             python -m pytest tests/ -v --tb=short
 
       - name: Start service via Docker Compose
-        working-directory: ${{ github.workspace }}
         run: docker compose up -d --wait ctp-service
