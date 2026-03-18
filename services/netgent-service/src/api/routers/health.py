@@ -17,12 +17,12 @@ router = APIRouter()
 )
 def health_check() -> HealthResponse:
     return HealthResponse(
-        status="ok",
+        status="healthy",
         checks=HealthChecks(
-            browser_driver="ok",
-            llm_service="ok",
-            workflow_engine="ok",
-            telemetry_service="ok",
+            browser_driver="available",
+            llm_service="responsive",
+            workflow_engine="operational",
+            telemetry_service="reachable",
         ),
         uptime_seconds=0,
     )

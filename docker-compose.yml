@@ -1,3 +1,5 @@
+version: '3.8'
+
 services:
   # Aux services
   postgres:
@@ -175,7 +177,7 @@ services:
     volumes:
       - ./services/netgent-service:/app
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8003/health')"]
       interval: 5s
       timeout: 3s
       retries: 10
