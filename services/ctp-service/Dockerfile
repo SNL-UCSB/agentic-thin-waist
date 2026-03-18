@@ -14,15 +14,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         wireshark-common \
         libpcap-dev \
         curl \
+        unzip \
         ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # Install joincap (Go binary — download pre-built release)
 RUN curl -fsSL \
     "https://github.com/assafmo/joincap/releases/download/v0.10.1/joincap-linux64-v0.10.1.zip" \
-    -o /tmp/joincap.tar.gz \
-    && tar -xzf /tmp/joincap.tar.gz -C /usr/local/bin joincap \
-    && rm /tmp/joincap.tar.gz \
+    -o /tmp/joincap.zip \
+    && unzip /tmp/joincap.zip -d /usr/local/bin \
+    && rm /tmp/joincap.zip \
     && chmod +x /usr/local/bin/joincap
 
 # ---------------------------------------------------------------------------
