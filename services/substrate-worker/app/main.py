@@ -468,9 +468,7 @@ def _verify_latency() -> None:
             timeout=20,
         )
         if result.returncode == 0:
-            match = re.search(
-                r"rtt min/avg/max/mdev = [\d.]+/([\d.]+)/", result.stdout
-            )
+            match = re.search(r"rtt min/avg/max/mdev = [\d.]+/([\d.]+)/", result.stdout)
             if match:
                 measured_rtt_ms = float(match.group(1))
                 diff_ms = abs(measured_rtt_ms - expected_rtt_ms)
@@ -484,7 +482,9 @@ def _verify_latency() -> None:
                 else:
                     log.append("PASS: latency")
             else:
-                log.append(f"FAIL: could not parse ping output: {result.stdout.strip()}")
+                log.append(
+                    f"FAIL: could not parse ping output: {result.stdout.strip()}"
+                )
                 latency_verified = False
         else:
             log.append(f"FAIL: ping error: {result.stderr.strip()}")
@@ -494,7 +494,9 @@ def _verify_latency() -> None:
         latency_verified = False
 
     CURRENT_BOTTLENECK_STATE.verification_log.extend(log)
-    CURRENT_BOTTLENECK_STATE.verified = CURRENT_BOTTLENECK_STATE.verified and latency_verified
+    CURRENT_BOTTLENECK_STATE.verified = (
+        CURRENT_BOTTLENECK_STATE.verified and latency_verified
+    )
 
 
 def _cmd_available(cmd: str) -> bool:
@@ -580,11 +582,11 @@ def shape(cfg: ShapeRequest) -> ShapeResponse:
             )
         )
     except subprocess.CalledProcessError as exc:
-        CURRENT_BOTTLENECK_STATE =  None
+        CURRENT_BOTTLENECK_STATE = None
         CURRENT_INTERFACES = None
         raise HTTPException(status_code=500, detail=f"tc command failed: {exc}")
     except Exception as exc:
-        CURRENT_BOTTLENECK_STATE =  None
+        CURRENT_BOTTLENECK_STATE = None
         CURRENT_INTERFACES = None
         raise HTTPException(status_code=500, detail=str(exc))
 
