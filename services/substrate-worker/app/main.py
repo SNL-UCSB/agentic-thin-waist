@@ -292,7 +292,7 @@ def apply_shaping(
         c3 = f"tc qdisc add dev {iface} parent 1:10 handle 10: {qdisc_args}"
         run_cmd(c3)
         applied.append(c3)
-
+    _verify_bottleneck_state()
     # -------------------------
     # Latency shaping (netem)
     # -------------------------
@@ -320,6 +320,7 @@ def apply_shaping(
             run_cmd(add_cmd)
             applied.append(add_cmd)
 
+    _verify_latency()
     return applied
 
 
@@ -431,6 +432,73 @@ def _verify_bottleneck_state() -> None:
     CURRENT_BOTTLENECK_STATE.verification_log = log
 
 
+def _verify_latency() -> None:
+    global CURRENT_BOTTLENECK_STATE
+
+    if CURRENT_BOTTLENECK_STATE is None:
+        return
+
+    import re
+
+    TARGET_IP = "172.16.3.1"
+    TOLERANCE_MS = 10.0
+    log: List[str] = []
+    latency_verified = True
+
+    expected_ms = CURRENT_BOTTLENECK_STATE.latency_ms
+    location = CURRENT_BOTTLENECK_STATE.latency_location
+
+    # Calculate expected RTT contribution from netem:
+    # - "both"            → outgoing + return leg both delayed  → +2*latency_ms
+    # - "upstream" or
+    #   "downstream"      → only one leg delayed                → +1*latency_ms
+    # - None / 0          → no added delay; verify baseline is low
+    if expected_ms > 0 and location is not None:
+        if location == "both":
+            expected_rtt_ms = expected_ms * 2
+        else:
+            expected_rtt_ms = expected_ms
+    else:
+        expected_rtt_ms = 0.0
+
+    try:
+        result = _run_in_ns(
+            "ns1",
+            f"ping -c 5 -W 2 -q {TARGET_IP}",
+            timeout=20,
+        )
+        if result.returncode == 0:
+            match = re.search(r"rtt min/avg/max/mdev = [\d.]+/([\d.]+)/", result.stdout)
+            if match:
+                measured_rtt_ms = float(match.group(1))
+                diff_ms = abs(measured_rtt_ms - expected_rtt_ms)
+                log.append(
+                    f"latency: measured_rtt={measured_rtt_ms:.2f}ms "
+                    f"expected_rtt={expected_rtt_ms:.2f}ms diff={diff_ms:.2f}ms"
+                )
+                if diff_ms > TOLERANCE_MS:
+                    log.append(f"FAIL: latency out of ±{TOLERANCE_MS}ms range")
+                    latency_verified = False
+                else:
+                    log.append("PASS: latency")
+            else:
+                log.append(
+                    f"FAIL: could not parse ping output: {result.stdout.strip()}"
+                )
+                latency_verified = False
+        else:
+            log.append(f"FAIL: ping error: {result.stderr.strip()}")
+            latency_verified = False
+    except Exception as e:
+        log.append(f"FAIL: latency verification exception: {e}")
+        latency_verified = False
+
+    CURRENT_BOTTLENECK_STATE.verification_log.extend(log)
+    CURRENT_BOTTLENECK_STATE.verified = (
+        CURRENT_BOTTLENECK_STATE.verified and latency_verified
+    )
+
+
 def _cmd_available(cmd: str) -> bool:
     result = subprocess.run(f"which {cmd}", shell=True, capture_output=True)
     return result.returncode == 0
@@ -479,6 +547,25 @@ def shape(cfg: ShapeRequest) -> ShapeResponse:
 
     _validate_qdisc_request(cfg.qdisc, cfg.buffer_packets, cfg.qdisc_params)
 
+    # Set state before apply_shaping so that the verification functions
+    # called inside it (_verify_bottleneck_state, _verify_latency) can
+    # read the expected values.
+    state = BottleneckState(
+        download_mbps=cfg.download_mbps,
+        upload_mbps=cfg.upload_mbps,
+        latency_ms=cfg.latency_ms,
+        latency_location=cfg.latency_location,
+        qdisc=cfg.qdisc,
+        verified=False,
+        buffer_packets=cfg.buffer_packets,
+        qdisc_params=cfg.qdisc_params,
+    )
+    CURRENT_BOTTLENECK_STATE = state
+    CURRENT_INTERFACES = {
+        "downstream_iface": cfg.downstream_iface,
+        "upstream_iface": cfg.upstream_iface,
+    }
+
     try:
         applied_commands: List[str] = []
         applied_commands.extend(
@@ -495,29 +582,13 @@ def shape(cfg: ShapeRequest) -> ShapeResponse:
             )
         )
     except subprocess.CalledProcessError as exc:
+        CURRENT_BOTTLENECK_STATE = None
+        CURRENT_INTERFACES = None
         raise HTTPException(status_code=500, detail=f"tc command failed: {exc}")
     except Exception as exc:
+        CURRENT_BOTTLENECK_STATE = None
+        CURRENT_INTERFACES = None
         raise HTTPException(status_code=500, detail=str(exc))
-
-    state = BottleneckState(
-        download_mbps=cfg.download_mbps,
-        upload_mbps=cfg.upload_mbps,
-        latency_ms=cfg.latency_ms,
-        latency_location=cfg.latency_location,
-        qdisc=cfg.qdisc,
-        verified=False,  # will be set by verification logic
-        buffer_packets=cfg.buffer_packets,
-        qdisc_params=cfg.qdisc_params,
-    )
-
-    CURRENT_BOTTLENECK_STATE = state
-    CURRENT_INTERFACES = {
-        "downstream_iface": cfg.downstream_iface,
-        "upstream_iface": cfg.upstream_iface,
-    }
-
-    # Run verification immediately after applying shaping
-    _verify_bottleneck_state()
 
     return ShapeResponse(
         status="shaped",
