@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # Aux services
   postgres:
@@ -103,7 +101,7 @@ services:
       - ./services/experiment-api:/app
       - /var/run/docker.sock:/var/run/docker.sock
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -167,11 +165,21 @@ services:
       - "8003:8003"
     environment:
       - FLASK_ENV=development
+      - NETGENT_RELOAD=true
       - SUBSTRATE_WORKER_URL=http://substrate-worker:8002
       - TELEMETRY_SERVICE_URL=http://telemetry-service:8004
+      - DB_HOST=${DB_HOST}
+      - DB_NAME=${DB_NAME}
+      - DB_PORT=${DB_PORT}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
     depends_on:
-      - substrate-worker
-      - telemetry-service
+      postgres:
+        condition: service_healthy
+      substrate-worker:
+        condition: service_started
+      telemetry-service:
+        condition: service_started
     networks:
       - agentic-network
     volumes:
@@ -221,8 +229,8 @@ services:
   # D5: Orchestration Service - Claude + OpenClaw
   orchestration:
     build:
-      context: .
-      dockerfile: ./services/orchestration/Dockerfile
+      context: ./services/orchestration
+      dockerfile: Dockerfile
     container_name: orchestration
     ports:
       - "8005:8005"
@@ -241,7 +249,7 @@ services:
     volumes:
       - ./services/orchestration:/app
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8005/health')"]
       interval: 5s
       timeout: 3s
       retries: 10

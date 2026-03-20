@@ -182,6 +182,7 @@ Three independent tracks running in parallel. Phase 1 (weeks 1–2) is independe
 ```bash
 git clone git@github.com:SNL-UCSB/agentic-thin-waist.git
 cd agentic-thin-waist
+cp .env.example .env
 make build
 ```
 

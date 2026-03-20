@@ -2,8 +2,6 @@
 # This extends the base docker-compose.yml with cloud-specific configurations
 # Usage: docker-compose -f docker-compose.yml -f docker-compose.cloud.yml up
 
-version: '3.8'
-
 services:
   experiment-api:
     # Use image from ECR (Elastic Container Registry) if available
