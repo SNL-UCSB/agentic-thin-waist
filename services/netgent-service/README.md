@@ -36,10 +36,9 @@ NetGent produces:
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
-| `/workflows/execute` | POST | Execute workflow from NL specification |
+| `/workflows/generate` | POST | Generate workflow from NL specification |
 | `/workflows/compile` | POST | Compile NL spec to NFA state machine |
-| `/workflows/validate` | POST | Validate spec without execution |
-| `/workflows/{id}` | GET | Get workflow result and QoE metrics |
+| `/workflows/result/{id}` | GET | Get workflow result and QoE metrics |
 | `/workflows/available` | GET | **Active application registry** — list all supported applications and their capabilities |
 | `/health` | GET | Health check: browser driver, LLM service |
 
@@ -72,19 +71,20 @@ The novel contribution of NetGent is **NFA compilation from natural-language spe
 
 ## API Reference
 
-### POST /workflows/execute
+### POST /workflows/generate
 
-Execute a workflow from natural-language specification.
+Generate a workflow from natural-language specification.
 
 **Request**:
 ```json
 {
-  "spec": "Watch YouTube for 60 seconds, measuring startup time and rebuffer events",
-  "timeout": 120,
-  "application": "youtube",
-  "llm_model": "gpt-4",
-  "headless": true,
-  "capture_artifacts": true
+  "query": "Watch YouTube for 60 seconds, measuring startup time and rebuffer events",
+  "parameters": {
+    "video_url": "YouTube video to open",
+    "watch_duration": "How long to play the video in seconds",
+    "metrics_focus": "QoE signals to extract during playback"
+  },
+  "application": "youtube"
 }
 ```
 
@@ -131,31 +131,7 @@ Compile NL specification to executable NFA state machine.
 }
 ```
 
-### POST /workflows/validate
-
-Validate workflow specification for correctness and completeness.
-
-**Request**:
-```json
-{
-  "spec": "Click button with selector #play-btn, then wait 60 seconds"
-}
-```
-
-**Response** (200 OK):
-```json
-{
-  "valid": true,
-  "errors": [],
-  "warnings": [
-    "No video element selection found; ensure video loads before wait"
-  ],
-  "estimated_duration_seconds": 62,
-  "state_count": 3
-}
-```
-
-### GET /workflows/{id}
+### GET /workflows/result/{id}
 
 Retrieve workflow result by execution ID.
 
@@ -252,9 +228,6 @@ class NetGentAPI:
 
     def compile_nfa(self, spec: str) -> NFA:
         """Compile spec to NFA state machine."""
-
-    def validate_workflow(self, spec: str) -> ValidationResult:
-        """Validate spec without execution."""
 
     def health_check(self) -> HealthStatus:
         """Return service health."""
@@ -357,7 +330,7 @@ class ValidationResult:
 ┌─────────────────────────────────────────┐
 │     User / Orchestrator (Port 8000)     │
 └──────────────────┬──────────────────────┘
-                   │ POST /workflows/execute
+                   │ POST /workflows/generate
                    ▼
 ┌─────────────────────────────────────────┐
 │      NetGent Service (Port 8003)        │
@@ -365,15 +338,13 @@ class ValidationResult:
 │  │  API Layer                        │  │
 │  │  - execute_workflow()             │  │
 │  │  - compile_nfa()                  │  │
-│  │  - validate_workflow()            │  │
 │  │  - health_check()                 │  │
 │  └───────────────────────────────────┘  │
 │  ┌───────────────────────────────────┐  │
-│  │  LangGraph StateGraph (4 nodes)   │  │
+│  │  LangGraph StateGraph (3 nodes)   │  │
 │  │  1. Compile: NL → NFA             │  │
-│  │  2. Validate: Check NFA           │  │
-│  │  3. Execute: Run Selenium/CDP     │  │
-│  │  4. Collect: Metrics + Artifacts  │  │
+│  │  2. Execute: Run Selenium/CDP     │  │
+│  │  3. Collect: Metrics + Artifacts  │  │
 │  └───────────────────────────────────┘  │
 │  ┌───────────────────────────────────┐  │
 │  │  Execution Engine                 │  │

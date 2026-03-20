@@ -322,7 +322,7 @@ class TelemetrySnapshot:
 
 **Key Endpoints**:
 - `POST /workflows/compile` — Compile NFA from spec
-- `POST /workflows/execute` — Run workflow under current network conditions
+- `POST /workflows/generate` — Run workflow under current network conditions
 - `GET /workflows/results/{workflow_id}` — Retrieve execution results
 - `GET /workflows/available` — List available NFA workflows
 - `POST /workflows/qoe/measure` — Extract QoE metrics from logs

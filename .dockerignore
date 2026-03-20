@@ -1,6 +1,10 @@
 .git
 **/.git
 **/.venv
+**/.uv-verify-env
+**/.pytest-tmp
+**/.pytest_cache
+**/pytest-cache-files-*
 **/__pycache__
 **/*.pyc
 **/*.pyo

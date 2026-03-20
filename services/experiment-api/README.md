@@ -698,7 +698,7 @@ class ExperimentResult:
 - **Failure Mode**: Return 503 on kernel module unavailability or privilege errors; retry with backoff
 
 ### NetGent Service (Application Execution)
-- **Endpoint**: POST `/workflows/execute`
+- **Endpoint**: POST `/workflows/generate`
 - **Purpose**: Execute application workflow (e.g., watch-video-60s) under shaped network conditions
 - **Inputs**: application, workflow_spec, duration_seconds, capture settings
 - **Outputs**: Metrics (QoE, transport), PCAP path, any errors
