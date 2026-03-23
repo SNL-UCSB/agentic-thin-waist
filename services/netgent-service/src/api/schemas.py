@@ -43,6 +43,7 @@ class WorkflowStatusResponse(BaseModel):
 class WorkflowResultResponse(BaseModel):
     workflow_id: str
     status: WorkflowStatus
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class AvailableWorkflowItem(BaseModel):

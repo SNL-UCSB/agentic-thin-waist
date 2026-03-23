@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from uuid import uuid4
-
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from botocore.client import BaseClient
 from sqlalchemy.orm import sessionmaker
 
+from ..exceptions import UnsupportedApplicationError
 from ..service import NetGentService
 from ..schemas import (
     AvailableWorkflowsResponse,
@@ -26,7 +26,9 @@ def get_netgent_service(request: Request) -> NetGentService:
         autocommit=False,
         expire_on_commit=False,
     )
-    return NetGentService(session_factory)
+    s3_client: BaseClient = request.app.state.s3_client
+    s3_bucket_name: str = request.app.state.s3_bucket_name
+    return NetGentService(session_factory, s3_client, s3_bucket_name)
 
 
 # Generate a Workflow
@@ -37,10 +39,19 @@ def get_netgent_service(request: Request) -> NetGentService:
 )
 def generate_workflow(
     request: GenerateWorkflowRequest,
+    service: NetGentService = Depends(get_netgent_service),
 ) -> GenerateWorkflowResponse:
+    try:
+        workflow = service.generate_workflow(request)
+    except UnsupportedApplicationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
     return GenerateWorkflowResponse(
-        workflow_id=str(uuid4()),
-        status="pending",
+        workflow_id=str(workflow.id),
+        status=workflow.status,
     )
 
 

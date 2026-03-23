@@ -33,6 +33,12 @@ class WorkflowRun(Base):
         default=dict,
         server_default=sa.text("'{}'::json"),
     )
+    parameters = sa.Column(
+        sa.JSON,
+        nullable=False,
+        default=dict,
+        server_default=sa.text("'{}'::json"),
+    )
     created_at = sa.Column(
         sa.DateTime(timezone=True),
         nullable=False,
