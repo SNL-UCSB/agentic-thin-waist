@@ -2,34 +2,23 @@
 
 from __future__ import annotations
 
-from uuid import uuid4
+from fastapi import APIRouter, Depends, status
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
-from sqlalchemy.orm import sessionmaker
 
-from ..service import NetGentService
 from ..schemas import (
     AvailableWorkflowsResponse,
     GenerateWorkflowRequest,
     GenerateWorkflowResponse,
-    WorkflowStatusResponse,
+    ExecuteWorkflowRequest,
+    ExecuteWorkflowResponse,
     WorkflowResultResponse,
 )
+from ..services.workflow import WorkflowService
 
 router = APIRouter(prefix="/workflows", tags=["workflow"])
 
 
-def get_netgent_service(request: Request) -> NetGentService:
-    session_factory = sessionmaker(
-        bind=request.app.state.db_engine,
-        autoflush=False,
-        autocommit=False,
-        expire_on_commit=False,
-    )
-    return NetGentService(session_factory)
-
-
-# Generate a Workflow
+# Generate a Workflow (Similar to the Compile Endpoint) -> It will generate an NFA Workflow based in Natural Language Specification
 @router.post(
     "/generate",
     response_model=GenerateWorkflowResponse,
@@ -37,63 +26,35 @@ def get_netgent_service(request: Request) -> NetGentService:
 )
 def generate_workflow(
     request: GenerateWorkflowRequest,
+    service: WorkflowService = Depends(WorkflowService),
 ) -> GenerateWorkflowResponse:
-    return GenerateWorkflowResponse(
-        workflow_id=str(uuid4()),
-        status="pending",
-    )
+    return service.generate(request)
 
 
-# Get the Status of a Workflow
-@router.get("/status/{workflow_id}", response_model=WorkflowStatusResponse)
-def get_workflow_status(
-    workflow_id: str,
-    service: NetGentService = Depends(get_netgent_service),
-) -> WorkflowStatusResponse:
-    try:
-        workflow = service.get_workflow_status(workflow_id)
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid workflow ID",
-        ) from exc
-    if workflow is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Workflow not found"
-        )
-    return WorkflowStatusResponse(
-        workflow_id=str(workflow.id),
-        status=workflow.status,
-    )
+@router.post("/execute", response_model=ExecuteWorkflowResponse)
+def execute_workflow(
+    request: ExecuteWorkflowRequest,
+    service: WorkflowService = Depends(WorkflowService),
+) -> ExecuteWorkflowResponse:
+    return service.execute(request)
 
 
 @router.get(
     "/available",
     response_model=AvailableWorkflowsResponse,
 )
-def get_available_workflows(
-    service: NetGentService = Depends(get_netgent_service),
+def get_applications(
+    service: WorkflowService = Depends(WorkflowService),
 ) -> AvailableWorkflowsResponse:
-    return service.get_available_workflows()
+    return service.get_available()
 
 
 @router.get(
-    "/result/{workflow_id}",
+    "/result/{job_id}",
     response_model=WorkflowResultResponse,
 )
-def get_workflow_result(
-    workflow_id: str,
-    service: NetGentService = Depends(get_netgent_service),
+def get_result(
+    job_id: str,
+    service: WorkflowService = Depends(WorkflowService),
 ) -> WorkflowResultResponse:
-    try:
-        workflow_result = service.get_workflow_result(workflow_id)
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid workflow ID",
-        ) from exc
-    if workflow_result is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Workflow not found"
-        )
-    return workflow_result
+    return service.get_result(job_id)

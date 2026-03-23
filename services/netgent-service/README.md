@@ -221,7 +221,7 @@ class NetGentAPI:
     def execute_workflow(
         self,
         spec: str,
-        timeout: int = 120,
+        timeout: int = 30,
         llm: Optional[BaseChatModel] = None
     ) -> WorkflowResult:
         """Execute workflow from NL spec with optional LLM override."""
@@ -434,7 +434,7 @@ HAR file analysis extracts:
 **Environment Variables**:
 ```bash
 NETGENT_PORT=8003
-NETGENT_TIMEOUT_DEFAULT=120
+NETGENT_TIMEOUT_DEFAULT=30
 LLM_API_KEY=<OpenAI API key>
 LLM_MODEL=gpt-4-turbo
 STORAGE_BUCKET=gs://netgent-artifacts

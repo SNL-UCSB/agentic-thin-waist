@@ -53,7 +53,8 @@ services:
     entrypoint: >
       /bin/sh -c "
         mc alias set local http://minio:9000 $${S3_ACCESS_KEY} $${S3_SECRET_KEY} &&
-        mc mb --ignore-existing local/$${S3_BUCKET_NAME}
+        mc mb --ignore-existing local/$${S3_BUCKET_NAME} &&
+        mc mb --ignore-existing local/$${NETGENT_S3_BUCKET_NAME:-netgent}
       "
 
   browserless:
@@ -168,11 +169,18 @@ services:
       - NETGENT_RELOAD=true
       - SUBSTRATE_WORKER_URL=http://substrate-worker:8002
       - TELEMETRY_SERVICE_URL=http://telemetry-service:8004
+      - BROWSERLESS_WS_ENDPOINT=${BROWSERLESS_WS_ENDPOINT:-ws://browserless:3000/chromium/playwright}
       - DB_HOST=${DB_HOST}
       - DB_NAME=${DB_NAME}
       - DB_PORT=${DB_PORT}
       - DB_USER=${DB_USER}
       - DB_PASSWORD=${DB_PASSWORD}
+      - S3_ENDPOINT_URL=${S3_ENDPOINT_URL}
+      - NETGENT_S3_BUCKET_NAME=${NETGENT_S3_BUCKET_NAME:-netgent}
+      - S3_ACCESS_KEY=${S3_ACCESS_KEY}
+      - S3_SECRET_KEY=${S3_SECRET_KEY}
+      - S3_CONNECTION_RETRIES=${S3_CONNECTION_RETRIES}
+      - S3_CONNECTION_TIMEOUT_SECONDS=${S3_CONNECTION_TIMEOUT_SECONDS}
     depends_on:
       postgres:
         condition: service_healthy
