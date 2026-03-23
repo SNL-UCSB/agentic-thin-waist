@@ -32,7 +32,11 @@ def _sample_spec(experiment_id: str = "youtube-20mbps-50ms-cubic-001") -> dict:
 def test_execution_manager_run_experiments_aggregates_single_success(monkeypatch):
     clients = DownstreamClients()
     clients.capture_substrate = MagicMock(
-        return_value={"capture_id": "cap-1", "status": "started", "pcap_path": "/tmp/e1.pcap"}
+        return_value={
+            "capture_id": "cap-1",
+            "status": "started",
+            "pcap_path": "/tmp/e1.pcap",
+        }
     )
     clients.shape_substrate = MagicMock(return_value={"status": "shaped"})
     clients.run_experiment = MagicMock(
@@ -43,7 +47,12 @@ def test_execution_manager_run_experiments_aggregates_single_success(monkeypatch
         }
     )
     clients.get_capture = MagicMock(
-        return_value={"capture_id": "cap-1", "status": "finished", "exit_code": 0, "pcap_path": "/tmp/e1.pcap"}
+        return_value={
+            "capture_id": "cap-1",
+            "status": "finished",
+            "exit_code": 0,
+            "pcap_path": "/tmp/e1.pcap",
+        }
     )
     clients.get_experiment = MagicMock(
         return_value={"experiment_id": "e1", "status": "completed"}
@@ -86,7 +95,9 @@ def test_execution_manager_real_stack_generates_pcap(monkeypatch):
     manager = ExecutionManager()
     unique = str(int(time.time()))
     experiment_id = f"youtube-20.19mbps-50ms-cubic-real-{unique}"
-    out = manager.run_experiments([_sample_spec(experiment_id)], enable_ctp_validation=False)
+    out = manager.run_experiments(
+        [_sample_spec(experiment_id)], enable_ctp_validation=False
+    )
     print("real-stack execution output:")
     print(out)
 
@@ -103,4 +114,3 @@ def test_execution_manager_real_stack_generates_pcap(monkeypatch):
         "/home/haarika/imp_files/thinwaist/agentic-thin-waist/netreplica/config/captures"
     )
     assert (capture_dir / f"{experiment_id}.pcap").exists()
-

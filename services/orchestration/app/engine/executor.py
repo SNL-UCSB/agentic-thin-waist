@@ -56,9 +56,13 @@ class _ServiceHttp:
         _raise_for_status(resp)
         return resp.json()
 
-    def stream_to_file(self, path: str, dest: str, params: dict[str, Any] | None = None) -> str:
+    def stream_to_file(
+        self, path: str, dest: str, params: dict[str, Any] | None = None
+    ) -> str:
         """Stream a GET response body to a local file. Returns *dest*."""
-        with httpx.stream("GET", self.base_url + path, params=params, timeout=self.timeout) as resp:
+        with httpx.stream(
+            "GET", self.base_url + path, params=params, timeout=self.timeout
+        ) as resp:
             resp.raise_for_status()
             parent = os.path.dirname(dest)
             if parent:
@@ -78,7 +82,9 @@ class ExperimentApis:
     def run_experiment(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._http.post("/experiments", payload)
 
-    def patch_experiment(self, experiment_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    def patch_experiment(
+        self, experiment_id: str, payload: dict[str, Any]
+    ) -> dict[str, Any]:
         return self._http.patch(f"/experiments/{experiment_id}", payload)
 
     def get_experiment(self, experiment_id: str) -> dict[str, Any]:
@@ -103,7 +109,9 @@ class CtpApis:
     def validate_ctp_spec(self, spec: dict[str, Any]) -> dict[str, Any]:
         return self._http.post("/ctps/validate", spec)
 
-    def replay_data(self, ctp_id: str, replay_dir: str, users_root: str) -> dict[str, Any]:
+    def replay_data(
+        self, ctp_id: str, replay_dir: str, users_root: str
+    ) -> dict[str, Any]:
         return self._http.get(
             f"/ctps/{ctp_id}/replay-data",
             params={
@@ -197,7 +205,10 @@ class TelemetryApis:
             return self._http.get("/results", params=params)
         except Exception:
             # Degrade gracefully when telemetry service endpoint is absent.
-            return {"results": [], "warning": "telemetry_service_unavailable_or_unsupported"}
+            return {
+                "results": [],
+                "warning": "telemetry_service_unavailable_or_unsupported",
+            }
 
     def post_result(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Persist an experiment result via ``POST /results``."""
@@ -219,19 +230,23 @@ class DownstreamClients:
         netgent_service_url: str | None = None,
     ) -> None:
         self.experiment_api_url = (
-            experiment_api_url or os.getenv("EXPERIMENT_API_URL", "http://localhost:8000")
+            experiment_api_url
+            or os.getenv("EXPERIMENT_API_URL", "http://localhost:8000")
         ).rstrip("/")
         self.ctp_service_url = (
             ctp_service_url or os.getenv("CTP_SERVICE_URL", "http://localhost:8001")
         ).rstrip("/")
         self.substrate_worker_url = (
-            substrate_worker_url or os.getenv("SUBSTRATE_WORKER_URL", "http://localhost:8002")
+            substrate_worker_url
+            or os.getenv("SUBSTRATE_WORKER_URL", "http://localhost:8002")
         ).rstrip("/")
         self.telemetry_service_url = (
-            telemetry_service_url or os.getenv("TELEMETRY_SERVICE_URL", "http://localhost:8004")
+            telemetry_service_url
+            or os.getenv("TELEMETRY_SERVICE_URL", "http://localhost:8004")
         ).rstrip("/")
         self.netgent_service_url = (
-            netgent_service_url or os.getenv("NETGENT_SERVICE_URL", "http://localhost:8003")
+            netgent_service_url
+            or os.getenv("NETGENT_SERVICE_URL", "http://localhost:8003")
         ).rstrip("/")
         self.timeout = float(os.getenv("ORCH_HTTP_TIMEOUT_SECONDS", "20"))
 
@@ -263,7 +278,9 @@ class DownstreamClients:
     def run_experiment(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self.experiment_apis.run_experiment(payload)
 
-    def patch_experiment(self, experiment_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    def patch_experiment(
+        self, experiment_id: str, payload: dict[str, Any]
+    ) -> dict[str, Any]:
         return self.experiment_apis.patch_experiment(experiment_id, payload)
 
     def get_experiment(self, experiment_id: str) -> dict[str, Any]:
@@ -296,7 +313,9 @@ class DownstreamClients:
     def validate_ctp_spec(self, spec: dict[str, Any]) -> dict[str, Any]:
         return self.ctp_apis.validate_ctp_spec(spec)
 
-    def replay_data(self, ctp_id: str, replay_dir: str, users_root: str) -> dict[str, Any]:
+    def replay_data(
+        self, ctp_id: str, replay_dir: str, users_root: str
+    ) -> dict[str, Any]:
         return self.ctp_apis.replay_data(ctp_id, replay_dir, users_root)
 
     def query_results(self, params: dict[str, Any]) -> dict[str, Any]:
@@ -336,9 +355,16 @@ class DownstreamClients:
     # --- CTP extended delegates ---
 
     def export_replay_pcap(
-        self, ctp_id: str, dest_path: str, replay_dir: str, users_root: str, direction: str = "download",
+        self,
+        ctp_id: str,
+        dest_path: str,
+        replay_dir: str,
+        users_root: str,
+        direction: str = "download",
     ) -> str:
-        return self.ctp_apis.export_replay_pcap(ctp_id, dest_path, replay_dir, users_root, direction)
+        return self.ctp_apis.export_replay_pcap(
+            ctp_id, dest_path, replay_dir, users_root, direction
+        )
 
 
 class ToolRouter:
@@ -347,7 +373,9 @@ class ToolRouter:
     def __init__(self, clients: DownstreamClients | None = None) -> None:
         self.clients = clients or DownstreamClients()
 
-    def handle_tool_call(self, tool_name: str, tool_input: dict[str, Any]) -> dict[str, Any]:
+    def handle_tool_call(
+        self, tool_name: str, tool_input: dict[str, Any]
+    ) -> dict[str, Any]:
         if tool_name == "run_experiment":
             return self._run_experiment(tool_input)
         if tool_name == "query_results":
@@ -422,7 +450,9 @@ class ToolRouter:
             "upstream_iface": os.getenv("SUBSTRATE_UPSTREAM_IFACE", "veth4"),
             "downstream_iface": os.getenv("SUBSTRATE_DOWNSTREAM_IFACE", "veth2"),
             "download_mbps": float(experiment_spec["capacity_mbps"]),
-            "upload_mbps": float(experiment_spec.get("upload_mbps", experiment_spec["capacity_mbps"])),
+            "upload_mbps": float(
+                experiment_spec.get("upload_mbps", experiment_spec["capacity_mbps"])
+            ),
             "latency_ms": float(experiment_spec["latency_ms"]),
             "latency_location": experiment_spec.get("latency_location", "both"),
             "qdisc": experiment_spec.get("aqm_policy", "fq_codel"),
@@ -461,9 +491,7 @@ class ExecutionManager:
         self.experiment_timeout_seconds = int(
             os.getenv("ORCH_EXPERIMENT_TIMEOUT_SECONDS", "60")
         )
-        self.poll_interval_seconds = float(
-            os.getenv("ORCH_POLL_INTERVAL_SECONDS", "2")
-        )
+        self.poll_interval_seconds = float(os.getenv("ORCH_POLL_INTERVAL_SECONDS", "2"))
         self.poll_experiment_status = (
             os.getenv("ORCH_POLL_EXPERIMENT_STATUS", "1").lower() != "0"
         )
@@ -533,7 +561,9 @@ class ExecutionManager:
                     item["capture_status"] = {"status": "missing_capture_id"}
 
                 experiment_record = dispatch.get("experiment", {})
-                if self.poll_experiment_status and experiment_record.get("experiment_id"):
+                if self.poll_experiment_status and experiment_record.get(
+                    "experiment_id"
+                ):
                     item["experiment_status"] = self._wait_for_experiment(
                         experiment_record["experiment_id"]
                     )

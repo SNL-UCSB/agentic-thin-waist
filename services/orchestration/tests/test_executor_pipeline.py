@@ -85,7 +85,9 @@ def test_run_experiments_shape_failure_still_records_dispatch_error_and_patches_
 
 def test_run_experiments_run_experiment_failure_skips_shape_and_capture():
     clients = DownstreamClients()
-    clients.run_experiment = MagicMock(side_effect=ConnectionError("experiment api down"))
+    clients.run_experiment = MagicMock(
+        side_effect=ConnectionError("experiment api down")
+    )
     clients.shape_substrate = MagicMock()
     clients.capture_substrate = MagicMock()
     clients.patch_experiment = MagicMock()

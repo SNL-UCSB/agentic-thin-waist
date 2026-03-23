@@ -89,4 +89,3 @@ def test_tool_router_validate_ctp_with_unknown_cluster():
     out = router.handle_tool_call("validate_ctp", {"ctp_cluster": "ctp_missing"})
     assert out["valid"] is False
     assert "warnings" in out
-

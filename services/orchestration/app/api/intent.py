@@ -161,7 +161,9 @@ def process_intent(orch_id: str, request: ResearchIntent) -> None:
         if execute_now:
             # Delegate to orchestration workflow runner (preflight + iterations + aggregation).
             result = run_orchestration(
-                orch_id, request.intent, parsed,
+                orch_id,
+                request.intent,
+                parsed,
                 clients=DownstreamClients(),
             )
             # Workflow runner persists final state itself; reload to avoid

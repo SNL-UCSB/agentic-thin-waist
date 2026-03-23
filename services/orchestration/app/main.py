@@ -11,5 +11,7 @@ app.include_router(intent_router)
 def health():
     clients = DownstreamClients()
     checks = clients.health()
-    overall = "healthy" if all(v == "reachable" for v in checks.values()) else "degraded"
+    overall = (
+        "healthy" if all(v == "reachable" for v in checks.values()) else "degraded"
+    )
     return {"status": overall, "checks": checks}

@@ -47,7 +47,9 @@ def _upload_dir() -> Path:
     env = os.getenv("ORCH_CTP_UPLOAD_DIR", "").strip()
     if env:
         return Path(env)
-    return _repo_root() / "netreplica" / "config" / "ctp" / "ctp_100_cluster_incoming_6M"
+    return (
+        _repo_root() / "netreplica" / "config" / "ctp" / "ctp_100_cluster_incoming_6M"
+    )
 
 
 def _default_cluster() -> str:

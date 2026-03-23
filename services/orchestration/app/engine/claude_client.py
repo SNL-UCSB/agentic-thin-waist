@@ -106,7 +106,11 @@ class ClaudeClient:
             for tool_use in tool_uses:
                 result = router.handle_tool_call(tool_use.name, tool_use.input)
                 tool_results.append(
-                    {"tool_name": tool_use.name, "input": tool_use.input, "output": result}
+                    {
+                        "tool_name": tool_use.name,
+                        "input": tool_use.input,
+                        "output": result,
+                    }
                 )
                 tool_result_blocks.append(
                     {

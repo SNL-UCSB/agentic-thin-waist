@@ -24,10 +24,10 @@ from app.engine.experiment_lifecycle import (
 from app.engine.experiment_generator import ExperimentGenerator
 from app.engine.orchestration_store import save_orchestration
 
-
 # ---------------------------------------------------------------------------
 # Configuration helpers
 # ---------------------------------------------------------------------------
+
 
 def _env_float(key: str, default: str) -> float:
     return float(os.getenv(key, default))
@@ -57,6 +57,7 @@ def ctp_service_preflight_enabled() -> bool:
 # ---------------------------------------------------------------------------
 # Preflight checks
 # ---------------------------------------------------------------------------
+
 
 class PreflightResult:
     """Aggregated outcome of all pre-dispatch checks."""
@@ -118,7 +119,9 @@ def _check_ctp_readiness(
     ctp_clusters = {s.get("ctp_cluster") for s in specs if s.get("ctp_cluster")}
     if not ctp_clusters:
         result.ctp = {"status": "no_ctp_cluster_requested", "ready": True}
-        recorder.record(OrchestrationStage.CTP_REPLAY_READY, detail="no ctp_cluster in specs")
+        recorder.record(
+            OrchestrationStage.CTP_REPLAY_READY, detail="no ctp_cluster in specs"
+        )
         return
 
     for cluster_id in ctp_clusters:
@@ -129,7 +132,9 @@ def _check_ctp_readiness(
                 "cluster_id": resolution.cluster,
                 "resolution": resolution.to_dict(),
             }
-            recorder.record(OrchestrationStage.CTP_REPLAY_READY, detail=resolution.cluster)
+            recorder.record(
+                OrchestrationStage.CTP_REPLAY_READY, detail=resolution.cluster
+            )
         else:
             result.ctp = {
                 "status": "not_ready",
@@ -154,10 +159,15 @@ def _check_ctp_readiness(
             try:
                 vr = clients.validate_ctp_spec({"ctp_cluster": cluster_id})
             except Exception as exc:
-                logger.warning("CTP preflight validate failed for %s: %s", cluster_id, exc)
+                logger.warning(
+                    "CTP preflight validate failed for %s: %s", cluster_id, exc
+                )
                 result.ctp = {
                     **result.ctp,
-                    "ctp_service_validate": {"cluster_id": cluster_id, "error": str(exc)},
+                    "ctp_service_validate": {
+                        "cluster_id": cluster_id,
+                        "error": str(exc),
+                    },
                 }
                 result.fail(f"CTP Service unreachable or validate failed: {exc}")
                 recorder.record(
@@ -204,10 +214,7 @@ def _check_application_support(
         recorder.record(OrchestrationStage.APPLICATION_UNSUPPORTED, detail=str(exc))
         return
 
-    supported_apps = {
-        item["application"]
-        for item in available.get("applications", [])
-    }
+    supported_apps = {item["application"] for item in available.get("applications", [])}
     unsupported = requested_apps - supported_apps
     if unsupported:
         result.netgent = {
@@ -252,9 +259,15 @@ def _check_worker_availability(
     required_caps = ["tc_available", "tshark_available", "tcpreplay_available"]
     missing = [c for c in required_caps if not health.get(c)]
     if missing:
-        result.worker = {"status": "missing_capabilities", "missing": missing, "health": health}
+        result.worker = {
+            "status": "missing_capabilities",
+            "missing": missing,
+            "health": health,
+        }
         result.fail(f"Substrate worker missing capabilities: {missing}")
-        recorder.record(OrchestrationStage.WORKER_UNAVAILABLE, detail=f"missing: {missing}")
+        recorder.record(
+            OrchestrationStage.WORKER_UNAVAILABLE, detail=f"missing: {missing}"
+        )
         return
 
     result.worker = {"status": "available", "health": health}
@@ -264,6 +277,7 @@ def _check_worker_availability(
 # ---------------------------------------------------------------------------
 # Per-iteration dispatch
 # ---------------------------------------------------------------------------
+
 
 def _build_shape_payload(spec: dict[str, Any]) -> dict[str, Any]:
     return {
@@ -275,17 +289,21 @@ def _build_shape_payload(spec: dict[str, Any]) -> dict[str, Any]:
         "latency_location": spec.get("latency_location", "both"),
         "qdisc": spec.get("aqm_policy", "fq_codel"),
         "buffer_packets": int(spec.get("buffer_packets", 1000)),
-        "qdisc_params": spec.get("qdisc_params", {"target": "5ms", "interval": "100ms"}),
+        "qdisc_params": spec.get(
+            "qdisc_params", {"target": "5ms", "interval": "100ms"}
+        ),
     }
 
 
 def _build_capture_payload(spec: dict[str, Any]) -> dict[str, Any]:
     exp_id = spec["experiment_id"]
     capture_iface = os.getenv("SUBSTRATE_CAPTURE_IFACE", "veth2")
-    capture_seconds = int(os.getenv(
-        "ORCH_CAPTURE_DURATION_SECONDS",
-        str(min(int(spec.get("duration_seconds", 60)), 30)),
-    ))
+    capture_seconds = int(
+        os.getenv(
+            "ORCH_CAPTURE_DURATION_SECONDS",
+            str(min(int(spec.get("duration_seconds", 60)), 30)),
+        )
+    )
     return {
         "interface": capture_iface,
         "capture_filter": "",
@@ -294,7 +312,9 @@ def _build_capture_payload(spec: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _build_replay_payload(spec: dict[str, Any], ctp_file: str | None = None) -> dict[str, Any]:
+def _build_replay_payload(
+    spec: dict[str, Any], ctp_file: str | None = None
+) -> dict[str, Any]:
     resolved_file = ctp_file or spec.get("ctp_cluster", "")
     return {
         "ctp_file": resolved_file,
@@ -330,8 +350,12 @@ def _build_telemetry_result_payload(
         "bottleneck_state": {
             "configured_capacity": spec.get("capacity_mbps"),
             "configured_latency": spec.get("latency_ms"),
-            "measured_throughput": (dynamic_state or {}).get("bottleneck_state", {}).get("download_mbps"),
-            "measured_rtt": (dynamic_state or {}).get("bottleneck_state", {}).get("latency_ms"),
+            "measured_throughput": (dynamic_state or {})
+            .get("bottleneck_state", {})
+            .get("download_mbps"),
+            "measured_rtt": (dynamic_state or {})
+            .get("bottleneck_state", {})
+            .get("latency_ms"),
         },
         "contextual_tree": {
             "c_app": {"application": spec.get("application")},
@@ -356,7 +380,9 @@ def _is_missing_ctp_replay_file_error(exc: Exception) -> bool:
     return "ctp file not found" in msg
 
 
-def _with_unique_experiment_id(spec: dict[str, Any], orch_id: str, iteration_index: int) -> dict[str, Any]:
+def _with_unique_experiment_id(
+    spec: dict[str, Any], orch_id: str, iteration_index: int
+) -> dict[str, Any]:
     out = dict(spec)
     base = str(spec.get("experiment_id", "experiment")).strip() or "experiment"
     suffix = f"{orch_id[-6:]}-{iteration_index}-{int(time.time())}"
@@ -380,12 +406,16 @@ def run_single_iteration(
     item: dict[str, Any] = {"experiment_id": exp_id, "iteration": iteration_index}
     lifecycle = ExperimentLifecycleSession(clients, exp_id)
 
-    recorder.record(OrchestrationStage.STARTING_ITERATION, iteration=iteration_index, detail=exp_id)
+    recorder.record(
+        OrchestrationStage.STARTING_ITERATION, iteration=iteration_index, detail=exp_id
+    )
 
     try:
         # 1. Resolve CTP PCAP from local corpus
         lifecycle.on_ctp_validation_start()
-        recorder.record(OrchestrationStage.REQUESTING_CTP_EXPORT, iteration=iteration_index)
+        recorder.record(
+            OrchestrationStage.REQUESTING_CTP_EXPORT, iteration=iteration_index
+        )
         ctp_resolution = resolve_ctp(spec.get("ctp_cluster"))
         item["ctp_resolution"] = ctp_resolution.to_dict()
         lifecycle.on_ctp_validation_done(bool(getattr(ctp_resolution, "ready", False)))
@@ -417,20 +447,28 @@ def run_single_iteration(
         lifecycle.on_registered_pending()
 
         # 3. Shape bottleneck via substrate
-        recorder.record(OrchestrationStage.CONFIGURING_BOTTLENECK, iteration=iteration_index)
+        recorder.record(
+            OrchestrationStage.CONFIGURING_BOTTLENECK, iteration=iteration_index
+        )
         shape_payload = _build_shape_payload(run_spec)
         shape_result = clients.shape_substrate(shape_payload)
         item["shape"] = shape_result
-        recorder.record(OrchestrationStage.BOTTLENECK_CONFIGURED, iteration=iteration_index)
+        recorder.record(
+            OrchestrationStage.BOTTLENECK_CONFIGURED, iteration=iteration_index
+        )
         lifecycle.mark_running()
 
         # 4. Start capture + replay
-        recorder.record(OrchestrationStage.STARTING_CAPTURE_AND_REPLAY, iteration=iteration_index)
+        recorder.record(
+            OrchestrationStage.STARTING_CAPTURE_AND_REPLAY, iteration=iteration_index
+        )
         capture_payload = _build_capture_payload(run_spec)
         capture_result = clients.capture_substrate(capture_payload)
         item["capture"] = capture_result
 
-        replay_payload = _build_replay_payload(run_spec, ctp_file=ctp_resolution.replay_ctp_file)
+        replay_payload = _build_replay_payload(
+            run_spec, ctp_file=ctp_resolution.replay_ctp_file
+        )
         try:
             replay_result = clients.replay_substrate(replay_payload)
         except Exception as exc:
@@ -442,10 +480,13 @@ def run_single_iteration(
                 "ctp_file": replay_payload.get("ctp_file"),
             }
             logger.warning(
-                "Replay skipped due to missing CTP file: %s", replay_payload.get("ctp_file")
+                "Replay skipped due to missing CTP file: %s",
+                replay_payload.get("ctp_file"),
             )
         item["replay"] = replay_result
-        recorder.record(OrchestrationStage.CAPTURE_IN_PROGRESS, iteration=iteration_index)
+        recorder.record(
+            OrchestrationStage.CAPTURE_IN_PROGRESS, iteration=iteration_index
+        )
 
         # 5. NetGent (NFA / QoE) — stage is always reached; execution optional via env
         skip_reason = (
@@ -453,10 +494,14 @@ def run_single_iteration(
             "(set ORCH_NETGENT_EXECUTION_ENABLED=1 when the service is ready)."
         )
         if netgent_execution_enabled():
-            recorder.record(OrchestrationStage.RUNNING_NETGENT_WORKFLOW, iteration=iteration_index)
+            recorder.record(
+                OrchestrationStage.RUNNING_NETGENT_WORKFLOW, iteration=iteration_index
+            )
             netgent_result = _run_netgent_workflow(clients, run_spec)
             item["netgent"] = netgent_result
-            recorder.record(OrchestrationStage.NETGENT_WORKFLOW_COMPLETE, iteration=iteration_index)
+            recorder.record(
+                OrchestrationStage.NETGENT_WORKFLOW_COMPLETE, iteration=iteration_index
+            )
             logger.info(
                 "NetGent workflow finished for experiment_id=%s iteration=%s status=%s",
                 exp_id,
@@ -500,7 +545,9 @@ def run_single_iteration(
             except Exception:
                 pass
 
-        recorder.record(OrchestrationStage.MEASURING_DYNAMIC_STATE, iteration=iteration_index)
+        recorder.record(
+            OrchestrationStage.MEASURING_DYNAMIC_STATE, iteration=iteration_index
+        )
         try:
             dynamic_state = clients.get_substrate_state()
         except Exception:
@@ -510,24 +557,38 @@ def run_single_iteration(
         lifecycle.mark_collecting()
 
         # 7. Telemetry persistence
-        recorder.record(OrchestrationStage.SAVING_TO_TELEMETRY, iteration=iteration_index)
+        recorder.record(
+            OrchestrationStage.SAVING_TO_TELEMETRY, iteration=iteration_index
+        )
         telemetry_payload = _build_telemetry_result_payload(
-            run_spec, orch_id, shape_result, capture_status, netgent_result, dynamic_state,
+            run_spec,
+            orch_id,
+            shape_result,
+            capture_status,
+            netgent_result,
+            dynamic_state,
         )
         telemetry_save = clients.post_result(telemetry_payload)
         item["telemetry"] = telemetry_save
 
         if telemetry_save.get("error"):
-            recorder.record(OrchestrationStage.TELEMETRY_SAVE_FAILED, iteration=iteration_index,
-                            detail=str(telemetry_save.get("error")))
+            recorder.record(
+                OrchestrationStage.TELEMETRY_SAVE_FAILED,
+                iteration=iteration_index,
+                detail=str(telemetry_save.get("error")),
+            )
             item["telemetry_saved"] = False
         else:
-            recorder.record(OrchestrationStage.TELEMETRY_SAVE_COMPLETE, iteration=iteration_index)
+            recorder.record(
+                OrchestrationStage.TELEMETRY_SAVE_COMPLETE, iteration=iteration_index
+            )
             item["telemetry_saved"] = True
 
         item["status"] = "success"
         lifecycle.mark_complete()
-        recorder.record(OrchestrationStage.ITERATION_SUCCEEDED, iteration=iteration_index)
+        recorder.record(
+            OrchestrationStage.ITERATION_SUCCEEDED, iteration=iteration_index
+        )
 
     except Exception as exc:
         item["status"] = "failed"
@@ -547,15 +608,19 @@ def run_single_iteration(
     return item
 
 
-def _run_netgent_workflow(clients: DownstreamClients, spec: dict[str, Any]) -> dict[str, Any] | None:
+def _run_netgent_workflow(
+    clients: DownstreamClients, spec: dict[str, Any]
+) -> dict[str, Any] | None:
     """Submit a workflow to NetGent, poll until terminal, return result."""
     application = spec.get("application", "")
     try:
-        gen_resp = clients.generate_workflow({
-            "query": f"Run {application} experiment",
-            "parameters": {},
-            "application": application,
-        })
+        gen_resp = clients.generate_workflow(
+            {
+                "query": f"Run {application} experiment",
+                "parameters": {},
+                "application": application,
+            }
+        )
     except Exception as exc:
         return {"status": "netgent_generate_failed", "error": str(exc)}
 
@@ -586,7 +651,9 @@ def _run_netgent_workflow(clients: DownstreamClients, spec: dict[str, Any]) -> d
     return result
 
 
-def _wait_and_stop_capture(clients: DownstreamClients, capture_id: str | None) -> dict[str, Any]:
+def _wait_and_stop_capture(
+    clients: DownstreamClients, capture_id: str | None
+) -> dict[str, Any]:
     if not capture_id:
         return {"status": "missing_capture_id"}
 
@@ -618,6 +685,7 @@ def _wait_and_stop_capture(clients: DownstreamClients, capture_id: str | None) -
 # ---------------------------------------------------------------------------
 # Top-level orchestration entrypoint
 # ---------------------------------------------------------------------------
+
 
 def run_orchestration(
     orch_id: str,
@@ -669,12 +737,16 @@ def run_orchestration(
     save_orchestration(orch_record)
 
     if not preflight.passed:
-        recorder.record(OrchestrationStage.EXPERIMENT_FAILED, detail=preflight.failure_reason)
+        recorder.record(
+            OrchestrationStage.EXPERIMENT_FAILED, detail=preflight.failure_reason
+        )
         orch_record["status"] = "failed"
         orch_record["error"] = preflight.failure_reason
         orch_record["lifecycle_stages"] = recorder.stages
         save_orchestration(orch_record)
-        return _build_final_result(orch_id, intent, experiment_specs, [], preflight, recorder, "failed")
+        return _build_final_result(
+            orch_id, intent, experiment_specs, [], preflight, recorder, "failed"
+        )
 
     # --- C. Cluster / topology (pass-through for now) ---
     recorder.record(OrchestrationStage.CHECKING_CLUSTER)
@@ -692,8 +764,10 @@ def run_orchestration(
 
     # --- E + F. Aggregate ---
     successful = sum(1 for r in iteration_results if r.get("status") == "success")
-    final_status = "complete" if successful == len(iteration_results) else (
-        "failed" if successful == 0 else "partial"
+    final_status = (
+        "complete"
+        if successful == len(iteration_results)
+        else ("failed" if successful == 0 else "partial")
     )
 
     if final_status in ("complete", "partial"):
@@ -706,7 +780,13 @@ def run_orchestration(
     save_orchestration(orch_record)
 
     return _build_final_result(
-        orch_id, intent, experiment_specs, iteration_results, preflight, recorder, final_status,
+        orch_id,
+        intent,
+        experiment_specs,
+        iteration_results,
+        preflight,
+        recorder,
+        final_status,
     )
 
 

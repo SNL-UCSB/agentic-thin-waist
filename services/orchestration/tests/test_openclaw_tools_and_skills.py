@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -57,8 +55,17 @@ def test_execute_parameter_sweep_skill():
 
 
 def test_intent_pipeline_with_saved_latency_sweep_output():
-    fixture_path = Path(__file__).resolve().parents[1] / "app" / "experiment_outputs" / "mixed_youtube_zoom_latency_sweep.json"
-    fixture = json.loads(fixture_path.read_text())
+    fixture = {
+        "intent": "Compare YouTube and Zoom across a latency sweep",
+        "with_examples": {
+            "applications": ["youtube", "zoom"],
+            "capacities": [25],
+            "latencies": [20, 80, 150],
+            "cc_algorithms": ["cubic"],
+            "num_trials": 1,
+            "reasoning": "Use a mixed app latency sweep from few-shot style output.",
+        },
+    }
     parsed = fixture["with_examples"]
 
     with patch("app.api.intent.IntentParser") as MockParser:
@@ -75,5 +82,10 @@ def test_intent_pipeline_with_saved_latency_sweep_output():
     status = client.get(f"/orchestration/{orch_id}")
     assert status.status_code == 200
     payload = status.json()
-    assert payload["status"] in {"generating", "validating", "complete", "pending", "parsing"}
-
+    assert payload["status"] in {
+        "generating",
+        "validating",
+        "complete",
+        "pending",
+        "parsing",
+    }

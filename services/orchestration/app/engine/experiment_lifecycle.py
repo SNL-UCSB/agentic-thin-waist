@@ -207,7 +207,9 @@ class ExperimentLifecycleSession:
                 os.getenv("ORCH_EXPERIMENT_LIFECYCLE_PATCHES", "1").lower() != "0"
             )
         self._intermediate = enable_intermediate_patches
-        self._last_status: ExperimentLifecycleStatus | None = ExperimentLifecycleStatus.PENDING
+        self._last_status: ExperimentLifecycleStatus | None = (
+            ExperimentLifecycleStatus.PENDING
+        )
 
     @property
     def last_status(self) -> ExperimentLifecycleStatus | None:
@@ -243,7 +245,9 @@ class ExperimentLifecycleSession:
 
     def on_registered_pending(self) -> None:
         """Experiment row created (API returns pending)."""
-        self._trace("registered", experiment_status=ExperimentLifecycleStatus.PENDING.value)
+        self._trace(
+            "registered", experiment_status=ExperimentLifecycleStatus.PENDING.value
+        )
         self._last_status = ExperimentLifecycleStatus.PENDING
 
     def mark_validating(self) -> None:

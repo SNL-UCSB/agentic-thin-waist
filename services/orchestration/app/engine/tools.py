@@ -6,11 +6,8 @@ import re
 from pathlib import Path
 from typing import Any
 
-
 _HEADER_RE = re.compile(r"^##\s+([a-zA-Z_][a-zA-Z0-9_]*)\((.*)\)\s*$")
-_ARG_RE = re.compile(
-    r"^-\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+\(([^)]+)\):\s*(.+)$"
-)
+_ARG_RE = re.compile(r"^-\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+\(([^)]+)\):\s*(.+)$")
 
 
 def _infer_json_type(type_text: str) -> str:
@@ -90,4 +87,3 @@ def load_tools() -> list[dict[str, Any]]:
             tool["input_schema"].pop("required", None)
 
     return tools
-

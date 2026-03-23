@@ -108,7 +108,9 @@ def run_chain(
     latency = float(os.getenv("DEMO_LATENCY_MS", "50"))
 
     if not skip_ctp:
-        _print("Step 1 — CTP validate (POST /ctps/validate)", "(capacity / cluster lookup)")
+        _print(
+            "Step 1 — CTP validate (POST /ctps/validate)", "(capacity / cluster lookup)"
+        )
         try:
             ctp_out = clients.validate_ctp_spec(
                 {"capacity_mbps": capacity, "latency_ms": latency}
@@ -181,9 +183,7 @@ def run_executor_tool(
     verbose: bool,
 ) -> int:
     """Same sequence as ToolRouter._run_experiment: experiment → shape → capture."""
-    exp_id = os.getenv(
-        "DEMO_EXPERIMENT_ID", f"demo-executor-{int(time.time())}"
-    )
+    exp_id = os.getenv("DEMO_EXPERIMENT_ID", f"demo-executor-{int(time.time())}")
     spec = {
         "experiment_id": exp_id,
         "capacity_mbps": float(os.getenv("DEMO_CAPACITY_MBPS", "25")),
@@ -237,7 +237,8 @@ def main() -> int:
         help="chain: CTP→shape→capture; executor: ToolRouter (exp API→shape→capture)",
     )
     parser.add_argument(
-        "--verbose", "-v",
+        "--verbose",
+        "-v",
         action="store_true",
         help="Include Python tracebacks on errors",
     )
