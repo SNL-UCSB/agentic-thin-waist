@@ -1,0 +1,64 @@
+{
+  "intent_id": "netflix_zoom_concurrent_low_capacity",
+  "intent": "Study how Netflix and Zoom behave together on a congested 5 Mbps link with default latency.",
+  "without_examples": {
+    "applications": [
+      "netflix",
+      "zoom"
+    ],
+    "capacities": [
+      5
+    ],
+    "latencies": [
+      50
+    ],
+    "cc_algorithms": null,
+    "aqm_policy": null,
+    "ctp_cluster": null,
+    "duration_seconds": null,
+    "num_trials": 1,
+    "clarification_needed": [
+      "No CC algorithm specified \u2014 will default to 'cubic' for both applications.",
+      "No AQM policy specified \u2014 will default to 'fq_codel'.",
+      "No duration specified \u2014 Netflix and Zoom have different default durations (60s and 120s respectively); should a unified duration be used for the concurrent experiment, or should each application's default be respected?",
+      "No number of trials specified \u2014 defaulting to 1; consider increasing to 3\u20135 for statistical reliability given the stochastic nature of congestion interactions.",
+      "No cross-traffic profile specified \u2014 the intent is to study Netflix and Zoom competing with each other, so no additional CTP is applied; please confirm this is correct.",
+      "WARNING: 5 Mbps is at the lower bound for Netflix (SD ~3 Mbps minimum, HD requires more) and marginally acceptable for Zoom (~1.5 Mbps minimum). At 5 Mbps shared between both, one or both applications will likely degrade significantly. This appears intentional ('congested link') but please confirm."
+    ],
+    "design_type": [
+      "concurrent"
+    ],
+    "reasoning": "The intent explicitly asks how Netflix and Zoom behave *together* on a shared 5 Mbps link \u2014 this is a concurrent experiment where both applications run simultaneously and compete for the same bottleneck capacity. The 5 Mbps capacity is user-specified and intentionally represents a congested regime; constraints warn that this is tight for Netflix (needs ~3+ Mbps for SD) and borderline for Zoom (~1.5 Mbps), so sharing 5 Mbps between both is the stress scenario of interest. Latency is explicitly 'default', so 50 ms is applied. No CC algorithm, AQM policy, or cross-traffic is specified, so defaults (cubic, fq_codel, no CTP) will be used. The design is a single concurrent experiment rather than isolated or Cartesian, since the research question is about interaction effects. Isolated baseline experiments for each application individually could complement this design and are worth proposing during experiment generation."
+  },
+  "with_examples": {
+    "applications": [
+      "netflix",
+      "zoom"
+    ],
+    "capacities": [
+      5
+    ],
+    "latencies": [
+      50
+    ],
+    "cc_algorithms": null,
+    "aqm_policy": null,
+    "ctp_cluster": null,
+    "duration_seconds": null,
+    "num_trials": 1,
+    "clarification_needed": [
+      "No CC algorithm specified \u2014 will default to cubic. Clarify if a CC comparison (e.g., cubic vs bbr) is part of the intent, which could be especially relevant under congestion.",
+      "No AQM policy specified \u2014 will default to fq_codel. Note that AQM policy can significantly affect how Netflix and Zoom compete at a congested 5 Mbps link; clarify if you want to compare policies (e.g., fq_codel vs fifo vs codel).",
+      "No number of trials specified \u2014 defaulting to 1. Given the congested regime and interaction effects between two applications, more trials (e.g., 3\u20135) are strongly recommended for statistical reliability.",
+      "No cross-traffic specified \u2014 no CTP will be applied. The 'congestion' is produced by Netflix and Zoom competing with each other on the shared 5 Mbps link, which is the primary intent. Clarify if additional background cross-traffic is also desired.",
+      "CONSTRAINT WARNING: 5 Mbps is at or near the minimum viable capacity for Netflix (SD requires ~3 Mbps, HD requires significantly more). Netflix will likely be limited to SD or lower quality and may experience rebuffering under shared load with Zoom.",
+      "CONSTRAINT WARNING: 5 Mbps shared between Netflix and Zoom means each application may effectively see less than 5 Mbps. Zoom requires ~1.5 Mbps minimum; at high Netflix load this could be tight. Consider whether isolated baseline experiments at 5 Mbps are also desired to establish individual baselines before studying interaction."
+    ],
+    "design_type": [
+      "isolated",
+      "isolated",
+      "concurrent"
+    ],
+    "reasoning": "The intent explicitly asks how Netflix and Zoom 'behave together' on a congested 5 Mbps link, which is a clear application interaction / concurrent design. The primary experiment of interest is the concurrent one where both applications share the 5 Mbps link simultaneously. Per the behavioral rules, since two distinct applications are mentioned, at least one concurrent experiment is required. I also include isolated experiments for Netflix alone and Zoom alone at 5 Mbps to establish individual baselines \u2014 without these, it is impossible to attribute degradation to the interaction rather than to the constrained capacity alone. Latency is explicitly stated as 'default', which maps to 50 ms per the parameter_ranges knowledge file. CC algorithm defaults to cubic, AQM defaults to fq_codel. No cross-traffic CTP is added because the congestion is intended to arise from Netflix and Zoom competing with each other, not from external background traffic. Duration will follow application defaults (Netflix: 60s, Zoom: 120s). num_trials defaults to 1, but a clarification note is raised recommending more trials given the high variability expected in a congested shared regime. Two constraint warnings are raised: (1) 5 Mbps is marginal for Netflix, especially when shared; (2) Zoom may be squeezed below its minimum viable bandwidth when competing with a greedy Netflix stream."
+  }
+}

@@ -1,0 +1,70 @@
+{
+  "intent_id": "twitch_vs_youtube_capacity_and_ctp",
+  "intent": "Compare Twitch vs YouTube at 8, 20, and 40 Mbps under a light background browsing cross-traffic pattern.",
+  "without_examples": {
+    "applications": [
+      "twitch",
+      "youtube"
+    ],
+    "capacities": [
+      8,
+      20,
+      40
+    ],
+    "latencies": null,
+    "cc_algorithms": null,
+    "aqm_policy": null,
+    "ctp_cluster": "ctp_low_background",
+    "duration_seconds": null,
+    "num_trials": 1,
+    "clarification_needed": [],
+    "design_type": [
+      "isolated",
+      "isolated",
+      "isolated",
+      "isolated",
+      "isolated",
+      "isolated",
+      "concurrent",
+      "concurrent",
+      "concurrent"
+    ],
+    "reasoning": "The user wants an application comparison (Twitch vs YouTube) across a capacity sweep of 8, 20, and 40 Mbps, under a light background browsing cross-traffic pattern. 'Light background browsing' maps directly to the documented CTP cluster 'ctp_low_background'. No latency, CC algorithm, or AQM policy is specified, so defaults will be used: latency_ms=50, cc_algorithm=cubic, aqm_policy=fq_codel. No duration is specified, so application defaults apply (60s for both Twitch and YouTube). This is a full application \u00d7 capacity design (2 apps \u00d7 3 capacities = 6 isolated experiments), and per the behavioral rules, at least one concurrent experiment per capacity point should be included to capture interaction effects between Twitch and YouTube sharing the link \u2014 yielding 3 additional concurrent experiments (one per capacity). All three capacity values are well above the constraint thresholds for both Twitch (\u22652 Mbps) and YouTube (\u22653 Mbps), so no constraint warnings apply. No clarification is needed."
+  },
+  "with_examples": {
+    "applications": [
+      "twitch",
+      "youtube"
+    ],
+    "capacities": [
+      8,
+      20,
+      40
+    ],
+    "latencies": null,
+    "cc_algorithms": null,
+    "aqm_policy": null,
+    "ctp_cluster": "ctp_low_background",
+    "duration_seconds": null,
+    "num_trials": 1,
+    "clarification_needed": [
+      "Latency is not specified \u2014 will default to 50 ms per parameter_ranges defaults. Clarify if a different latency or a latency sweep is intended.",
+      "No CC algorithm specified \u2014 will default to cubic. Clarify if a CC comparison is part of the intent.",
+      "No AQM policy specified \u2014 will default to fq_codel.",
+      "No number of trials specified \u2014 defaulting to 1. More trials (e.g., 3\u20135) are recommended for statistical reliability, especially with cross-traffic present.",
+      "It is assumed that isolated experiments (Twitch alone, YouTube alone) plus concurrent experiments (both together) are all desired at each capacity point. Please confirm if concurrent experiments should be included or if only isolated per-application comparisons are needed."
+    ],
+    "design_type": [
+      "isolated",
+      "isolated",
+      "isolated",
+      "isolated",
+      "isolated",
+      "isolated",
+      "concurrent",
+      "concurrent",
+      "concurrent"
+    ],
+    "reasoning": "The intent specifies two applications (Twitch and YouTube) and three capacity values (8, 20, 40 Mbps) under a light background browsing cross-traffic pattern \u2014 this maps directly to the CTP cluster 'ctp_low_background' (low burstiness, low average load, mostly idle with occasional short flows). The design follows the 'Application Comparisons' pattern from the experimental_designs knowledge file, with a Cartesian expansion over two apps \u00d7 three capacity points = 6 isolated experiments. Per the behavioral rules, since two distinct applications are mentioned, at least one concurrent experiment (both apps running simultaneously) must be included to observe interaction effects \u2014 one concurrent experiment per capacity point adds 3 more, yielding 9 experiments total. All three capacity values (8, 20, 40 Mbps) are above the 2 Mbps minimum warning threshold for both Twitch and YouTube (YouTube threshold is 3 Mbps, Twitch threshold is 2 Mbps), so no constraint warnings are triggered. Latency is unspecified so it defaults to 50 ms; CC defaults to cubic; AQM defaults to fq_codel. Duration follows application defaults: 60s for both YouTube and Twitch. num_trials defaults to 1, though more trials would be advisable given the presence of cross-traffic. The ctp_low_background cluster is applied uniformly across all 9 experiments as the user specified it for the entire comparison."
+  }
+}

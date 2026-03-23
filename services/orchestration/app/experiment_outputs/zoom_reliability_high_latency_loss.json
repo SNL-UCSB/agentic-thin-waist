@@ -1,0 +1,64 @@
+{
+  "intent_id": "zoom_reliability_high_latency_loss",
+  "intent": "Evaluate Zoom call reliability at 10 Mbps under 100, 200, and 400 ms latency with 1% loss.",
+  "without_examples": {
+    "applications": [
+      "zoom"
+    ],
+    "capacities": [
+      10
+    ],
+    "latencies": [
+      100,
+      200,
+      400
+    ],
+    "cc_algorithms": null,
+    "aqm_policy": null,
+    "ctp_cluster": null,
+    "duration_seconds": null,
+    "num_trials": 1,
+    "clarification_needed": [
+      "The 400 ms latency point exceeds the 300 ms threshold at which real-time communication (Zoom) is expected to degrade severely \u2014 confirm this is intentional (e.g., stress test) or whether 300 ms should be the upper bound.",
+      "No cross-traffic profile was specified \u2014 would you like a baseline (no CTP) or a typical home background load (ctp_low_background)?",
+      "No number of trials was specified \u2014 would you like more than 1 trial per configuration for statistical reliability (e.g., 3\u20135 trials)?"
+    ],
+    "design_type": [
+      "isolated",
+      "isolated",
+      "isolated"
+    ],
+    "reasoning": "The intent maps cleanly to a latency sweep for Zoom at a fixed 10 Mbps capacity with 1% packet loss. Three latency points are specified: 100, 200, and 400 ms. Each configuration runs Zoom in isolation (no concurrent application), so all three are 'isolated' experiments. Defaults applied: cc_algorithm=cubic, aqm_policy=fq_codel, duration_seconds=120 (Zoom default). The 400 ms latency point triggers a constraint warning since real-time communication degrades severely above 300 ms \u2014 this is flagged for user confirmation. No cross-traffic was mentioned, so ctp_cluster is left null pending clarification. num_trials defaults to 1 but clarification is requested since reliability studies typically benefit from multiple trials."
+  },
+  "with_examples": {
+    "applications": [
+      "zoom"
+    ],
+    "capacities": [
+      10
+    ],
+    "latencies": [
+      100,
+      200,
+      400
+    ],
+    "cc_algorithms": null,
+    "aqm_policy": null,
+    "ctp_cluster": null,
+    "duration_seconds": null,
+    "num_trials": 1,
+    "clarification_needed": [
+      "The 400 ms latency point exceeds the constraint warning threshold of 300 ms for real-time communication apps like Zoom \u2014 call quality is expected to degrade severely at this level. Is this intentional (e.g., to characterise the degradation boundary), or should the upper latency bound be capped at 300 ms?",
+      "No number of trials specified \u2014 defaulting to 1. For reliability evaluation under lossy, high-latency conditions, more trials (e.g., 3\u20135) are strongly recommended to capture variability in Zoom's adaptive behaviour.",
+      "No CC algorithm specified \u2014 will default to cubic. Should a CC comparison (e.g., cubic vs bbr) be included, given that BBR may behave differently under loss and high latency?",
+      "No AQM policy specified \u2014 will default to fq_codel. Should AQM be varied (e.g., fifo vs fq_codel) to study its effect on jitter and latency under loss?",
+      "No cross-traffic specified \u2014 experiments will run in isolation (no CTP). Should a background traffic profile (e.g., ctp_low_background) be added to simulate realistic home conditions?"
+    ],
+    "design_type": [
+      "isolated",
+      "isolated",
+      "isolated"
+    ],
+    "reasoning": "The intent clearly specifies a latency sweep for Zoom at a fixed capacity of 10 Mbps and a fixed loss rate of 1%, across three latency values: 100, 200, and 400 ms. This maps directly to the 'Latency Sweeps' design pattern. The application is zoom (explicitly stated), capacity is 10 Mbps (well above Zoom's ~1.5 Mbps minimum \u2014 no constraint violation), and loss_rate is 1% (below the 10% warning threshold for real-time apps). Each of the three latency values produces one isolated experiment, for a total of 3 experiments. However, the 400 ms latency point triggers a constraint warning: per the constraints knowledge file, latency > 300 ms for zoom/google-meet/discord is flagged as causing severe degradation \u2014 this is noted as a clarification item but retained since the explicit goal is to 'evaluate reliability', implying the degraded regime is intentional. No CC algorithm, AQM policy, or duration were specified, so defaults apply: cc_algorithm=cubic, aqm_policy=fq_codel, duration=120s (Zoom application default). No cross-traffic was mentioned, so ctp_cluster is null. num_trials defaults to 1, though more trials are recommended given the variable nature of loss + high-latency conditions."
+  }
+}
