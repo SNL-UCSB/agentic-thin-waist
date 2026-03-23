@@ -1,0 +1,56 @@
+---
+# =============================================================================
+# upstream role — configures the Edge Router / NAT gateway server
+# =============================================================================
+
+- name: Install upstream dependencies (iptables, nftables handling)
+  ansible.builtin.apt:
+    name:
+      - iptables
+      - iptables-persistent
+      - netfilter-persistent
+    state: present
+
+- name: Run upstream deps (switches iptables to legacy if needed)
+  ansible.builtin.command:
+    cmd: bash upstream.sh deps
+    chdir: "{{ netreplica_remote_dir }}"
+  register: upstream_deps
+  changed_when: upstream_deps.rc == 0
+
+- name: Show upstream deps output
+  ansible.builtin.debug:
+    msg: "{{ upstream_deps.stdout_lines }}"
+
+- name: Run upstream start (namespace, veths, NAT, policy routing)
+  ansible.builtin.command:
+    cmd: bash upstream.sh start
+    chdir: "{{ netreplica_remote_dir }}"
+  register: upstream_start
+  changed_when: upstream_start.rc == 0
+
+- name: Show upstream start output
+  ansible.builtin.debug:
+    msg: "{{ upstream_start.stdout_lines }}"
+
+- name: Install upstream as a systemd service
+  ansible.builtin.command:
+    cmd: bash upstream.sh install
+    chdir: "{{ netreplica_remote_dir }}"
+  register: upstream_install
+  changed_when: upstream_install.rc == 0
+
+- name: Show upstream install output
+  ansible.builtin.debug:
+    msg: "{{ upstream_install.stdout_lines }}"
+
+- name: Verify upstream status
+  ansible.builtin.command:
+    cmd: bash upstream.sh status
+    chdir: "{{ netreplica_remote_dir }}"
+  register: upstream_status
+  changed_when: false
+
+- name: Show upstream status
+  ansible.builtin.debug:
+    msg: "{{ upstream_status.stdout_lines }}"

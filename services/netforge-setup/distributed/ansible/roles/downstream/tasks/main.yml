@@ -1,0 +1,102 @@
+---
+# =============================================================================
+# downstream role — configures the Core Router / GRE aggregator server
+# =============================================================================
+
+# --- Docker installation ---
+- name: Install prerequisites for Docker apt repo
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - gnupg
+      - lsb-release
+    state: present
+
+- name: Add Docker GPG key
+  ansible.builtin.apt_key:
+    url: https://download.docker.com/linux/ubuntu/gpg
+    state: present
+
+- name: Add Docker apt repository
+  ansible.builtin.apt_repository:
+    repo: >-
+      deb [arch={{ ansible_architecture }}]
+      https://download.docker.com/linux/ubuntu
+      {{ ansible_distribution_release }} stable
+    state: present
+
+- name: Install Docker Engine
+  ansible.builtin.apt:
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-buildx-plugin
+      - docker-compose-plugin
+    state: present
+    update_cache: true
+
+- name: Ensure Docker service is started and enabled
+  ansible.builtin.systemd:
+    name: docker
+    state: started
+    enabled: true
+
+# --- minicom (for switch serial console access from downstream) ---
+- name: Install minicom for switch console access
+  ansible.builtin.apt:
+    name: minicom
+    state: present
+
+# --- GRE / networking dependencies ---
+- name: Install downstream networking packages
+  ansible.builtin.apt:
+    name:
+      - iproute2
+      - iptables
+    state: present
+
+- name: Run downstream deps (loads ip_gre module)
+  ansible.builtin.command:
+    cmd: bash downstream.sh deps
+    chdir: "{{ netreplica_remote_dir }}"
+  register: downstream_deps
+  changed_when: downstream_deps.rc == 0
+
+- name: Show downstream deps output
+  ansible.builtin.debug:
+    msg: "{{ downstream_deps.stdout_lines }}"
+
+- name: Run downstream start (GRE tunnels, routing, Docker network)
+  ansible.builtin.command:
+    cmd: bash downstream.sh start
+    chdir: "{{ netreplica_remote_dir }}"
+  register: downstream_start
+  changed_when: downstream_start.rc == 0
+
+- name: Show downstream start output
+  ansible.builtin.debug:
+    msg: "{{ downstream_start.stdout_lines }}"
+
+- name: Install downstream as a systemd service
+  ansible.builtin.command:
+    cmd: bash downstream.sh install
+    chdir: "{{ netreplica_remote_dir }}"
+  register: downstream_install
+  changed_when: downstream_install.rc == 0
+
+- name: Show downstream install output
+  ansible.builtin.debug:
+    msg: "{{ downstream_install.stdout_lines }}"
+
+- name: Verify downstream status
+  ansible.builtin.command:
+    cmd: bash downstream.sh status
+    chdir: "{{ netreplica_remote_dir }}"
+  register: downstream_status
+  changed_when: false
+
+- name: Show downstream status
+  ansible.builtin.debug:
+    msg: "{{ downstream_status.stdout_lines }}"

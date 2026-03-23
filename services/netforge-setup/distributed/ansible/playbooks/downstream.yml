@@ -1,0 +1,16 @@
+---
+# =============================================================================
+# downstream.yml — Configure the downstream server (Core Router / GRE aggregator)
+#
+# Usage (standalone):
+#   ansible-playbook -i inventory/hosts.yml playbooks/downstream.yml
+# =============================================================================
+
+- name: Configure downstream server
+  hosts: downstream
+  become: true
+  gather_facts: true
+
+  roles:
+    - common
+    - downstream

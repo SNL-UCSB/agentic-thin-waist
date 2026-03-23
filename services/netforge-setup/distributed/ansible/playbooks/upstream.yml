@@ -1,0 +1,16 @@
+---
+# =============================================================================
+# upstream.yml — Configure the upstream server (Edge Router / NAT gateway)
+#
+# Usage (standalone):
+#   ansible-playbook -i inventory/hosts.yml playbooks/upstream.yml
+# =============================================================================
+
+- name: Configure upstream server
+  hosts: upstream
+  become: true
+  gather_facts: true
+
+  roles:
+    - common
+    - upstream

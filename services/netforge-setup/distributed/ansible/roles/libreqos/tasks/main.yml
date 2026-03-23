@@ -1,0 +1,74 @@
+---
+# =============================================================================
+# libreqos role — configures the Traffic Shaper (on-a-stick VLAN mode)
+# NOTE: LibreQoS itself must be pre-installed per https://libreqos.readthedocs.io
+# =============================================================================
+
+- name: Install LibreQoS server system packages
+  ansible.builtin.apt:
+    name:
+      - ethtool
+      - vlan
+    state: present
+
+- name: Run libreqos deps (loads 8021q module)
+  ansible.builtin.command:
+    cmd: bash libreqos.sh deps
+    chdir: "{{ netreplica_remote_dir }}"
+  register: libreqos_deps
+  changed_when: libreqos_deps.rc == 0
+
+- name: Show libreqos deps output
+  ansible.builtin.debug:
+    msg: "{{ libreqos_deps.stdout_lines }}"
+
+- name: Run libreqos configure (writes ispConfig.py and lqos.conf)
+  ansible.builtin.command:
+    cmd: bash libreqos.sh configure
+    chdir: "{{ netreplica_remote_dir }}"
+  register: libreqos_configure
+  changed_when: libreqos_configure.rc == 0
+
+- name: Show libreqos configure output
+  ansible.builtin.debug:
+    msg: "{{ libreqos_configure.stdout_lines }}"
+
+- name: Run libreqos start (creates VLAN sub-interfaces, disables RX VLAN offload)
+  ansible.builtin.command:
+    cmd: bash libreqos.sh start
+    chdir: "{{ netreplica_remote_dir }}"
+  register: libreqos_start
+  changed_when: libreqos_start.rc == 0
+
+- name: Show libreqos start output
+  ansible.builtin.debug:
+    msg: "{{ libreqos_start.stdout_lines }}"
+
+- name: Install libreqos as a systemd service
+  ansible.builtin.command:
+    cmd: bash libreqos.sh install
+    chdir: "{{ netreplica_remote_dir }}"
+  register: libreqos_install
+  changed_when: libreqos_install.rc == 0
+
+- name: Show libreqos install output
+  ansible.builtin.debug:
+    msg: "{{ libreqos_install.stdout_lines }}"
+
+- name: Start the lqosd daemon
+  ansible.builtin.systemd:
+    name: lqosd
+    state: started
+    enabled: true
+  ignore_errors: true   # lqosd may fail if LibreQoS is not fully configured yet
+
+- name: Verify libreqos status
+  ansible.builtin.command:
+    cmd: bash libreqos.sh status
+    chdir: "{{ netreplica_remote_dir }}"
+  register: libreqos_status
+  changed_when: false
+
+- name: Show libreqos status
+  ansible.builtin.debug:
+    msg: "{{ libreqos_status.stdout_lines }}"

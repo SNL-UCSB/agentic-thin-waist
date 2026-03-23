@@ -1,0 +1,60 @@
+---
+# =============================================================================
+# common role — runs on every server before role-specific tasks
+# =============================================================================
+
+- name: Update apt package cache
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Install common system packages
+  ansible.builtin.apt:
+    name:
+      - iproute2
+      - bash
+      - curl
+      - git
+    state: present
+
+- name: Create netReplica deployment directory
+  ansible.builtin.file:
+    path: "{{ netreplica_remote_dir }}"
+    state: directory
+    mode: "0755"
+    owner: root
+    group: root
+
+- name: Copy all setup scripts to remote
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "{{ netreplica_remote_dir }}/"
+    mode: "0755"
+    owner: root
+    group: root
+  loop:
+    - "{{ playbook_dir }}/../../common.sh"
+    - "{{ playbook_dir }}/../../setup.sh"
+    - "{{ playbook_dir }}/../../upstream.sh"
+    - "{{ playbook_dir }}/../../downstream.sh"
+    - "{{ playbook_dir }}/../../libreqos.sh"
+    - "{{ playbook_dir }}/../../switch.sh"
+
+- name: Deploy config.env from template
+  ansible.builtin.template:
+    src: config.env.j2
+    dest: "{{ netreplica_remote_dir }}/config.env"
+    mode: "0644"
+    owner: root
+    group: root
+
+- name: Validate config.env syntax (check-config)
+  ansible.builtin.command:
+    cmd: bash setup.sh check-config
+    chdir: "{{ netreplica_remote_dir }}"
+  register: config_check
+  changed_when: false
+
+- name: Show config-check output
+  ansible.builtin.debug:
+    msg: "{{ config_check.stdout_lines }}"

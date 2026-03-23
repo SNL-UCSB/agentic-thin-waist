@@ -1,0 +1,277 @@
+---
+# =============================================================================
+# verify role — checks that the end-to-end setup is correct on each server
+# Run with: ansible-playbook playbooks/verify.yml
+# =============================================================================
+
+# ---- UPSTREAM checks --------------------------------------------------------
+- name: "[upstream] Check IPv4 forwarding is enabled"
+  ansible.builtin.command: cat /proc/sys/net/ipv4/ip_forward
+  register: ipv4_fwd
+  changed_when: false
+  when: inventory_hostname in groups['upstream']
+
+- name: "[upstream] Assert IPv4 forwarding = 1"
+  ansible.builtin.assert:
+    that: ipv4_fwd.stdout | trim == "1"
+    fail_msg: "IPv4 forwarding is NOT enabled on upstream server"
+    success_msg: "IPv4 forwarding is enabled"
+  when: inventory_hostname in groups['upstream']
+
+- name: "[upstream] Check network namespace exists"
+  ansible.builtin.command: ip netns list
+  register: ns_list
+  changed_when: false
+  when: inventory_hostname in groups['upstream']
+
+- name: "[upstream] Assert namespace {{ ns_name }} exists"
+  ansible.builtin.assert:
+    that: ns_name in ns_list.stdout
+    fail_msg: "Network namespace '{{ ns_name }}' not found"
+    success_msg: "Network namespace '{{ ns_name }}' exists"
+  when: inventory_hostname in groups['upstream']
+
+- name: "[upstream] Check veth interfaces exist"
+  ansible.builtin.command: ip link show {{ item }}
+  loop:
+    - "{{ veth_internet_host }}"
+    - "{{ veth_switch_host }}"
+  register: veth_check
+  changed_when: false
+  when: inventory_hostname in groups['upstream']
+
+- name: "[upstream] Check iptables MASQUERADE rules"
+  ansible.builtin.command: iptables -t nat -L POSTROUTING -n
+  register: iptables_nat
+  changed_when: false
+  when: inventory_hostname in groups['upstream']
+
+- name: "[upstream] Assert MASQUERADE rule is present"
+  ansible.builtin.assert:
+    that: "'MASQUERADE' in iptables_nat.stdout"
+    fail_msg: "No MASQUERADE rule found in iptables nat table"
+    success_msg: "MASQUERADE rule is configured"
+  when: inventory_hostname in groups['upstream']
+
+- name: "[upstream] Check policy routing table is registered"
+  ansible.builtin.command: grep {{ policy_table_name }} /etc/iproute2/rt_tables
+  register: rt_table
+  changed_when: false
+  when: inventory_hostname in groups['upstream']
+
+- name: "[upstream] Assert policy routing table exists"
+  ansible.builtin.assert:
+    that: rt_table.rc == 0
+    fail_msg: "Policy routing table '{{ policy_table_name }}' not found"
+    success_msg: "Policy routing table '{{ policy_table_name }}' is registered"
+  when: inventory_hostname in groups['upstream']
+
+- name: "[upstream] Check systemd service is active"
+  ansible.builtin.systemd:
+    name: netreplica-upstream
+  register: upstream_svc
+  when: inventory_hostname in groups['upstream']
+
+- name: "[upstream] Assert service is active"
+  ansible.builtin.assert:
+    that: upstream_svc.status.ActiveState == "active"
+    fail_msg: "netreplica-upstream service is not active"
+    success_msg: "netreplica-upstream service is active"
+  when: inventory_hostname in groups['upstream']
+
+# ---- DOWNSTREAM checks ------------------------------------------------------
+- name: "[downstream] Check IPv4 forwarding is enabled"
+  ansible.builtin.command: cat /proc/sys/net/ipv4/ip_forward
+  register: ipv4_fwd_ds
+  changed_when: false
+  when: inventory_hostname in groups['downstream']
+
+- name: "[downstream] Assert IPv4 forwarding = 1"
+  ansible.builtin.assert:
+    that: ipv4_fwd_ds.stdout | trim == "1"
+    fail_msg: "IPv4 forwarding is NOT enabled on downstream server"
+    success_msg: "IPv4 forwarding is enabled"
+  when: inventory_hostname in groups['downstream']
+
+- name: "[downstream] Check ip_gre kernel module is loaded"
+  ansible.builtin.command: lsmod
+  register: lsmod_out
+  changed_when: false
+  when: inventory_hostname in groups['downstream']
+
+- name: "[downstream] Assert ip_gre is loaded"
+  ansible.builtin.assert:
+    that: "'ip_gre' in lsmod_out.stdout"
+    fail_msg: "ip_gre kernel module is not loaded"
+    success_msg: "ip_gre module is loaded"
+  when: inventory_hostname in groups['downstream']
+
+- name: "[downstream] Check GRE tunnel interface exists"
+  ansible.builtin.command: ip link show type gre
+  register: gre_ifaces
+  changed_when: false
+  when: inventory_hostname in groups['downstream']
+
+- name: "[downstream] Assert at least one GRE interface exists"
+  ansible.builtin.assert:
+    that: gre_ifaces.stdout | length > 0
+    fail_msg: "No GRE tunnel interfaces found"
+    success_msg: "GRE tunnel interface(s) found"
+  when: inventory_hostname in groups['downstream']
+
+- name: "[downstream] Check Docker network exists"
+  ansible.builtin.command: docker network ls --format {{ '{{' }}.Name{{ '}}' }}
+  register: docker_nets
+  changed_when: false
+  when: inventory_hostname in groups['downstream']
+
+- name: "[downstream] Assert Docker network exists"
+  ansible.builtin.assert:
+    that: docker_network_name in docker_nets.stdout
+    fail_msg: "Docker network '{{ docker_network_name }}' not found"
+    success_msg: "Docker network '{{ docker_network_name }}' exists"
+  when: inventory_hostname in groups['downstream']
+
+- name: "[downstream] Check systemd service is active"
+  ansible.builtin.systemd:
+    name: netreplica-downstream
+  register: downstream_svc
+  when: inventory_hostname in groups['downstream']
+
+- name: "[downstream] Assert service is active"
+  ansible.builtin.assert:
+    that: downstream_svc.status.ActiveState == "active"
+    fail_msg: "netreplica-downstream service is not active"
+    success_msg: "netreplica-downstream service is active"
+  when: inventory_hostname in groups['downstream']
+
+# ---- LIBREQOS checks --------------------------------------------------------
+- name: "[libreqos] Check 8021q kernel module is loaded"
+  ansible.builtin.command: lsmod
+  register: lsmod_lq
+  changed_when: false
+  when: inventory_hostname in groups['libreqos']
+
+- name: "[libreqos] Assert 8021q is loaded"
+  ansible.builtin.assert:
+    that: "'8021q' in lsmod_lq.stdout"
+    fail_msg: "8021q kernel module is not loaded"
+    success_msg: "8021q module is loaded"
+  when: inventory_hostname in groups['libreqos']
+
+- name: "[libreqos] Check VLAN upstream sub-interface exists"
+  ansible.builtin.command: ip link show {{ libreqos_switch_iface }}.{{ vlan_upstream_id }}
+  register: vlan_up_iface
+  changed_when: false
+  when: inventory_hostname in groups['libreqos']
+
+- name: "[libreqos] Assert upstream VLAN interface exists"
+  ansible.builtin.assert:
+    that: vlan_up_iface.rc == 0
+    fail_msg: >-
+      VLAN interface {{ libreqos_switch_iface }}.{{ vlan_upstream_id }} not found
+    success_msg: >-
+      VLAN interface {{ libreqos_switch_iface }}.{{ vlan_upstream_id }} exists
+  when: inventory_hostname in groups['libreqos']
+
+- name: "[libreqos] Check VLAN downstream sub-interface exists"
+  ansible.builtin.command: ip link show {{ libreqos_switch_iface }}.{{ vlan_downstream_id }}
+  register: vlan_down_iface
+  changed_when: false
+  when: inventory_hostname in groups['libreqos']
+
+- name: "[libreqos] Assert downstream VLAN interface exists"
+  ansible.builtin.assert:
+    that: vlan_down_iface.rc == 0
+    fail_msg: >-
+      VLAN interface {{ libreqos_switch_iface }}.{{ vlan_downstream_id }} not found
+    success_msg: >-
+      VLAN interface {{ libreqos_switch_iface }}.{{ vlan_downstream_id }} exists
+  when: inventory_hostname in groups['libreqos']
+
+- name: "[libreqos] Check RX VLAN offload is disabled"
+  ansible.builtin.command: >-
+    ethtool -k {{ libreqos_switch_iface }}.{{ vlan_upstream_id }}
+  register: ethtool_out
+  changed_when: false
+  when: inventory_hostname in groups['libreqos']
+
+- name: "[libreqos] Assert rx-vlan-offload is off"
+  ansible.builtin.assert:
+    that: "'rx-vlan-offload: off' in ethtool_out.stdout"
+    fail_msg: "RX VLAN offload is not disabled — XDP shaping will not work"
+    success_msg: "RX VLAN offload is disabled (required for XDP)"
+  when: inventory_hostname in groups['libreqos']
+
+- name: "[libreqos] Check lqosd service is active"
+  ansible.builtin.systemd:
+    name: lqosd
+  register: lqosd_svc
+  when: inventory_hostname in groups['libreqos']
+
+- name: "[libreqos] Assert lqosd is active"
+  ansible.builtin.assert:
+    that: lqosd_svc.status.ActiveState == "active"
+    fail_msg: "lqosd service is not active"
+    success_msg: "lqosd service is active"
+  when: inventory_hostname in groups['libreqos']
+
+- name: "[libreqos] Check netreplica-libreqos systemd service"
+  ansible.builtin.systemd:
+    name: netreplica-libreqos
+  register: libreqos_svc
+  when: inventory_hostname in groups['libreqos']
+
+- name: "[libreqos] Assert netreplica-libreqos is active"
+  ansible.builtin.assert:
+    that: libreqos_svc.status.ActiveState == "active"
+    fail_msg: "netreplica-libreqos service is not active"
+    success_msg: "netreplica-libreqos service is active"
+  when: inventory_hostname in groups['libreqos']
+
+# ---- CONNECTIVITY checks (run from downstream as the hub) -------------------
+- name: "[connectivity] Ping upstream switch IP from downstream"
+  ansible.builtin.command: ping -c 3 -W 2 {{ upstream_switch_ip }}
+  register: ping_upstream
+  changed_when: false
+  when: inventory_hostname in groups['downstream']
+
+- name: "[connectivity] Assert upstream is reachable from downstream"
+  ansible.builtin.assert:
+    that: ping_upstream.rc == 0
+    fail_msg: >-
+      Downstream cannot ping upstream switch IP ({{ upstream_switch_ip }}).
+      Check switch VLAN config and upstream.sh start.
+    success_msg: "Upstream switch IP is reachable from downstream"
+  when: inventory_hostname in groups['downstream']
+
+- name: "[connectivity] Ping LibreQoS downstream VLAN IP from downstream"
+  ansible.builtin.command: >-
+    ping -c 3 -W 2 {{ libreqos_vlan_downstream_ip | regex_replace('/.*', '') }}
+  register: ping_libreqos
+  changed_when: false
+  when: inventory_hostname in groups['downstream']
+
+- name: "[connectivity] Assert LibreQoS is reachable from downstream"
+  ansible.builtin.assert:
+    that: ping_libreqos.rc == 0
+    fail_msg: >-
+      Downstream cannot reach LibreQoS downstream VLAN IP.
+      Check switch trunk config and libreqos.sh start.
+    success_msg: "LibreQoS downstream VLAN IP is reachable from downstream"
+  when: inventory_hostname in groups['downstream']
+
+- name: "[connectivity] Ping downstream switch IP from upstream"
+  ansible.builtin.command: ping -c 3 -W 2 {{ downstream_switch_ip }}
+  register: ping_downstream
+  changed_when: false
+  when: inventory_hostname in groups['upstream']
+
+- name: "[connectivity] Assert downstream is reachable from upstream"
+  ansible.builtin.assert:
+    that: ping_downstream.rc == 0
+    fail_msg: >-
+      Upstream cannot ping downstream switch IP ({{ downstream_switch_ip }}).
+      Check switch VLAN config and downstream.sh start.
+    success_msg: "Downstream switch IP is reachable from upstream"
+  when: inventory_hostname in groups['upstream']

@@ -1,0 +1,30 @@
+---
+# =============================================================================
+# site.yml — Main orchestration playbook
+#
+# Runs the complete netReplica distributed setup in the correct order:
+#   1. Display switch commands (manual step — operator configures switch)
+#   2. LibreQoS server
+#   3. Upstream server
+#   4. Downstream server
+#   5. End-to-end verification
+#
+# Usage:
+#   ansible-playbook -i inventory/hosts.yml playbooks/site.yml
+#   ansible-playbook -i inventory/hosts.yml playbooks/site.yml --ask-become-pass
+# =============================================================================
+
+- name: "Step 1: Display switch configuration commands (manual)"
+  ansible.builtin.import_playbook: switch_commands.yml
+
+- name: "Step 2: Configure LibreQoS server"
+  ansible.builtin.import_playbook: libreqos.yml
+
+- name: "Step 3: Configure upstream server"
+  ansible.builtin.import_playbook: upstream.yml
+
+- name: "Step 4: Configure downstream server"
+  ansible.builtin.import_playbook: downstream.yml
+
+- name: "Step 5: Verify end-to-end setup"
+  ansible.builtin.import_playbook: verify.yml

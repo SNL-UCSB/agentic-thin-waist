@@ -1,0 +1,182 @@
+---
+# =============================================================================
+# netReplica Distributed Testbed — All Variables
+# =============================================================================
+#
+# HOW TO USE:
+#   Fill in every value below that matches your hardware.  Descriptions above
+#   each variable explain exactly what it represents and where to find it.
+#   Run `ip -br link` and `ip -br addr` on each server to find interface names
+#   and IP addresses.
+#
+# SECTIONS:
+#   1. Upstream Server   (Edge Router / NAT gateway)
+#   2. Downstream Server (Core Router / GRE aggregator)
+#   3. LibreQoS Server   (Traffic Shaper)
+#   4. Switch            (Managed L2 switch)
+#   5. Ansible / Deployment settings
+# =============================================================================
+
+
+# =============================================================================
+# 1. UPSTREAM SERVER
+# =============================================================================
+
+# Network interface on the upstream server that is physically cabled to the
+# managed switch.  Find it with: ip -br link | grep -v lo
+# Example: eno2, enp3s0, eth1
+upstream_switch_iface: "eno2"
+
+# Network interface on the upstream server connected to the internet.
+# Example: eno1, eth0
+upstream_internet_iface: "eno1"
+
+# IP address to assign to upstream_switch_iface.
+# Must be on the same subnet as the switch VLAN used for upstream traffic.
+# Example: 192.168.0.203
+upstream_switch_ip: "192.168.0.203"
+
+# CIDR covering the entire internal switch subnet.
+# Used to define the scope of policy routing rules.
+# Example: 192.168.0.0/16
+switch_subnet: "192.168.0.0/16"
+
+# Name for the Linux network namespace that isolates the NAT logic.
+# Any valid identifier works; "ns1" is the default.
+ns_name: "ns1"
+
+# veth pair — internet side (bridges main namespace ↔ ns1 toward internet).
+# These are virtual Ethernet interfaces created by the upstream script.
+# Names must be unique on the server; defaults below are fine unless they clash.
+veth_internet_host: "veth6"   # lives in the main namespace
+veth_internet_ns: "veth5"     # lives inside ns_name
+
+# veth pair — switch side (bridges main namespace ↔ ns1 toward switch).
+veth_switch_host: "veth4"     # lives in the main namespace
+veth_switch_ns: "veth3"       # lives inside ns_name
+
+# /30 IP blocks for the veth pairs.  Pick any RFC-1918 /30 blocks that do
+# not conflict with existing routes on the upstream server.
+# Example: 172.16.3.0/30 gives .1 and .2 usable addresses.
+veth_internet_host_ip: "172.16.3.2/30"
+veth_internet_ns_ip: "172.16.3.1/30"
+veth_switch_host_ip: "172.16.4.2/30"
+veth_switch_ns_ip: "172.16.4.1/30"
+
+# Policy-routing table for steering downstream traffic into the NAT namespace.
+#   policy_table_id:   integer 1–252, must not already be in /etc/iproute2/rt_tables
+#   policy_table_name: unique string identifier for the same table
+policy_table_name: "netreplica_rt"
+policy_table_id: "300"
+
+# Subnet whose traffic is subject to policy routing.
+# This is the GRE inner address space assigned to Pinot/client nodes.
+# Example: 192.168.99.0/24
+gre_client_subnet: "192.168.99.0/24"
+
+
+# =============================================================================
+# 2. DOWNSTREAM SERVER
+# =============================================================================
+
+# Network interface on the downstream server cabled to the managed switch.
+# Find it with: ip -br link | grep -v lo
+downstream_switch_iface: "ens2f1"
+
+# Network interface on the downstream server used for internet / management.
+# This is also the local endpoint of all GRE tunnels.
+downstream_internet_iface: "eno1"
+
+# IP address to assign to downstream_switch_iface.
+# Must be on the same VLAN subnet as the downstream VLAN (VLAN_DOWNSTREAM_ID).
+# Example: 192.168.1.203
+downstream_switch_ip: "192.168.1.203"
+
+# Public IP address of the downstream server.
+# This is the address that Pinot/client nodes use as the GRE tunnel remote end.
+# Find it with: curl -s ifconfig.me  (or check your cloud provider dashboard)
+server_internet_ip: "128.111.5.236"
+
+# Public IPs of all Pinot/client nodes that will connect via GRE tunnels.
+# Space-separated list.  One GRE tunnel interface is created per IP.
+# Example: "169.231.171.58 169.231.171.99 1.2.3.4"
+pinot_ips: "169.231.171.58"
+
+# Base octet for GRE tunnel /30 addressing.
+# Tunnels are assigned sequential /30 blocks:
+#   Tunnel 1: <base>.1/30 (network), <base>.2/30 (server), <base>.3 (client)
+#   Tunnel 2: <base>.5/30, <base>.6/30, <base>.7
+# Example: "192.168.99" → tunnels use 192.168.99.1–192.168.99.x
+gre_tunnel_base: "192.168.99"
+
+# Prefix for GRE tunnel interface names (suffixed with 1, 2, 3 …).
+# Example: "gre" → gre1, gre2, gre3
+gre_tunnel_prefix: "gre"
+
+# Docker network settings for netReplica containers.
+#   docker_network_name: name of the Docker bridge network to create
+#   docker_subnet:       CIDR for container IPs (must not overlap other subnets)
+#   docker_mtu:          reduced from 1500 to account for GRE overhead
+docker_network_name: "docBr"
+docker_subnet: "192.168.40.0/24"
+docker_mtu: "1470"
+
+
+# =============================================================================
+# 3. LIBREQOS SERVER
+# =============================================================================
+
+# Network interface on the LibreQoS server connected to the switch trunk port.
+# This interface carries both upstream VLAN and downstream VLAN traffic.
+# Find it with: ip -br link | grep -v lo
+libreqos_switch_iface: "enp216s0f0"
+
+# Network interface used for management and dashboard access.
+libreqos_mgmt_iface: "eno1"
+
+# IP address for the VLAN sub-interface facing the UPSTREAM VLAN.
+# Must be on the same subnet as upstream_switch_ip.
+# Example: 192.168.0.200/24
+libreqos_vlan_upstream_ip: "192.168.0.200/24"
+
+# IP address for the VLAN sub-interface facing the DOWNSTREAM VLAN.
+# Must be on the same subnet as downstream_switch_ip.
+# Example: 192.168.1.200/24
+libreqos_vlan_downstream_ip: "192.168.1.200/24"
+
+# Absolute paths to LibreQoS configuration files on the LibreQoS server.
+# These are the defaults after a standard LibreQoS installation.
+# Only change if you installed LibreQoS to a non-default location.
+libreqos_isp_config: "/opt/libreqos/src/ispConfig.py"
+libreqos_lqos_conf: "/etc/lqos.conf"
+
+
+# =============================================================================
+# 4. SWITCH
+# =============================================================================
+
+# Serial console device on the server physically attached to the switch console.
+# (Usually the downstream server.)
+# Find it with: ls /dev/ttyUSB* or ls /dev/ttyS*
+switch_serial_device: "/dev/ttyUSB0"
+
+# Switch port numbers/names for each server connection.
+# Use the format your switch vendor expects (e.g. "te1/0/3" for Dell, "Gi0/1" for Cisco).
+switch_upstream_port: "te1/0/3"    # port cabled to the upstream server
+switch_downstream_port: "te1/0/4"  # port cabled to the downstream server
+switch_libreqos_port: "te1/0/1"    # port cabled to the LibreQoS server (trunk)
+
+# VLAN IDs for traffic segregation.
+# upstream VLAN:   carries traffic between upstream server and LibreQoS
+# downstream VLAN: carries traffic between downstream server and LibreQoS
+# These must match on both the switch and the LibreQoS server.
+vlan_upstream_id: "22"
+vlan_downstream_id: "11"
+
+
+# =============================================================================
+# 5. ANSIBLE / DEPLOYMENT SETTINGS
+# =============================================================================
+
+# Directory on each remote server where scripts will be deployed.
+netreplica_remote_dir: "/opt/netreplica/distributed"

@@ -1,0 +1,75 @@
+---
+# =============================================================================
+# switch_commands.yml — Display switch CLI commands (Plan B: manual step)
+#
+# The managed switch cannot be configured automatically via Ansible because it
+# is accessed through a serial console (minicom).  This playbook:
+#   1. Displays all switch commands pre-filled from your inventory variables.
+#   2. Pauses and waits for you to apply them before the deployment continues.
+#
+# To connect to the switch console run on the downstream server:
+#   minicom -D {{ switch_serial_device }}
+# =============================================================================
+
+- name: Display switch configuration commands
+  hosts: localhost
+  gather_facts: false
+  vars_files:
+    - ../inventory/group_vars/all.yml
+
+  tasks:
+    - name: Print switch configuration commands
+      ansible.builtin.debug:
+        msg: |
+          ============================================================
+          SWITCH CONFIGURATION — MANUAL STEP REQUIRED
+          ============================================================
+
+          Connect to your switch console from the downstream server:
+            minicom -D {{ switch_serial_device }}
+
+          Then enter the following commands in your switch CLI:
+
+          ── Dell / Cisco IOS style ───────────────────────────────────
+
+          ! Create VLANs
+          vlan database
+            vlan {{ vlan_downstream_id }} name DOWNSTREAM
+            vlan {{ vlan_upstream_id }}   name UPSTREAM
+          exit
+
+          ! Downstream server port → access port on VLAN {{ vlan_downstream_id }}
+          interface {{ switch_downstream_port }}
+            switchport mode access
+            switchport access vlan {{ vlan_downstream_id }}
+            no shutdown
+
+          ! Upstream server port → access port on VLAN {{ vlan_upstream_id }}
+          interface {{ switch_upstream_port }}
+            switchport mode access
+            switchport access vlan {{ vlan_upstream_id }}
+            no shutdown
+
+          ! LibreQoS server port → trunk port carrying both VLANs
+          interface {{ switch_libreqos_port }}
+            switchport mode trunk
+            switchport trunk allowed vlan {{ vlan_downstream_id }},{{ vlan_upstream_id }}
+            no shutdown
+
+          ! Save configuration
+          copy running-config startup-config
+
+          ── Verification commands ────────────────────────────────────
+          show vlan brief
+          show interfaces status
+          show running-config
+
+          ============================================================
+
+    - name: Pause — apply switch commands before continuing
+      ansible.builtin.pause:
+        prompt: |
+
+          Apply the switch commands shown above now.
+          When the switch is configured and you have verified with
+          'show vlan brief', press ENTER to continue the deployment.
