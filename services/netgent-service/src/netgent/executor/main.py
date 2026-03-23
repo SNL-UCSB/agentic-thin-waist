@@ -175,7 +175,9 @@ class NetGentExecutor:
             self._playwright = None
             self._playwright_manager = None
 
-        return self.har_path if self.har_path and os.path.exists(self.har_path) else None
+        return (
+            self.har_path if self.har_path and os.path.exists(self.har_path) else None
+        )
 
     def execute(self) -> Browser:
         return self.connect_browser()
