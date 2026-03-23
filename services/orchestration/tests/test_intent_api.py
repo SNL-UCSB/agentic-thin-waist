@@ -67,6 +67,8 @@ def test_get_orchestration_status_returns_progress():
     assert data["status"] == "complete"
     assert "generated_experiments" in data
     assert len(data["generated_experiments"]) >= 1
+    assert "detailed_progress" in data
+    assert "iteration_phase_flags" in data["detailed_progress"]
 
 
 def test_get_orchestration_results_after_completion():
