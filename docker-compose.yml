@@ -63,8 +63,6 @@ services:
     restart: unless-stopped
     ports:
       - "${BROWSERLESS_PORT:-3000}:3000"
-    env_file:
-      - ./services/netgent-service/.env
     environment:
       CONCURRENT: ${MAX_CONCURRENT_SESSIONS:-5}
       QUEUED: ${QUEUE_LENGTH:-10}
