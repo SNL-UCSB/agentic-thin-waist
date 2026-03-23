@@ -14,12 +14,32 @@ from ..schemas import (
     GenerateWorkflowResponse,
     WorkflowResultResponse,
 )
-from ..utils import create_session_factory
+from ..utils import (
+    create_job,
+    create_session_factory,
+    create_workflow,
+    get_job,
+    get_workflow,
+    update_job_status,
+)
+from ..worker.queue.app import run_netgent
 
 
 class WorkflowService:
     def __init__(self):
         self.session_factory = create_session_factory()
+
+    def _defer_job(self, session, job: WorkflowJob) -> str | None:
+        try:
+            run_netgent.defer(job_id=str(job.id))
+        except Exception as exc:
+            update_job_status(session, job.id, "failed")
+            metadata = dict(job.metadata_ or {})
+            metadata["error"] = f"Failed to queue job: {exc}"
+            job.metadata_ = metadata
+            session.commit()
+            return str(exc)
+        return None
 
     def generate(self, request: GenerateWorkflowRequest) -> GenerateWorkflowResponse:
         with self.session_factory() as session:
@@ -36,29 +56,39 @@ class WorkflowService:
                     error=f"Unsupported Application Error: {request.application}",
                 )
 
-            specification = WorkflowSpecification(
-                id=uuid4(),
-                application_id=available_workflow.id,
-                specification=request.specification,
-                workflow={},  # Will be Filled Later
+            specification = create_workflow(
+                session,
+                WorkflowSpecification(
+                    id=uuid4(),
+                    application_id=available_workflow.id,
+                    specification=request.specification,
+                    workflow={},  # Will be Filled Later
+                ),
             )
-            session.add(specification)
-            session.flush()
 
-            job = WorkflowJob(
-                id=uuid4(),
-                application_id=available_workflow.id,
-                workflow_id=specification.id,
-                status="pending",
-                metadata_={
-                    "timeout": request.timeout,
-                },
-                parameters=request.parameters,
+            job = create_job(
+                session,
+                WorkflowJob(
+                    id=uuid4(),
+                    application_id=available_workflow.id,
+                    workflow_id=specification.id,
+                    status="pending",
+                    metadata_={
+                        "timeout": request.timeout,
+                    },
+                    parameters=request.parameters,
+                ),
             )
-            session.add(job)
             session.commit()
 
-            # Call Generate Workflow Here
+            defer_error = self._defer_job(session, job)
+            if defer_error is not None:
+                return GenerateWorkflowResponse(
+                    workflow_id=str(specification.id),
+                    job_id=str(job.id),
+                    status="failed",
+                    error=defer_error,
+                )
 
             return GenerateWorkflowResponse(
                 workflow_id=str(specification.id),
@@ -78,11 +108,7 @@ class WorkflowService:
             )
 
         with self.session_factory() as session:
-            specification = session.execute(
-                sa.select(WorkflowSpecification).where(
-                    WorkflowSpecification.id == workflow_uuid
-                )
-            ).scalar_one_or_none()
+            specification = get_workflow(session, workflow_uuid)
             if specification is None:
                 return ExecuteWorkflowResponse(
                     job_id="",
@@ -91,18 +117,27 @@ class WorkflowService:
                     error="Workflow not found",
                 )
 
-            job = WorkflowJob(
-                id=uuid4(),
-                application_id=specification.application_id,
-                workflow_id=specification.id,
-                status="pending",
-                metadata_={"timeout": request.timeout},
-                parameters=request.parameters,
+            job = create_job(
+                session,
+                WorkflowJob(
+                    id=uuid4(),
+                    application_id=specification.application_id,
+                    workflow_id=specification.id,
+                    status="pending",
+                    metadata_={"timeout": request.timeout},
+                    parameters=request.parameters,
+                ),
             )
-            session.add(job)
             session.commit()
 
-            # Call Execute Workflow Here
+            defer_error = self._defer_job(session, job)
+            if defer_error is not None:
+                return ExecuteWorkflowResponse(
+                    job_id=str(job.id),
+                    workflow_id=str(specification.id),
+                    status="failed",
+                    error=defer_error,
+                )
 
             return ExecuteWorkflowResponse(
                 job_id=str(job.id),
@@ -121,15 +156,7 @@ class WorkflowService:
                 metadata={"error": "Invalid job_id"},
             )
         with self.session_factory() as session:
-            job = (
-                session.execute(
-                    sa.select(WorkflowJob)
-                    .where(WorkflowJob.id == job_uuid)
-                    .order_by(WorkflowJob.created_at.desc())
-                )
-                .scalars()
-                .first()
-            )
+            job = get_job(session, job_uuid)
             if job is None:
                 return WorkflowResultResponse(
                     workflow_id="",

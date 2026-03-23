@@ -1,3 +1,7 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
 name = "netgent-service"
 version = "0.1.0"
@@ -23,4 +27,8 @@ dependencies = [
     "langchain-community>=0.4.1",
     "langchain-core>=1.2.20",
     "langchain>=1.2.13",
+    "procrastinate>=3.7.2",
 ]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/api", "src/netgent"]
