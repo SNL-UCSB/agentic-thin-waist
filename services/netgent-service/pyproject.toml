@@ -28,6 +28,7 @@ dependencies = [
     "langchain-core>=1.2.20",
     "langchain>=1.2.13",
     "procrastinate>=3.7.2",
+    "langgraph-cli[inmem]>=0.4.19",
 ]
 
 [tool.hatch.build.targets.wheel]
