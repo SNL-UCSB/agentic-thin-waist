@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 
 import pytest
 
@@ -317,6 +318,7 @@ def test_browser_session_type_ref_uses_editable_bias_for_combobox():
 
     assert node.role == "combobox"
     assert page.mouse.clicks[0]["x"] < 500
-    assert page.keyboard.presses[:2] == ["Meta+A", "Backspace"]
+    expected_modifier = "Meta" if sys.platform == "darwin" else "Control"
+    assert page.keyboard.presses[:2] == [f"{expected_modifier}+A", "Backspace"]
     assert page.keyboard.typed == [("browser-use", 50)]
     assert page.keyboard.presses[-1] == "Enter"
