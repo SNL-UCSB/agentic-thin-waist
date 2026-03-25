@@ -9,10 +9,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from netgent.client.ping.exception import (
     PingBinaryNotFoundError,
-    PingError,
     PingProcessError,
 )
 
+
+# Regexes to Parse Ping Output
 PING_HEADER_RE = re.compile(r"^PING\s+(?P<host>\S+)\s+\((?P<ip>[^)]+)\)")
 PING_REPLY_RE = re.compile(
     r"^(?P<bytes>\d+)\s+bytes from\s+(?P<source>[^:]+):\s+"
