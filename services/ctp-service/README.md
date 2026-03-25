@@ -93,6 +93,7 @@ services/ctp-service/
 └── tests/
     ├── __init__.py
     ├── conftest.py                 # pytest fixtures; stubs heavy deps (numpy, scapy, psycopg2)
+    ├── test_placeholder.py         # Placeholder test
     └── test_routes.py              # Unit tests for all API endpoints (mocked DB + operations)
 ```
 
@@ -447,11 +448,17 @@ All settings are controlled by environment variables prefixed `CTP_`.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CTP_DATABASE_URL` | `postgresql://ctp_user:ctp_pass@localhost:5432/ctp_corpus` | PostgreSQL connection URL |
+| `CTP_HOST` | `0.0.0.0` | Bind address |
 | `CTP_PORT` | `8001` | TCP port |
-| `CTP_LOG_LEVEL` | `INFO` | Logging level |
+| `CTP_LOG_LEVEL` | `INFO` | Logging level (`DEBUG`/`INFO`/`WARNING`/`ERROR`/`CRITICAL`) |
 | `CTP_WORKERS` | `4` | Parallel worker count |
-| `CTP_WINDOW_DURATION_SEC` | `30` | Time-window length |
+| `CTP_DB_POOL_MIN` | `2` | Minimum DB connections in pool |
+| `CTP_DB_POOL_MAX` | `10` | Maximum DB connections in pool |
+| `CTP_WINDOW_DURATION_SEC` | `30` | Time-window length (seconds) |
 | `CTP_BURST_INTERVAL_MS` | `100` | Timeseries bin width (ms) |
+| `CTP_START_OFFSET_SEC` | `0` | Leading traffic to discard at capture start (seconds) |
+| `CTP_PCAP_BATCH_SIZE` | `30` | Max PCAPs joined per `joincap` call |
+| `CTP_TOP_PREFIX_LEN` | `16` | Shortest prefix length in the subnet hierarchy (`/16` = gateway) |
 | `CTP_INTERNAL_SUBNETS` | UCSB defaults | Internal IP prefix list (JSON array) |
 | `CTP_GATEWAY_SUBNET` | `169.231.0.0/16` | Top-level gateway subnet |
 
@@ -590,7 +597,157 @@ pytest services/ctp-service/tests/ -v
 
 ---
 
-**Last Updated**: 2026-03-18
+---
+
+## Docker Setup and Usage
+
+### Step 1 — Build the Image
+
+Run from the repo root:
+
+```bash
+cd agentic-thin-waist/
+sudo docker build -t ctp-service -f services/ctp-service/Dockerfile .
+```
+
+### Step 2 — Start Infrastructure
+
+#### 2a. Create a shared Docker network
+
+```bash
+sudo docker network create ctp-net
+```
+
+#### 2b. Start PostgreSQL
+
+```bash
+sudo docker run -d \
+  --name ctp-postgres \
+  --network ctp-net \
+  -e POSTGRES_USER=ctp_user \
+  -e POSTGRES_PASSWORD=ctp_pass \
+  -e POSTGRES_DB=ctp_corpus \
+  -v pgdata:/var/lib/postgresql/data \
+  postgres:15
+```
+
+#### 2c. Apply the database schema
+
+```bash
+sudo docker exec -i ctp-postgres psql \
+  -U ctp_user -d ctp_corpus \
+  < services/ctp-service/app/database/schema.sql
+```
+
+### Step 3 — Configure Environment
+
+Create `services/ctp-service/.env`:
+
+```ini
+CTP_DATABASE_URL=postgresql://ctp_user:ctp_pass@ctp-postgres:5432/ctp_corpus
+CTP_PORT=8001
+CTP_LOG_LEVEL=INFO
+CTP_WORKERS=4
+CTP_WINDOW_DURATION_SEC=30
+CTP_BURST_INTERVAL_MS=100
+CTP_GATEWAY_SUBNET=169.231.0.0/16
+```
+
+### Step 4 — Start the CTP Service
+
+Replace the two `-v` mount paths with your actual input and output directories.
+
+```bash
+sudo docker run \
+  --name ctp-service \
+  --network ctp-net \
+  -p 8001:8001 \
+  --env-file services/ctp-service/.env \
+  --cap-add=NET_ADMIN \
+  -v /path/to/pcap/input:/path/to/pcap/input:ro \
+  -v /path/to/output/dir:/path/to/output/dir \
+  ctp-service
+```
+
+### Step 5 — API Usage Examples
+
+#### Health check
+
+```bash
+curl http://localhost:8001/health
+```
+
+#### List all CTPs
+
+```bash
+curl http://localhost:8001/ctps
+```
+
+#### Extract
+
+```bash
+curl -X POST http://localhost:8001/ctps/extract \
+  -H "Content-Type: application/json" \
+  -d '{
+    "pcap_input": "/path/to/pcap/input/your-trace.pcap",
+    "output_dir": "/path/to/output/dir",
+    "dataset_name": "your-dataset-name"
+  }'
+```
+
+#### Select
+
+```bash
+curl -X POST http://localhost:8001/ctps/select \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": {
+      "dataset_name": "your-dataset-name",
+      "intensity_range_mbps": [3.5, 4.5]
+    },
+    "limit": 20,
+    "order_by": "contributor_count"
+  }'
+```
+
+#### Transform
+
+```bash
+curl -X POST http://localhost:8001/ctps/transform \
+  -H "Content-Type: application/json" \
+  -d '{
+    "ctp_id": "ctp-your-dataset-name-169.231.162.180_30-w0001",
+    "throughput_threshold_mbps": 1,
+    "output_dir": "/path/to/output/dir",
+    "users_root": "/path/to/output/dir/users"
+  }'
+```
+
+#### Merge
+
+```bash
+curl -X POST http://localhost:8001/ctps/merge \
+  -H "Content-Type: application/json" \
+  -d '{
+    "dataset_name": "your-dataset-name",
+    "subnet": "169.231.162.180/30",
+    "start_index": 1,
+    "end_index": 2,
+    "output_dir": "/path/to/output/dir",
+    "users_root": "/path/to/output/dir/users"
+  }'
+```
+
+#### Replay Data
+
+```bash
+curl -X GET \
+  "http://localhost:8001/ctps/ctp-your-dataset-name-169.231.162.180_30-w0001/replay-data?replay_dir=/path/to/output/dir&users_root=/path/to/output/dir/users&direction=download"
+```
+
+---
+
+**Last Updated**: 2026-03-25
 **Status**: Active Development
 **Team Lead**: Jaber
 **PI**: Prof. Arpit Gupta
