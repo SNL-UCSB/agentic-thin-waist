@@ -9,9 +9,11 @@ from fastapi import FastAPI
 import uvicorn
 
 from .config import APIConfig
+from .worker import get_queue_app
+from .utils.init.init_db import init_db
+from .utils.init.init_queue import init_queue
+from .utils.init.init_s3 import init_s3_bucket
 from .routers import health_router, workflow_router
-from .utils.init_db import init_db
-from .utils.init_s3 import init_s3_bucket
 
 
 def create_app() -> FastAPI:
@@ -24,18 +26,22 @@ def create_app() -> FastAPI:
             or os.getenv("S3_BUCKET_NAME")
             or "netgent"
         ).strip()
+        queue_app = get_queue_app()
         engine = init_db()
         s3_client = init_s3_bucket(s3_bucket_name)
         app.state.db_engine = engine
         app.state.s3_client = s3_client
         app.state.s3_bucket_name = s3_bucket_name
-        try:
-            yield
-        finally:
-            close = getattr(s3_client, "close", None)
-            if callable(close):
-                close()
-            engine.dispose()
+        async with queue_app.open_async():
+            await init_queue(queue_app, engine)
+            app.state.queue_app = queue_app
+            try:
+                yield
+            finally:
+                close = getattr(s3_client, "close", None)
+                if callable(close):
+                    close()
+                engine.dispose()
 
     app = FastAPI(
         title=config.title,

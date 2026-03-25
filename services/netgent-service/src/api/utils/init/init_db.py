@@ -9,7 +9,7 @@ import sqlalchemy as sa
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 
-from ..models import Base
+from ...models import Base
 from .init_columns import create_availability_workflow
 
 

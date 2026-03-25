@@ -23,6 +23,12 @@ class APIConfig(BaseSettings):
         validation_alias="BROWSERLESS_WS_ENDPOINT",
     )
     browser_pool_size: int = Field(default=5, validation_alias="BROWSER_POOL_SIZE")
+    # Max workflow jobs executed in parallel by the Procrastinate worker (per process).
+    queue_worker_concurrency: int = Field(
+        default=1,
+        ge=1,
+        validation_alias="NETGENT_QUEUE_CONCURRENCY",
+    )
 
     model_config = SettingsConfigDict(
         extra="ignore",

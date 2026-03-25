@@ -1,10 +1,22 @@
+FROM golang:1.25-bookworm AS ndt-builder
+
+RUN go install github.com/m-lab/ndt7-client-go/cmd/ndt7-client@latest
+
 FROM python:3.12-slim-trixie
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+COPY --from=ndt-builder /go/bin/ndt7-client /usr/local/bin/ndt-client
 
 WORKDIR /app
 
 ENV UV_PROJECT_ENVIRONMENT=/opt/netgent-venv
+
+## Install NDT SpeedTest, Shell (NDT Client), Ping and IPerf 3
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        iperf3 \
+        iputils-ping \
+    && rm -rf /var/lib/apt/lists/*
 
 # Resolve and install project dependencies with uv.
 COPY services/netgent-service/pyproject.toml ./pyproject.toml

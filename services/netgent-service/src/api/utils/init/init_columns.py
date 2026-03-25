@@ -7,7 +7,7 @@ from uuid import uuid4
 import sqlalchemy as sa
 from sqlalchemy.orm import Session
 
-from ..models import AvailableWorkflows
+from ...models import AvailableWorkflows
 
 
 def create_availability_workflow(session: Session) -> None:

@@ -63,8 +63,6 @@ services:
     restart: unless-stopped
     ports:
       - "${BROWSERLESS_PORT:-3000}:3000"
-    env_file:
-      - ./services/netgent-service/.env
     environment:
       CONCURRENT: ${MAX_CONCURRENT_SESSIONS:-5}
       QUEUED: ${QUEUE_LENGTH:-10}
@@ -72,7 +70,8 @@ services:
     networks:
       - agentic-network
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/json/version || exit 1"]
+      test:
+        ["CMD-SHELL", "wget -qO- http://localhost:3000/json/version || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -102,7 +101,13 @@ services:
       - ./services/experiment-api:/app
       - /var/run/docker.sock:/var/run/docker.sock
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')",
+        ]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -138,6 +143,8 @@ services:
     environment:
       - FLASK_ENV=development
       - TELEMETRY_SERVICE_URL=http://telemetry-service:8004
+      - BROWSER_PROXY_HOST=172.16.1.1
+      - BROWSER_PROXY_PORT=8888
     depends_on:
       - telemetry-service
     networks:
@@ -181,7 +188,10 @@ services:
       - S3_SECRET_KEY=${S3_SECRET_KEY}
       - S3_CONNECTION_RETRIES=${S3_CONNECTION_RETRIES}
       - S3_CONNECTION_TIMEOUT_SECONDS=${S3_CONNECTION_TIMEOUT_SECONDS}
+      - NETGENT_QUEUE_CONCURRENCY=${NETGENT_QUEUE_CONCURRENCY:-1}
     depends_on:
+      browserless:
+        condition: service_healthy
       postgres:
         condition: service_healthy
       substrate-worker:
@@ -193,10 +203,40 @@ services:
     volumes:
       - ./services/netgent-service:/app
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8003/health')"]
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8003/health')",
+        ]
       interval: 5s
       timeout: 3s
       retries: 10
+
+  # Procrastinate worker: processes workflow jobs queued by netgent-service
+  netgent-worker:
+    build:
+      context: .
+      dockerfile: ./services/netgent-service/Dockerfile
+    container_name: netgent-worker
+    command: ["python", "-m", "api.worker.main"]
+    environment:
+      - DB_HOST=${DB_HOST}
+      - DB_NAME=${DB_NAME}
+      - DB_PORT=${DB_PORT}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - NETGENT_QUEUE_CONCURRENCY=${NETGENT_QUEUE_CONCURRENCY:-1}
+    depends_on:
+      netgent-service:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - agentic-network
+    volumes:
+      - ./services/netgent-service:/app
 
   # D3: Telemetry Service - Telemetry and Results
   telemetry-service:
@@ -229,7 +269,13 @@ services:
       S3_CONNECTION_RETRIES: ${S3_CONNECTION_RETRIES}
       S3_CONNECTION_TIMEOUT_SECONDS: ${S3_CONNECTION_TIMEOUT_SECONDS}
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request,sys; urllib.request.urlopen('http://localhost:8004/health')"]
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request,sys; urllib.request.urlopen('http://localhost:8004/health')",
+        ]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -257,7 +303,13 @@ services:
     volumes:
       - ./services/orchestration:/app
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8005/health')"]
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8005/health')",
+        ]
       interval: 5s
       timeout: 3s
       retries: 10
