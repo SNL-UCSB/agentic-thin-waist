@@ -16,56 +16,51 @@ The Substrate Worker is the **Execution Plane** of the NetForge Service. It inst
 ## Input
 
 Substrate Worker accepts:
-- BottleneckState specifications: download/upload capacity (Mbps), latency (ms), queue discipline, buffer depth
-- Network interface assignments: upstream/downstream interfaces, delay interface
-- CTP replay sessions: replay-ready PCAP files (from CTP Service), replay rates, hybrid mode configuration
-- Packet capture filters: interface, tcpdump filter syntax, output directory
-- Configuration: network namespace, capture directory path
+- BottleneckState specifications: download/upload capacity (Mbps), latency (ms), latency location, queue discipline, buffer depth, qdisc parameters
+- Network interface assignments: upstream/downstream interfaces
+- CTP replay sessions: replay-ready PCAP files (from CTP Service), replay rates, PNAT rewrite, loop/duration options
+- Packet capture requests: interface, tcpdump filter syntax, filename, optional duration
+- Configuration: capture directory path, CTP directory path (via environment variables)
 
 ## Output
 
 Substrate Worker produces:
-- BottleneckState verification results: verified boolean, measured capacity, measured RTT
+- BottleneckState verification results: verified boolean, applied tc commands, verification log
 - tc qdisc command outputs confirming kernel module load
 - PCAP files from packet capture at specified interface
-- tcpreplay session metrics: packets replayed, actual rate achieved
+- tcpreplay session metrics: replay ID, status, rate achieved
 - Status reports: interface configuration, qdisc state, available tc modules
 
 ## Interfaces
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
-| `/shape` | POST | Configure bottleneck regime (tc qdisc rules) |
-| `/capture` | POST | Start packet capture with tshark |
+| `/shape` | POST | Configure bottleneck regime (tc qdisc rules + netem latency) |
+| `/capture` | POST | Start asynchronous packet capture with tshark |
+| `/capture/{capture_id}` | GET | Poll capture session status |
+| `/capture/{capture_id}` | DELETE | Stop active capture session |
 | `/replay` | POST | Start CTP traffic replay via tcpreplay |
+| `/replay/{replay_id}` | GET | Poll replay session status |
+| `/replay/{replay_id}` | DELETE | Stop active replay session |
 | `/state` | GET | Get current bottleneck configuration and verification |
 | `/health` | GET | Health check: privileges, tc availability, qdisc support |
-
-## YouTube MVP Example
-
-For YouTube at 10/25/50 Mbps with 50ms latency under CUBIC:
-- /shape: Apply tc rules to eth0 for each capacity (tbf rate + fq_codel, netem delay 50ms)
-- /capture: Start tshark on eth0, capture filter "tcp port 443"
-- /replay: Start tcpreplay with scaled CTP at each bottleneck rate
-- /state: Verify bottleneck_state.verified=True, measured_throughput within ±5% of target
-- Success criteria: all 3 capacity regimes verify, tc modules load, measured throughput matches config within tolerance
 
 ## Core Concepts
 
 **Bottleneck Regime**: A complete network condition specification with two components:
 
 1. **Static Attributes** (configured via tc):
-   - Capacity (bandwidth shaping)
-   - Base latency (propagation delay)
+   - Capacity (bandwidth shaping via HTB root qdisc)
+   - Base latency (propagation delay via netem)
    - Buffering (queue depth)
-   - Queue management policy (AQM: FIFO, fq_codel, prio, etc.)
+   - Queue management policy (AQM: pfifo, fq_codel, codel, sfq, etc.)
 
 2. **Dynamic Pressure** (replayed via tcpreplay):
    - CTP (Common Traffic Pattern) background traffic
    - Hybrid replay model: background traffic open-loop, target application fully reactive
    - Captures contention and packet interaction effects
 
-The worker must verify that configured shaping matches the intended specification via `BottleneckState.verified`.
+The worker verifies configured shaping via iperf3 (±20% bandwidth tolerance) and ping (±10ms latency tolerance), recorded in `BottleneckState.verified`.
 
 ## Deployment Modes
 
@@ -78,66 +73,83 @@ The worker must verify that configured shaping matches the intended specificatio
 
 NetForge provides `NAT()` and `Tunnel()` abstractions for connectivity beyond the testbed.
 
+## Network Topology (setup.sh)
+
+The service configures a two-namespace topology at startup:
+
+```
+ [ns1: client]          [host bridge]          [ns2: server]
+   veth1 ─────── veth2 ── netrepBr ── veth4 ─────── veth3
+172.16.1.1/30  172.16.1.2/30       172.16.2.2/30  172.16.2.1/30
+
+                 veth6 (172.16.3.2/30) ── ns2: veth5 (172.16.3.1/30)
+```
+
+- **ns1** (downstream/client): iperf3 client, tcpreplay injection point, downstream latency via `veth1`
+- **ns2** (upstream/server): iperf3 server (target 172.16.3.1), upstream latency via `veth3`
+- **host**: HTB bandwidth shaping on `veth2` (downstream) and `veth4` (upstream)
+
 ## Architecture
 
 ```
 ┌──────────────────────────────────┐
 │  Experiment API                  │
 │  (Intent Plane Orchestration)    │
-└────────────┬──────────────────────┘
+└────────────┬─────────────────────┘
              │
-             │ POST /shape (BottleneckState)
-             │ POST /capture
-             │ POST /replay
+             │ POST /shape, /capture, /replay
              │ GET /state, /health
              ▼
 ┌──────────────────────────────────┐
 │  SUBSTRATE WORKER (8002)         │
-│  EXECUTION PLANE                 │
+│  EXECUTION PLANE (FastAPI)       │
 │  ┌──────────────────────────┐    │
 │  │ TC Executor              │    │
-│  │ (qdisc, filter, class)   │    │
+│  │ (HTB root + child qdisc) │    │
+│  ├──────────────────────────┤    │
+│  │ netem Latency Injection  │    │
+│  │ (upstream/downstream/    │    │
+│  │  both)                   │    │
 │  ├──────────────────────────┤    │
 │  │ Packet Capture (tshark)  │    │
 │  ├──────────────────────────┤    │
 │  │ CTP Replay (tcpreplay)   │    │
 │  ├──────────────────────────┤    │
 │  │ State Verification       │    │
-│  │ (verified bool)          │    │
+│  │ (iperf3 + ping)          │    │
 │  └──────────────────────────┘    │
 └────────────┬─────────────────────┘
              │
-             │ tc commands
+             │ tc commands (HTB, netem, qdisc)
              │ tshark capture
-             │ tcpreplay stream
+             │ tcpreplay / tcpreplay-edit (PNAT)
+             │ iperf3, ping (verification)
              ▼
         ┌─────────────────┐
         │ Linux Kernel    │
+        │ Network NS      │
         │ tc qdisc stack  │
-        │ LibreQoS/XDP    │
+        │ Virtual Bridges │
+        | LibreQoS/ XDP   │
         └─────────────────┘
 ```
 
 ### Dependencies
 
-- **CTP Service** (Port 8001): Provides replay-ready PCAP data via `GET /ctps/{id}/replay-data`. The Substrate Worker does not perform CTP algebra — it receives pre-processed PCAP and replays it via tcpreplay.
-- **Experiment API** (Port 8000): Dispatches configuration, replay, and capture commands. The Experiment API orchestrates the sequencing of Substrate Worker operations.
+- **CTP Service** (Port 8001): Provides replay-ready PCAP data. The Substrate Worker does not perform CTP algebra — it receives pre-processed PCAP and replays it via tcpreplay.
+- **Experiment API** (Port 8000): Dispatches configuration, replay, and capture commands.
 
-## Configuration Requirements
+## Configuration
 
-The worker requires a `NetReplicaConfig` object with the following fields:
+**Environment Variables**:
 
-- `capture_dir`: Directory for pcap files (replaces hardcoded `/home/jaber/captures/`)
-- `upstream_iface`: Ingress interface (e.g., `eth0`)
-- `downstream_iface`: Egress interface (e.g., `eth1`)
-- `delay_iface`: Interface for delay application (optional)
-- `namespace`: Network namespace name (for isolated testbeds)
-- `ctp_dir`: Directory containing CTP traffic patterns for tcpreplay
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `CAPTURE_DIR` | `/home/netreplica/config/captures` | Output directory for PCAP files |
+| `CTP_DIR` | `/home/netreplica/config/ctp` | Directory containing CTP PCAP files for replay |
 
-**Critical Security Notes**:
-- Remove hardcoded passwords and paths from the codebase
-- Use sudoers configuration for tc/tshark privilege elevation
-- Run as a privileged Docker container with `CAP_NET_ADMIN` capability
+**Security Notes**:
+- Run as a privileged Docker container with `CAP_NET_ADMIN` and `CAP_SYS_ADMIN`
 - Never commit credentials to version control
 
 ## API Specification
@@ -149,166 +161,327 @@ Configure bottleneck regime on target interfaces.
 **Request**:
 ```json
 {
-  "upstream_iface": "eth0",
-  "downstream_iface": "eth1",
-  "download_mbps": 10.0,
-  "upload_mbps": 5.0,
-  "latency_ms": 50,
+  "upstream_iface": "veth4",
+  "downstream_iface": "veth2",
+  "download_mbps": 100.0,
+  "upload_mbps": 100.0,
+  "latency_ms": 50.0,
+  "latency_location": "both",
   "qdisc": "fq_codel",
-  "buffer_packets": 1000
+  "buffer_packets": 1000,
+  "qdisc_params": {
+    "target": "5ms",
+    "interval": "100ms"
+  }
 }
 ```
+
+- `latency_location`: `"upstream"` | `"downstream"` | `"both"` | `null` — controls which namespace interface receives netem delay
+- `qdisc`: `"pfifo"` (default) | `"fq_codel"` | `"codel"` | `"sfq"` | `"tbf"` | `"bfifo"` | `"pfifo_fast"`
+- `qdisc_params`: optional per-qdisc tuning (e.g., `target`, `interval` for fq_codel/codel)
+- `buffer_packets`: queue limit for pfifo/bfifo/sfq; ignored for AQM qdiscs (fq_codel, codel)
 
 **Response** (200 OK):
 ```json
 {
   "status": "shaped",
   "bottleneck_state": {
-    "download_mbps": 10.0,
-    "upload_mbps": 5.0,
-    "latency_ms": 50,
+    "download_mbps": 100.0,
+    "upload_mbps": 100.0,
+    "latency_ms": 50.0,
+    "latency_location": "both",
     "qdisc": "fq_codel",
-    "verified": true
+    "buffer_packets": 1000,
+    "qdisc_params": {"target": "5ms", "interval": "100ms"},
+    "loss_rate_percent": 0.0,
+    "verified": true,
+    "verification_log": ["iperf3 download: 98.2 Mbps (target 100.0)", "..."]
   },
   "applied_commands": [
-    "tc qdisc replace dev eth0 root handle 1: tbf rate 10mbit burst 15k latency 50ms",
-    "tc qdisc add dev eth0 parent 1: handle 10: fq_codel limit 1000"
+    "tc qdisc replace dev veth2 root handle 1: htb default 10",
+    "tc class add dev veth2 parent 1: classid 1:10 htb rate 100mbit ceil 100mbit",
+    "tc qdisc add dev veth2 parent 1:10 handle 10: fq_codel limit 1000 target 5ms interval 100ms",
+    "..."
   ]
+}
+```
+
+**Verification**: After applying tc rules, the worker runs iperf3 (±20% bandwidth tolerance) and ping (±10ms latency tolerance) and sets `verified` accordingly.
+
+---
+
+### 2. Get State (GET /state)
+
+Retrieve cached bottleneck state without re-running verification.
+
+**Response** (200 OK):
+```json
+{
+  "status": "ok",
+  "bottleneck_state": { ... }
+}
+```
+
+Returns `"status": "no_state"` with `"bottleneck_state": null` if no shaping has been applied.
+
+---
+
+### 3. Health Check (GET /health)
+
+**Response** (200 OK):
+```json
+{
+  "status": "ok",
+  "root_privileges": true,
+  "tc_available": true,
+  "tshark_available": true,
+  "tcpreplay_available": true,
+  "qdisc_support": true,
+  "interfaces": ["veth0", "veth2", "veth4", "veth6"],
+  "timestamp": "2026-03-25T10:00:00"
+}
+```
+
+`status` is `"ok"` when all checks pass; `"degraded"` if any check fails.
+
+---
+
+### 4. Packet Capture (POST /capture)
+
+Start an asynchronous tshark capture session.
+
+**Request**:
+```json
+{
+  "interface": "veth2",
+  "capture_filter": "tcp port 443",
+  "filename": "test1",
+  "duration_seconds": 30
+}
+```
+
+- `capture_filter`: tcpdump-style filter (optional, default captures all traffic)
+- `duration_seconds`: optional auto-stop timeout
+
+**Response** (200 OK):
+```json
+{
+  "capture_id": "550e8400-e29b-41d4-a716-446655440000",
+  "status": "started",
+  "pcap_path": "/home/netreplica/config/captures/test1.pcap",
+  "interface": "veth2",
+  "capture_filter": "tcp port 443"
+}
+```
+
+Use the returned `capture_id` to poll or stop the session.
+
+---
+
+### 5. Check Capture Status (GET /capture/{capture_id})
+
+**Response** (200 OK):
+```json
+{
+  "capture_id": "...",
+  "status": "running",
+  "pcap_path": "/home/netreplica/config/captures/test1.pcap",
+  "interface": "veth2",
+  "capture_filter": "tcp port 443",
+  "start_time": "2026-03-25T10:00:00",
+  "exit_code": null
+}
+```
+
+`status` transitions to `"finished"` when tshark exits (duration elapsed or stopped).
+
+---
+
+### 6. Stop Capture (DELETE /capture/{capture_id})
+
+Gracefully terminates tshark; PCAP file is retained on disk.
+
+**Response** (200 OK):
+```json
+{
+  "capture_id": "...",
+  "status": "stopped"
 }
 ```
 
 ---
 
-### 2. Packet Capture (POST /capture)
-Start tshark: `{interface, capture_filter, filename}` → `{capture_id, status, pcap_path}`
+### 7. Replay CTP Traffic (POST /replay)
 
-### 3. Replay CTP (POST /replay)
-Replay traffic: `{ctp_file, interface, rate, loop, duration_seconds}` → `{replay_id, status, packets_replayed}`
+Start a tcpreplay session against a PCAP file from CTP_DIR.
 
-### 4. Get State (GET /state)
-Retrieve bottleneck config: `{download_mbps, upload_mbps, latency_ms, qdisc, verified}`
+**Request**:
+```json
+{
+  "ctp_file": "out_70_profile8",
+  "interface": "veth1",
+  "rate": "10",
+  "loop": false,
+  "duration_seconds": 60,
+  "pnat": "169.231.0.0/16:172.16.1.1"
+}
+```
 
-### 5. Health Check (GET /health)
-Worker status: `{status, root_privileges, tc_available, tshark_available, tcpreplay_available, interfaces}`
+- `ctp_file`: filename (without `.pcap`) in `CTP_DIR`
+- `rate`: replay rate in Mbps (optional)
+- `loop`: repeat indefinitely
+- `duration_seconds`: auto-stop after N seconds (optional)
+- `pnat`: IP rewrite rule `"src_net:dst_ip[,...]"` — uses `tcpreplay-edit` when provided
 
-**Error Codes**: 400 Bad Request, 403 Forbidden, 500 Internal Server Error, 503 Service Unavailable
+**Response** (200 OK):
+```json
+{
+  "replay_id": "550e8400-e29b-41d4-a716-446655440001",
+  "status": "started",
+  "ctp_file": "out_70_profile8",
+  "interface": "veth1",
+  "rate": "10"
+}
+```
 
-## Dataclass Contracts
+---
 
+### 8. Check Replay Status (GET /replay/{replay_id})
+
+**Response** (200 OK):
+```json
+{
+  "replay_id": "...",
+  "status": "running",
+  "ctp_file": "out_70_profile8",
+  "interface": "veth1",
+  "rate": "10",
+  "pnat": "169.231.0.0/16:172.16.1.1",
+  "start_time": "2026-03-25T10:00:00"
+}
+```
+
+---
+
+### 9. Stop Replay (DELETE /replay/{replay_id})
+
+**Response** (200 OK):
+```json
+{
+  "replay_id": "...",
+  "status": "stopped"
+}
+```
+
+**Error Codes**: 400 Bad Request, 404 Not Found, 422 Validation Error, 500 Internal Server Error
+
+## Data Models
+
+### ShapeRequest
 ```python
-from dataclasses import dataclass, field
-from typing import List, Optional
-from datetime import datetime
+upstream_iface: str
+downstream_iface: str
+download_mbps: float          # Must be > 0
+upload_mbps: float            # Must be > 0
+latency_ms: float             # Must be >= 0, default 0
+latency_location: Optional[Literal["upstream", "downstream", "both"]]
+qdisc: str                    # Default "pfifo"
+buffer_packets: int           # >= 1, default 1000
+qdisc_params: Optional[Dict[str, str]]
+```
 
-@dataclass
-class BottleneckState:
-    """Static and dynamic network configuration with verification."""
-    download_mbps: float          # Downstream capacity (bits/s)
-    upload_mbps: float            # Upstream capacity (bits/s)
-    latency_ms: float             # Base propagation latency
-    qdisc: str                    # Queue discipline (tbf, fq_codel, prio, etc.)
-    verified: bool = False        # Verification passed: config matches measurement
-    buffer_packets: int = 1000    # Queue depth for AQM
-    loss_rate_percent: float = 0.0  # Packet loss injection (optional)
+### BottleneckState
+```python
+download_mbps: float
+upload_mbps: float
+latency_ms: float
+latency_location: Optional[str]
+qdisc: str
+verified: bool                # True if iperf3+ping verification passed
+buffer_packets: int           # Default 1000
+qdisc_params: Optional[Dict[str, str]]
+loss_rate_percent: float      # Default 0.0
+verification_log: List[str]   # Detailed verification output
+```
 
-@dataclass
-class SubstrateStatus:
-    """Worker health and operational status."""
-    status: str                   # "healthy" or "degraded"
-    root_privileges: bool         # Can execute tc/tshark
-    tc_available: bool            # tc command available
-    tshark_available: bool        # tshark command available
-    tcpreplay_available: bool     # tcpreplay command available
-    qdisc_support: bool           # Kernel supports requested qdisc
-    interfaces: List[str]         # Available network interfaces
-    timestamp: str                # ISO 8601 timestamp
+### CaptureRequest
+```python
+interface: str
+capture_filter: str           # Default ""
+filename: str                 # Non-empty; basename-sanitized
+duration_seconds: Optional[int]
+```
 
-@dataclass
-class NetReplicaConfig:
-    """Configuration for substrate worker (replaces hardcoded paths)."""
-    capture_dir: str              # Directory for pcap files
-    upstream_iface: str           # Ingress interface (e.g., eth0)
-    downstream_iface: str         # Egress interface (e.g., eth1)
-    delay_iface: Optional[str]    # Interface for delay application
-    namespace: Optional[str]      # Network namespace (isolated testbed)
-    ctp_dir: str                  # Directory with CTP traffic patterns
-
-@dataclass
-class CTPReplaySession:
-    """Traffic replay metadata."""
-    replay_id: str                # Unique replay identifier
-    ctp_file: str                 # CTP pcap filename
-    interface: str                # Target interface
-    rate: str                     # Replay rate (e.g., "10M", "50K")
-    loop: bool = False            # Repeat indefinitely
-    start_time: str = ""          # ISO 8601 timestamp
-    packets_replayed: int = 0     # Count during active replay
+### ReplayRequest
+```python
+ctp_file: str
+interface: str
+rate: Optional[str]           # In Mbps
+loop: bool                    # Default False
+duration_seconds: Optional[int]
+pnat: Optional[str]           # "src_net:dst_ip[,...]"
 ```
 
 ## Implementation Notes
 
 ### Linux Traffic Control (tc)
 
-The worker translates bottleneck specifications into tc commands:
+The worker builds an HTB hierarchy with a child qdisc:
 
 ```bash
-# Basic traffic shaping (TBF: Token Bucket Filter)
-tc qdisc replace dev eth0 root handle 1: tbf \
-  rate 10mbit burst 15k latency 50ms
+# HTB root + bandwidth class
+tc qdisc replace dev veth2 root handle 1: htb default 10
+tc class add dev veth2 parent 1: classid 1:10 htb rate 100mbit ceil 100mbit
 
-# Queue management (fq_codel: Fair Queuing + CoDel AQM)
-tc qdisc add dev eth0 parent 1: handle 10: fq_codel \
-  limit 1000 target 5ms interval 100ms
+# Queue management (applied as HTB leaf)
+tc qdisc add dev veth2 parent 1:10 handle 10: fq_codel limit 1000 target 5ms interval 100ms
 
-# Latency (netem: Network Emulation)
-tc qdisc add dev eth0 root netem delay 50ms
+# Latency via netem (in namespace)
+ip netns exec ns1 tc qdisc add dev veth1 root netem delay 50ms
 ```
 
-### Packet Capture and CTP Replay
+### Qdisc Parameter Rules
 
-- **tshark**: Captures packets with optional filtering for analysis
-- **tcpreplay**: Replays CTPs (background traffic) from pcap files
-- **Hybrid Model**: Background traffic open-loop (replay-based), target application fully reactive (measures real contention effects)
+| Qdisc family | buffer_packets behavior | qdisc_params |
+|---|---|---|
+| `pfifo`, `bfifo`, `pfifo_fast`, `sfq` | Sets `limit` | Cannot include `"limit"` key |
+| `fq_codel`, `codel` | Ignored | Can include `"limit"`, `"target"`, `"interval"`, etc. |
+
+### Verification
+
+After applying shaping rules, the worker runs:
+- **iperf3** upload and download tests (3 second duration, ±20% tolerance)
+- **ping** RTT measurement (±10ms tolerance)
+
+Results are logged in `verification_log` and summarized in `verified`.
 
 ### Privilege Elevation
 
-Configure sudoers to allow the worker process tc and tshark execution:
+The container runs privileged. For non-privileged deployments, configure sudoers:
 
 ```
 # /etc/sudoers.d/substrate-worker
 substrate-worker ALL=(ALL) NOPASSWD: /sbin/tc
 substrate-worker ALL=(ALL) NOPASSWD: /usr/bin/tshark
 substrate-worker ALL=(ALL) NOPASSWD: /usr/bin/tcpreplay
+substrate-worker ALL=(ALL) NOPASSWD: /usr/bin/tcpreplay-edit
 ```
-
-Never hardcode passwords in configuration files.
-
-## Testing and Validation
-
-> **Unit tests for this service live in `services/substrate-worker/tests/`.** Run them with `pytest services/substrate-worker/tests/ -v`.
-
-**Unit Tests**: BottleneckState/SubstrateStatus dataclass parsing, parameter range checks, interface validation, CTP path resolution.
-
-**Integration Tests**: tc command execution (±5% capacity/latency tolerance), tshark pcap generation, tcpreplay injection at specified rate, BottleneckState.verified state accuracy.
-
-**Performance Targets**: POST /shape < 500ms, POST /capture < 100ms, POST /replay < 200ms, GET /state < 50ms, GET /health < 100ms.
 
 ## Docker Configuration
-The Dockerfile executes `setup.sh` and runs the service on port 8002.
 
-### Build and Run
+The Dockerfile copies paths relative to the repo root, so **build from the repository root**.
 
-Navigate to the service directory and build the image:
+### Build
 
 ```bash
-cd agentic-thin-waist/services/substrate-worker
-sudo docker build -t substrate-worker .
+cd agentic-thin-waist/
+sudo docker build -t substrate-worker -f services/substrate-worker/Dockerfile .
 ```
 
-Run the container with the required privileges and volume mounts:
+### Run (detached)
 
 ```bash
-sudo docker run -it \
+sudo docker run -d \
   --name substrate-worker \
   --privileged \
   --cap-add=NET_ADMIN \
@@ -321,68 +494,166 @@ sudo docker run -it \
   -e CTP_DIR=/home/netreplica/config/ctp \
   substrate-worker
 ```
- 
-**Dockerfile**:
-```dockerfile
-FROM ubuntu:22.04
 
-ENV DEBIAN_FRONTEND=noninteractive
+### Docker Compose
 
-RUN apt-get update && apt-get install -y \
-    python3 python3-pip python-is-python3 \
-    tshark iputils-ping iproute2 \
-    net-tools iperf3 \
-    curl wget iptables byobu nano \
-    speedtest-cli tcpreplay \
-    python3-flask python3-requests \
-    sudo \
-    && rm -rf /var/lib/apt/lists/*
-
-WORKDIR /app
-
-COPY requirements.txt .
-RUN pip3 install -r requirements.txt
-
-COPY . .
-
-
-EXPOSE 8002
-
-CMD ["bash", "-lc", "cd app && chmod +x setup.sh && ./setup.sh && uvicorn main:app --host 0.0.0.0 --port 8002"]
-```
-
-**Docker Compose**:
 ```yaml
 substrate-worker:
-  build: ./services/substrate-worker
+  build:
+    context: .
+    dockerfile: services/substrate-worker/Dockerfile
   container_name: substrate-worker
   privileged: true
   cap_add:
     - NET_ADMIN
     - SYS_ADMIN
+  sysctls:
+    - net.ipv4.ip_forward=1
   ports:
     - "8002:8002"
   volumes:
-    - /home/config/captures:/home/config/captures
-    - /home/config/ctp:/home/config/ctp
+    - /home/netreplica/config/captures:/home/netreplica/config/captures
+    - /home/netreplica/config/ctp:/home/netreplica/config/ctp
   environment:
-    - CAPTURE_DIR=/home/config/captures
-    - CTP_DIR=/home/config/ctp
-    - UPSTREAM_IFACE=eth0
-    - DOWNSTREAM_IFACE=eth1
+    - CAPTURE_DIR=/home/netreplica/config/captures
+    - CTP_DIR=/home/netreplica/config/ctp
 ```
+
+## Usage Examples
+
+### Shape the network
+
+```bash
+curl -X POST http://localhost:8002/shape \
+  -H "Content-Type: application/json" \
+  -d '{
+    "upstream_iface": "veth4",
+    "downstream_iface": "veth2",
+    "download_mbps": 100.0,
+    "upload_mbps": 100.0,
+    "latency_ms": 50.0,
+    "latency_location": "both",
+    "qdisc": "fq_codel",
+    "buffer_packets": 1000,
+    "qdisc_params": {
+      "target": "5ms",
+      "interval": "100ms"
+    }
+  }'
+```
+
+### Check current bottleneck state
+
+```bash
+curl http://localhost:8002/state
+```
+
+### Health check
+
+```bash
+curl http://localhost:8002/health
+```
+
+### Capture packets
+
+```bash
+curl -X POST http://localhost:8002/capture \
+  -H "Content-Type: application/json" \
+  -d '{
+    "duration": 10,
+    "prefix": "test1",
+    "upstream_iface": "veth4",
+    "downstream_iface": "veth2"
+  }'
+```
+
+Poll capture status:
+```bash
+curl http://localhost:8002/capture/{capture_id}
+```
+
+Stop capture:
+```bash
+curl -X DELETE http://localhost:8002/capture/{capture_id}
+```
+
+### Replay CTP background traffic
+
+```bash
+curl -X POST "http://localhost:8002/replay" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "ctp_file": "out_70_profile8",
+    "interface": "veth1",
+    "rate": "10",
+    "loop": false,
+    "duration_seconds": 60,
+    "pnat": "169.231.0.0/16:172.16.1.1"
+  }'
+```
+
+Poll replay status:
+```bash
+curl http://localhost:8002/replay/{replay_id}
+```
+
+Stop replay:
+```bash
+curl -X DELETE http://localhost:8002/replay/{replay_id}
+```
+
+### YouTube MVP Example
+
+For YouTube at 100 Mbps with 50ms latency under fq_codel:
+
+```bash
+# 1. Shape the bottleneck
+curl -X POST http://localhost:8002/shape \
+  -H "Content-Type: application/json" \
+  -d '{"upstream_iface":"veth4","downstream_iface":"veth2","download_mbps":100.0,"upload_mbps":100.0,"latency_ms":50.0,"latency_location":"both","qdisc":"fq_codel"}'
+
+# 2. Start packet capture
+curl -X POST http://localhost:8002/capture \
+  -H "Content-Type: application/json" \
+  -d '{"interface":"veth2","capture_filter":"tcp port 443","filename":"youtube_100mbps"}'
+
+# 3. Inject background traffic
+curl -X POST http://localhost:8002/replay \
+  -H "Content-Type: application/json" \
+  -d '{"ctp_file":"youtube_background","interface":"veth1","rate":"100","duration_seconds":60}'
+
+# 4. Verify bottleneck state
+curl http://localhost:8002/state
+```
+
+Success criteria: `bottleneck_state.verified == true`, measured throughput within ±20% of target, measured RTT within ±10ms of configured latency.
+
+## Testing
+
+> Unit tests live in `services/substrate-worker/tests/`. Run from repo root:
+
+```bash
+pytest services/substrate-worker/tests/ -v
+```
+
+**Unit tests** cover: qdisc argument building, Pydantic model validation, health caching, state endpoint behavior, netem latency placement, capture/replay lifecycle, qdisc_params conflict detection.
+
+**Integration tests** cover: live tc execution, tshark pcap generation, tcpreplay injection, bandwidth and latency verification within tolerance, concurrent replay sessions, error paths.
+
+**Performance targets**: POST /shape < 500ms (excluding iperf3 verification), POST /capture < 100ms, POST /replay < 200ms, GET /state < 50ms, GET /health < 100ms.
 
 ## Key Responsibilities
 
-- **Translate specifications into tc commands**: Convert BottleneckState into operational qdisc configurations
-- **Enforce bottleneck regimes**: Apply both static attributes and dynamic pressure (CTP replay)
-- **Verify configuration state**: Ensure BottleneckState.verified reflects actual network behavior
-- **Capture and replay traffic**: Provide hooks for experiment analysis and load injection
-- **Report health and status**: Enable orchestration layer visibility into execution plane state
+- **Translate specifications into tc commands**: Convert BottleneckState into HTB + child qdisc configurations
+- **Enforce bottleneck regimes**: Apply both static attributes (tc) and dynamic pressure (tcpreplay)
+- **Verify configuration state**: Run iperf3 and ping after shaping; set `BottleneckState.verified`
+- **Capture and replay traffic**: Lifecycle management for tshark and tcpreplay sessions
+- **Report health and status**: Expose dependency checks and cached bottleneck state
 
 ## References
 
 - Linux tc (traffic control): https://man7.org/linux/man-pages/man8/tc.8.html
+- HTB qdisc: https://tldp.org/HOWTO/Traffic-Control-HOWTO/classful-qdiscs.html
 - tshark (Wireshark CLI): https://www.wireshark.org/docs/man-pages/tshark.html
 - tcpreplay: https://tcpreplay.appneta.com/
 - Linux queue disciplines: https://tldp.org/HOWTO/Traffic-Control-HOWTO/
@@ -393,5 +664,5 @@ substrate-worker:
 **Project**: Agentic Thin Waist (NetForge Service)
 **PI**: Prof. Arpit Gupta
 **Lead**: Jaber
-**Last Updated**: 2026-03-05
-**Status**: Specification Complete — Ready for Implementation
+**Last Updated**: 2026-03-25
+**Status**: Active Development
