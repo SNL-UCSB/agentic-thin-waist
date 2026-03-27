@@ -67,6 +67,7 @@ services:
       CONCURRENT: ${MAX_CONCURRENT_SESSIONS:-5}
       QUEUED: ${QUEUE_LENGTH:-10}
       PROXY: ${BROWSERLESS_PROXY:-}
+      TIMEOUT: ${BROWSERLESS_TIMEOUT_MS:-300000}
     networks:
       - agentic-network
     healthcheck:
