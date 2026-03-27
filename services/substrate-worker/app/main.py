@@ -184,6 +184,27 @@ class ReplayStatusResponse(BaseModel):
     start_time: str
 
 
+class CongestionRequest(BaseModel):
+    algorithm: str = Field(
+        ...,
+        description="TCP congestion control algorithm name (e.g., 'bbr', 'cubic', 'reno')",
+    )
+    namespace: Optional[str] = Field(
+        None,
+        description=(
+            "Network namespace to configure: 'ns1', 'ns2', or 'root' for the "
+            "container root namespace. Omit or set null to apply in all namespaces."
+        ),
+    )
+
+
+class CongestionResponse(BaseModel):
+    current_algorithm: str
+    available_algorithms: List[str]
+    status: str
+    applied_commands: List[str] = []
+
+
 # =========================
 # Helper functions
 # =========================
@@ -849,3 +870,100 @@ def delete_replay(replay_id: str):
     del ACTIVE_REPLAYS[replay_id]
 
     return {"replay_id": replay_id, "status": "stopped"}
+
+
+def _sysctl_get_cca(ns: Optional[str]) -> str:
+    key = "net.ipv4.tcp_congestion_control"
+    if ns and ns != "root":
+        result = subprocess.run(
+            f"ip netns exec {ns} sysctl -n {key}",
+            shell=True,
+            capture_output=True,
+            text=True,
+        )
+    else:
+        result = subprocess.run(
+            f"sysctl -n {key}", shell=True, capture_output=True, text=True
+        )
+    return result.stdout.strip()
+
+
+def _sysctl_get_available() -> List[str]:
+    result = subprocess.run(
+        "sysctl -n net.ipv4.tcp_available_congestion_control",
+        shell=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip().split()
+
+
+def _apply_cca_in_ns(ns: Optional[str], algorithm: str) -> str:
+    key = "net.ipv4.tcp_congestion_control"
+    if ns and ns != "root":
+        cmd = f"ip netns exec {ns} sysctl -w {key}={algorithm}"
+    else:
+        cmd = f"sysctl -w {key}={algorithm}"
+    result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+    if result.returncode != 0 or "Operation not permitted" in (
+        result.stderr + result.stdout
+    ):
+        raise RuntimeError((result.stderr or result.stdout).strip())
+    return cmd
+
+
+@app.post("/congestion", response_model=CongestionResponse)
+def set_congestion(cfg: CongestionRequest) -> CongestionResponse:
+    algorithm = cfg.algorithm.strip().lower()
+    applied: List[str] = []
+
+    available = _sysctl_get_available()
+
+    if algorithm not in available:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Algorithm '{algorithm}' not available. Available: {available}",
+        )
+    # Determine which namespaces to configure
+    if cfg.namespace is None:
+        namespaces = ["root", "ns1", "ns2"]
+    elif cfg.namespace == "root":
+        namespaces = ["root"]
+    elif cfg.namespace in ("ns1", "ns2"):
+        namespaces = [cfg.namespace]
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid namespace '{cfg.namespace}'. Use 'ns1', 'ns2', 'root', or null.",
+        )
+
+    for ns in namespaces:
+        try:
+            cmd = _apply_cca_in_ns(ns, algorithm)
+            applied.append(cmd)
+        except RuntimeError as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=(f"Cannot set '{algorithm}' in namespace '{ns}': {exc}. "),
+            )
+
+    return CongestionResponse(
+        current_algorithm=algorithm,
+        available_algorithms=available,
+        status="ok",
+        applied_commands=applied,
+    )
+
+
+@app.get("/congestion", response_model=CongestionResponse)
+def get_congestion(namespace: Optional[str] = None) -> CongestionResponse:
+    ns = namespace if namespace else "root"
+    current = _sysctl_get_cca(ns)
+    available = _sysctl_get_available()
+
+    return CongestionResponse(
+        current_algorithm=current,
+        available_algorithms=available,
+        status="ok",
+        applied_commands=[],
+    )
