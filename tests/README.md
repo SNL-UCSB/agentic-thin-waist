@@ -96,12 +96,8 @@ tests/
 ├── conftest.py                         # (To be created) Global pytest fixtures
 │
 ├── integration/                        # Level 3: Service integration
-│   ├── test_experiment_lifecycle.py    # Full experiment workflow
-│   ├── test_bottleneck_verification.py # D1 bottleneck realism
-│   ├── test_workflow_execution.py      # D2 NFA execution
-│   ├── test_result_storage.py          # D3 result persistence
-│   ├── test_orchestration_e2e.py       # D5 orchestration flow
-│   └── test_four_requirements.py       # Controllability, composability, fidelity, replicability
+│   ├── test_netgent_telemetry_integration.py # D2↔D3 workflow artifact/result handoff
+│   └── test_orchestration_integration.py     # D5 orchestration against downstream services
 │
 ├── e2e/                                # Level 4: End-to-end tests
 │   ├── test_full_experiment.py         # Complete workflow Intent→Execution
@@ -467,10 +463,10 @@ pytest services/netgent-service/tests/ -v
 **What to test**:
 1. NetGent Service: Browser automation commands
 2. NFA Workflow: Navigation and action sequences
-3. Integration with D1 bottleneck regime
+3. Cross-service handoff to Telemetry Service
 
 **Key scenarios**:
-- Execute NFA workflow on known bottleneck
+- Execute NFA workflow and verify artifacts/results can be handed to Telemetry
 - Verify actions complete within expected time
 - Capture and verify QoE metrics (startup time, bitrate, rebuffering)
 
@@ -499,14 +495,14 @@ pytest services/orchestration/tests/ -v
 ```
 
 **What to test**:
-1. Orchestration Service: Claude + OpenClaw integration
-2. Intent → CTP translation
+1. Orchestration Service: Claude + downstream service coordination
+2. Intent → experiment translation
 3. Experiment orchestration based on intent
 
 **Key scenarios**:
 - Translate research intent to experiment spec
-- Generate CTP from natural language description
-- Orchestrate full experiment execution
+- Dispatch and monitor downstream experiment execution
+- Aggregate results across downstream services
 
 ---
 
