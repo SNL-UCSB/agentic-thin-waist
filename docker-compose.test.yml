@@ -1,5 +1,5 @@
 services:
-  tests:
+  orchestration-tests:
     build:
       context: .
       dockerfile: tests/Dockerfile
@@ -16,4 +16,9 @@ services:
       TELEMETRY_SERVICE_URL: http://telemetry-service:8004
     networks:
       - agentic-network
-    command: ["python", "-m", "pytest", "tests/integration", "-v", "--tb=short"]
+    command:
+        [
+          "sh",
+          "-lc",
+          "python -m pytest tests/integration/test_orchestration*.py -v --tb=short",
+        ]
