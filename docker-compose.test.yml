@@ -8,11 +8,14 @@ services:
         condition: service_healthy
       ctp-service:
         condition: service_healthy
+      experiment-api:
+        condition: service_healthy
       telemetry-service:
         condition: service_healthy
     env_file:
       - .env
     environment:
+      EXPERIMENT_API_URL: http://experiment-api:8000
       PYTHONPATH: /workspace/services/orchestration:/workspace
       DB_HOST: postgres
       CTP_SERVICE_URL: http://ctp-service:8001
