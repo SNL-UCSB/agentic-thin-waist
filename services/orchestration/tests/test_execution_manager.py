@@ -84,7 +84,9 @@ def test_execution_manager_real_stack_generates_pcap(monkeypatch):
     # Preconditions: substrate-worker (:8002) and experiment-api must be reachable.
     # Default matches DownstreamClients / docker internal port 8000; override with
     # EXPERIMENT_API_URL (e.g. http://localhost:18000) if your compose maps a host port.
-    experiment_api_url = os.getenv("EXPERIMENT_API_URL", "http://localhost:8000").rstrip("/")
+    experiment_api_url = os.getenv(
+        "EXPERIMENT_API_URL", "http://localhost:8000"
+    ).rstrip("/")
     assert requests.get("http://localhost:8002/health", timeout=5).status_code == 200
     assert requests.get(f"{experiment_api_url}/health", timeout=5).status_code == 200
 
@@ -121,5 +123,7 @@ def test_execution_manager_real_stack_generates_pcap(monkeypatch):
         expected = Path(pcap_path)
     else:
         repo_root = Path(__file__).resolve().parents[3]
-        expected = repo_root / "netreplica" / "config" / "captures" / f"{experiment_id}.pcap"
+        expected = (
+            repo_root / "netreplica" / "config" / "captures" / f"{experiment_id}.pcap"
+        )
     assert expected.exists(), f"expected pcap at {expected}"
