@@ -11,16 +11,18 @@ services:
       - "8000:8000"
     environment:
       - DEPLOYMENT_MODE=cloud
+      - NETGENT_USE_LOCAL=${NETGENT_USE_LOCAL:-true}
+      - NETGENT_NAMESPACE=${NETGENT_NAMESPACE:-ns1}
       - LOG_LEVEL=info
       - CORS_ORIGINS=*
     # Deploy on cloud infrastructure
     deploy:
       resources:
         limits:
-          cpus: '2'
+          cpus: "2"
           memory: 2G
         reservations:
-          cpus: '1'
+          cpus: "1"
           memory: 1G
 
   ctp-service:
@@ -33,10 +35,10 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '1'
+          cpus: "1"
           memory: 1G
         reservations:
-          cpus: '0.5'
+          cpus: "0.5"
           memory: 512M
 
   substrate-worker:
@@ -51,10 +53,10 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '4'
+          cpus: "4"
           memory: 4G
         reservations:
-          cpus: '2'
+          cpus: "2"
           memory: 2G
 
   netgent-service:
@@ -67,10 +69,10 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '2'
+          cpus: "2"
           memory: 2G
         reservations:
-          cpus: '1'
+          cpus: "1"
           memory: 1G
 
   telemetry-service:
@@ -87,10 +89,10 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '2'
+          cpus: "2"
           memory: 2G
         reservations:
-          cpus: '1'
+          cpus: "1"
           memory: 1G
 
   orchestration:
@@ -105,10 +107,10 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '2'
+          cpus: "2"
           memory: 2G
         reservations:
-          cpus: '1'
+          cpus: "1"
           memory: 1G
 
 # Cloud volume configurations (for persistent data)

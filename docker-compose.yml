@@ -175,6 +175,8 @@ services:
     environment:
       - FLASK_ENV=development
       - NETGENT_RELOAD=true
+      - NETGENT_USE_LOCAL=${NETGENT_USE_LOCAL:-true}
+      - NETGENT_NAMESPACE=${NETGENT_NAMESPACE:-ns1}
       - SUBSTRATE_WORKER_URL=http://substrate-worker:8002
       - TELEMETRY_SERVICE_URL=http://telemetry-service:8004
       - BROWSERLESS_WS_ENDPOINT=${BROWSERLESS_WS_ENDPOINT:-ws://browserless:3000/chromium/playwright}
@@ -203,6 +205,11 @@ services:
       - agentic-network
     volumes:
       - ./services/netgent-service:/app
+    pid: "service:substrate-worker"
+    privileged: true
+    cap_add:
+      - NET_ADMIN
+      - SYS_ADMIN
     healthcheck:
       test:
         [
@@ -228,6 +235,8 @@ services:
       - DB_PORT=${DB_PORT}
       - DB_USER=${DB_USER}
       - DB_PASSWORD=${DB_PASSWORD}
+      - NETGENT_USE_LOCAL=${NETGENT_USE_LOCAL:-true}
+      - NETGENT_NAMESPACE=${NETGENT_NAMESPACE:-ns1}
       - NETGENT_QUEUE_CONCURRENCY=${NETGENT_QUEUE_CONCURRENCY:-1}
     depends_on:
       netgent-service:
@@ -238,6 +247,11 @@ services:
       - agentic-network
     volumes:
       - ./services/netgent-service:/app
+    pid: "service:substrate-worker"
+    privileged: true
+    cap_add:
+      - NET_ADMIN
+      - SYS_ADMIN
 
   # D3: Telemetry Service - Telemetry and Results
   telemetry-service:
