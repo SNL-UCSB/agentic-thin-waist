@@ -27,7 +27,9 @@ def _wait_for_health(url: str, timeout_seconds: float = 60.0) -> None:
             response = requests.get(url, timeout=5)
             if response.status_code == 200:
                 return
-            last_error = f"unexpected status={response.status_code} body={response.text[:200]}"
+            last_error = (
+                f"unexpected status={response.status_code} body={response.text[:200]}"
+            )
         except requests.RequestException as exc:
             last_error = str(exc)
         time.sleep(1)
@@ -134,7 +136,9 @@ def test_orchestration_result_roundtrip_persists_in_telemetry_db(
     assert post_response["status"] == "stored"
     result_id = post_response["result_id"]
 
-    query_response = clients.query_results({"experiment_id": experiment_id, "limit": 10})
+    query_response = clients.query_results(
+        {"experiment_id": experiment_id, "limit": 10}
+    )
     assert "warning" not in query_response
     assert query_response["returned"] >= 1
 
@@ -168,8 +172,9 @@ def test_orchestration_result_roundtrip_persists_in_telemetry_db(
     )
     assert row["pcap_path"] == capture_status["pcap_path"]
     assert row["qoe_metrics"]["status"] == netgent_result["status"]
-    assert row["qoe_metrics"]["video_startup_time_ms"] == netgent_result[
-        "video_startup_time_ms"
-    ]
+    assert (
+        row["qoe_metrics"]["video_startup_time_ms"]
+        == netgent_result["video_startup_time_ms"]
+    )
     assert row["contextual_tree"]["orchestration_id"] == orchestration_id
     assert row["contextual_tree"]["c_app"]["application"] == spec["application"]
