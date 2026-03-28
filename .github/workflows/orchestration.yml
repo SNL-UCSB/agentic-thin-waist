@@ -11,19 +11,16 @@ on:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: services/orchestration
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Copy shared module into build context
-        run: cp -r ../../shared ./shared
+      - name: Create repo .env from example
+        run: cp .env.example .env
 
       - name: Build Docker image
-        run: docker build -t orchestration .
+        run: docker build -f services/orchestration/Dockerfile -t orchestration .
 
       - name: Run tests
         run: |

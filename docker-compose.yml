@@ -319,8 +319,8 @@ services:
   # D5: Orchestration Service - Claude + OpenClaw
   orchestration:
     build:
-      context: ./services/orchestration
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./services/orchestration/Dockerfile
     container_name: orchestration
     ports:
       - "8005:8005"
