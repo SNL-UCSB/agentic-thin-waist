@@ -1,9 +1,8 @@
-from netgent.client.ping import (
+from .client import PingClient, PingReply, PingResult, PingStatistics
+from .exception import (
     PingBinaryNotFoundError,
-    PingClient,
     PingError,
     PingProcessError,
-    PingResult,
 )
 
 __all__ = [
@@ -11,5 +10,7 @@ __all__ = [
     "PingClient",
     "PingError",
     "PingProcessError",
+    "PingReply",
     "PingResult",
+    "PingStatistics",
 ]

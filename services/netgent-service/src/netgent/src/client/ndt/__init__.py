@@ -1,10 +1,10 @@
-from netgent.client.ndt.client import (
+from .client import (
     NDT7Client,
     NDT7Event,
     NDT7Result,
     NDT7TestName,
 )
-from netgent.client.ndt.exception import (
+from .exception import (
     NDT7BinaryNotFoundError,
     NDT7Error,
     NDT7ProcessError,

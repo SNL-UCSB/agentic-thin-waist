@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from netgent.client.iperf.client import IPerf3Result
+    from .client import IPerf3Result
 
 
 class IPerf3Error(RuntimeError):

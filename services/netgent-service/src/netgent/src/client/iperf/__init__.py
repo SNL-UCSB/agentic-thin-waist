@@ -1,9 +1,8 @@
-from netgent.client.iperf import (
+from .client import IPerf3Client, IPerf3Result
+from .exception import (
     IPerf3BinaryNotFoundError,
-    IPerf3Client,
     IPerf3Error,
     IPerf3ProcessError,
-    IPerf3Result,
 )
 
 __all__ = [

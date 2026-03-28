@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import json
-import shutil
 import subprocess
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from netgent.client.ndt.exception import (
+from ..execution import build_execution_command, require_execution_binary
+from .exception import (
     NDT7BinaryNotFoundError,
     NDT7Error,
     NDT7ProcessError,
@@ -136,10 +136,12 @@ class NDT7Client(BaseModel):
         return self.run(download=False, upload=True, **kwargs)
 
     def _require_binary(self) -> None:
-        if shutil.which(self.binary) is None:
-            raise NDT7BinaryNotFoundError(
-                f"Unable to find ndt7 client binary '{self.binary}' on PATH"
-            )
+        try:
+            require_execution_binary(self.binary)
+        except FileNotFoundError as exc:
+            raise NDT7BinaryNotFoundError(str(exc)) from exc
+        except RuntimeError as exc:
+            raise NDT7Error(str(exc)) from exc
 
     def _build_command(
         self,
@@ -153,25 +155,25 @@ class NDT7Client(BaseModel):
         no_verify: bool,
         client_name: str | None,
     ) -> list[str]:
-        command = [self.binary, "-format", "json", "-timeout", timeout]
+        args = ["-format", "json", "-timeout", timeout]
 
         if not download:
-            command.extend(["-download=false"])
+            args.extend(["-download=false"])
         if not upload:
-            command.extend(["-upload=false"])
+            args.extend(["-upload=false"])
         if server:
-            command.extend(["-server", server])
+            args.extend(["-server", server])
         if service_url:
-            command.extend(["-service-url", service_url])
+            args.extend(["-service-url", service_url])
         if scheme:
-            command.extend(["-scheme", scheme])
+            args.extend(["-scheme", scheme])
         if no_verify:
-            command.append("-no-verify")
+            args.append("-no-verify")
         if client_name:
-            command.extend(["-client-name", client_name])
+            args.extend(["-client-name", client_name])
 
-        command.extend(self.extra_args)
-        return command
+        args.extend(self.extra_args)
+        return build_execution_command(binary=self.binary, args=args)
 
     def _parse_result(
         self,

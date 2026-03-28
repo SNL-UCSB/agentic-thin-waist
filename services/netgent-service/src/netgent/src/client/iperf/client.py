@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import json
-import shutil
 import subprocess
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from netgent.client.iperf.exception import (
+from ..execution import build_execution_command, require_execution_binary
+from .exception import (
     IPerf3BinaryNotFoundError,
     IPerf3Error,
     IPerf3ProcessError,
@@ -147,10 +147,12 @@ class IPerf3Client(BaseModel):
         return result
 
     def _require_binary(self) -> None:
-        if shutil.which(self.binary) is None:
-            raise IPerf3BinaryNotFoundError(
-                f"Unable to find iperf3 binary '{self.binary}' on PATH"
-            )
+        try:
+            require_execution_binary(self.binary)
+        except FileNotFoundError as exc:
+            raise IPerf3BinaryNotFoundError(str(exc)) from exc
+        except RuntimeError as exc:
+            raise IPerf3Error(str(exc)) from exc
 
     def _build_command(
         self,
@@ -165,8 +167,7 @@ class IPerf3Client(BaseModel):
         bitrate: str | None,
         parallel: int | None,
     ) -> list[str]:
-        command = [
-            self.binary,
+        args = [
             "-J",
             "-c",
             host,
@@ -177,20 +178,20 @@ class IPerf3Client(BaseModel):
         ]
 
         if interval_seconds is not None:
-            command.extend(["-i", str(interval_seconds)])
+            args.extend(["-i", str(interval_seconds)])
         if omit_seconds is not None:
-            command.extend(["-O", str(omit_seconds)])
+            args.extend(["-O", str(omit_seconds)])
         if udp:
-            command.append("-u")
+            args.append("-u")
         if reverse:
-            command.append("-R")
+            args.append("-R")
         if bitrate:
-            command.extend(["-b", bitrate])
+            args.extend(["-b", bitrate])
         if parallel is not None:
-            command.extend(["-P", str(parallel)])
+            args.extend(["-P", str(parallel)])
 
-        command.extend(self.extra_args)
-        return command
+        args.extend(self.extra_args)
+        return build_execution_command(binary=self.binary, args=args)
 
     def _parse_result(
         self,

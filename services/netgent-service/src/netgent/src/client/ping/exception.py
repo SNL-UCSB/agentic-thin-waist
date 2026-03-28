@@ -3,19 +3,19 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from netgent.client.ndt.client import NDT7Result
+    from .client import PingResult
 
 
-class NDT7Error(RuntimeError):
-    """Base exception for ndt7 client failures."""
+class PingError(RuntimeError):
+    """Base exception for ping client failures."""
 
 
-class NDT7BinaryNotFoundError(NDT7Error):
-    """Raised when the ndt7 client binary cannot be found."""
+class PingBinaryNotFoundError(PingError):
+    """Raised when the ping binary cannot be found."""
 
 
-class NDT7ProcessError(NDT7Error):
-    """Raised when the ndt7 client exits with a non-zero status."""
+class PingProcessError(PingError):
+    """Raised when ping exits with a non-zero status."""
 
     def __init__(
         self,
@@ -25,7 +25,7 @@ class NDT7ProcessError(NDT7Error):
         returncode: int,
         stdout: str,
         stderr: str,
-        result: "NDT7Result | None" = None,
+        result: "PingResult | None" = None,
     ) -> None:
         super().__init__(message)
         self.command = command

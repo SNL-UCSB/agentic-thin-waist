@@ -1,17 +1,17 @@
 from __future__ import annotations
 
 import re
-import shutil
 import subprocess
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from netgent.client.ping.exception import (
+from ..execution import build_execution_command, require_execution_binary
+from .exception import (
     PingBinaryNotFoundError,
+    PingError,
     PingProcessError,
 )
-
 
 # Regexes to Parse Ping Output
 PING_HEADER_RE = re.compile(r"^PING\s+(?P<host>\S+)\s+\((?P<ip>[^)]+)\)")
@@ -138,10 +138,12 @@ class PingClient(BaseModel):
         return result
 
     def _require_binary(self) -> None:
-        if shutil.which(self.binary) is None:
-            raise PingBinaryNotFoundError(
-                f"Unable to find ping binary '{self.binary}' on PATH"
-            )
+        try:
+            require_execution_binary(self.binary)
+        except FileNotFoundError as exc:
+            raise PingBinaryNotFoundError(str(exc)) from exc
+        except RuntimeError as exc:
+            raise PingError(str(exc)) from exc
 
     def _build_command(
         self,
@@ -152,16 +154,16 @@ class PingClient(BaseModel):
         timeout_seconds: int | None,
         packet_size: int | None,
     ) -> list[str]:
-        command = [self.binary, "-c", str(count)]
+        args = ["-c", str(count)]
         if interval_seconds is not None:
-            command.extend(["-i", str(interval_seconds)])
+            args.extend(["-i", str(interval_seconds)])
         if timeout_seconds is not None:
-            command.extend(["-W", str(timeout_seconds)])
+            args.extend(["-W", str(timeout_seconds)])
         if packet_size is not None:
-            command.extend(["-s", str(packet_size)])
-        command.extend(self.extra_args)
-        command.append(host)
-        return command
+            args.extend(["-s", str(packet_size)])
+        args.extend(self.extra_args)
+        args.append(host)
+        return build_execution_command(binary=self.binary, args=args)
 
     def _parse_result(
         self,
