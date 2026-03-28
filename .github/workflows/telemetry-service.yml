@@ -19,6 +19,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Create repo .env from example
+        run: cp .env.example .env
+
       - name: Build Docker image
         run: docker build -f services/telemetry-service/Dockerfile -t telemetry-service .
 
