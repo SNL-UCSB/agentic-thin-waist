@@ -5,6 +5,7 @@ NS1="ns1"
 NS2="ns2"
 NUM_QUEUE=4
 BR="netrepBr"
+RUNTIME_DIR="/var/run/substrate"
 
 # Enable forwarding
 sysctl -w net.ipv4.ip_forward=1
@@ -21,6 +22,7 @@ ip link set veth2 up
 
 ip link set veth1 netns $NS1
 ip netns exec $NS1 ip addr add 172.16.1.1/30 dev veth1
+ip netns exec $NS1 ip link set lo up
 ip netns exec $NS1 ip link set veth1 up
 ip netns exec $NS1 ip route add default via 172.16.1.2
 
@@ -46,6 +48,7 @@ ip link set veth5 netns $NS2
 
 ip netns exec $NS2 ip addr add 172.16.2.1/30 dev veth3
 ip netns exec $NS2 ip addr add 172.16.3.1/30 dev veth5
+ip netns exec $NS2 ip link set lo up
 ip netns exec $NS2 ip link set veth3 up
 ip netns exec $NS2 ip link set veth5 up
 ip netns exec $NS2 ip route add default via 172.16.3.2
@@ -72,6 +75,18 @@ ip link add $BR type bridge
 ip link set dev veth2 master $BR
 ip link set dev veth4 master $BR
 ip link set dev $BR up
+
+########################
+# Namespace anchors    #
+########################
+
+mkdir -p "$RUNTIME_DIR"
+
+ip netns exec $NS1 sleep infinity &
+echo $! > "$RUNTIME_DIR/${NS1}.pid"
+
+ip netns exec $NS2 sleep infinity &
+echo $! > "$RUNTIME_DIR/${NS2}.pid"
 
 echo
 echo "======================================"

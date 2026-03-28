@@ -1,7 +1,9 @@
 import asyncio
+import json
 import os
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from browser_use import Agent, Browser, ChatGoogle, Controller
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -47,10 +49,49 @@ class BrowserContext(BaseModel):
     playwright: Playwright
 
 
-async def execute_task(state: BrowserState, runtime: Runtime[BrowserContext]):
-    browser = await runtime.context.playwright.chromium.launch(
-        headless=DEFAULT_HEADLESS
+def _browserless_ws_endpoint() -> str | None:
+    endpoint = os.getenv("BROWSERLESS_WS_ENDPOINT", "").strip()
+    if not endpoint:
+        return None
+
+    remote_debugging_address = os.getenv(
+        "BROWSERLESS_REMOTE_DEBUGGING_ADDRESS", ""
+    ).strip()
+    if not remote_debugging_address:
+        return endpoint
+
+    split = urlsplit(endpoint)
+    query = dict(parse_qsl(split.query, keep_blank_values=True))
+    launch = {}
+
+    if query.get("launch"):
+        try:
+            launch = json.loads(query["launch"])
+        except json.JSONDecodeError:
+            launch = {}
+
+    args = list(launch.get("args", []))
+    debug_arg = f"--remote-debugging-address={remote_debugging_address}"
+    if debug_arg not in args:
+        args.append(debug_arg)
+
+    launch["args"] = args
+    query["launch"] = json.dumps(launch, separators=(",", ":"))
+
+    return urlunsplit(
+        (split.scheme, split.netloc, split.path, urlencode(query), split.fragment)
     )
+
+
+async def _open_browser(playwright: Playwright):
+    ws_endpoint = _browserless_ws_endpoint()
+    if ws_endpoint:
+        return await playwright.chromium.connect(ws_endpoint)
+    return await playwright.chromium.launch(headless=DEFAULT_HEADLESS)
+
+
+async def execute_task(state: BrowserState, runtime: Runtime[BrowserContext]):
+    browser = await _open_browser(runtime.context.playwright)
     try:
         browser_context = await browser.new_context()
         page = await browser_context.new_page()

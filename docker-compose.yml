@@ -57,22 +57,33 @@ services:
         mc mb --ignore-existing local/$${NETGENT_S3_BUCKET_NAME:-netgent}
       "
 
-  browserless:
-    image: ghcr.io/browserless/chromium:latest
-    container_name: browserless
+  browserless-substrate-worker:
+    build:
+      context: .
+      dockerfile: ./services/browserless-substrate-worker/Dockerfile
+    container_name: browserless-substrate-worker
     restart: unless-stopped
-    ports:
-      - "${BROWSERLESS_PORT:-3000}:3000"
     environment:
       CONCURRENT: ${MAX_CONCURRENT_SESSIONS:-5}
       QUEUED: ${QUEUE_LENGTH:-10}
       PROXY: ${BROWSERLESS_PROXY:-}
       TIMEOUT: ${BROWSERLESS_TIMEOUT_MS:-300000}
-    networks:
-      - agentic-network
+      HOST: 0.0.0.0
+      PORT: 3000
+      SUBSTRATE_BROWSER_NAMESPACE: ${NETGENT_NAMESPACE:-ns1}
+    depends_on:
+      substrate-worker:
+        condition: service_healthy
+    network_mode: "service:substrate-worker"
+    pid: "service:substrate-worker"
+    privileged: true
+    cap_add:
+      - NET_ADMIN
+      - SYS_ADMIN
+    volumes:
+      - substrate-runtime:/var/run/substrate:ro
     healthcheck:
-      test:
-        ["CMD-SHELL", "wget -qO- http://localhost:3000/json/version || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/pressure || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -141,6 +152,7 @@ services:
     container_name: substrate-worker
     ports:
       - "8002:8002"
+      - "${BROWSERLESS_PORT:-3000}:3000"
     environment:
       - FLASK_ENV=development
       - TELEMETRY_SERVICE_URL=http://telemetry-service:8004
@@ -153,6 +165,7 @@ services:
     volumes:
       - ./services/substrate-worker:/app
       - /var/run/docker.sock:/var/run/docker.sock
+      - substrate-runtime:/var/run/substrate
     # Substrate worker requires privileged mode to use tc (traffic control)
     privileged: true
     cap_add:
@@ -184,7 +197,8 @@ services:
       - LANGSMITH_PROJECT=${LANGSMITH_PROJECT:-}
       - SUBSTRATE_WORKER_URL=http://substrate-worker:8002
       - TELEMETRY_SERVICE_URL=http://telemetry-service:8004
-      - BROWSERLESS_WS_ENDPOINT=${BROWSERLESS_WS_ENDPOINT:-ws://browserless:3000/chromium/playwright}
+      - BROWSERLESS_WS_ENDPOINT=${BROWSERLESS_WS_ENDPOINT:-ws://substrate-worker:3000/chromium/playwright}
+      - BROWSERLESS_REMOTE_DEBUGGING_ADDRESS=172.16.1.1
       - DB_HOST=${DB_HOST}
       - DB_NAME=${DB_NAME}
       - DB_PORT=${DB_PORT}
@@ -198,7 +212,7 @@ services:
       - S3_CONNECTION_TIMEOUT_SECONDS=${S3_CONNECTION_TIMEOUT_SECONDS}
       - NETGENT_QUEUE_CONCURRENCY=${NETGENT_QUEUE_CONCURRENCY:-1}
     depends_on:
-      browserless:
+      browserless-substrate-worker:
         condition: service_healthy
       postgres:
         condition: service_healthy
@@ -242,6 +256,8 @@ services:
       - DB_PASSWORD=${DB_PASSWORD}
       - NETGENT_USE_LOCAL=${NETGENT_USE_LOCAL:-true}
       - NETGENT_NAMESPACE=${NETGENT_NAMESPACE:-ns1}
+      - BROWSERLESS_WS_ENDPOINT=${BROWSERLESS_WS_ENDPOINT:-ws://substrate-worker:3000/chromium/playwright}
+      - BROWSERLESS_REMOTE_DEBUGGING_ADDRESS=172.16.1.1
       - NETGENT_QUEUE_CONCURRENCY=${NETGENT_QUEUE_CONCURRENCY:-1}
     depends_on:
       netgent-service:
@@ -341,3 +357,4 @@ networks:
 volumes:
   minio-data:
   postgres-data:
+  substrate-runtime:
