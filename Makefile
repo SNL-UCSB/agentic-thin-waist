@@ -22,7 +22,7 @@ install:
 	done
 
 build:
-	docker-compose build
+	docker compose --profile build build python-base experiment-api ctp-service substrate-worker netgent-service telemetry-service orchestration
 
 up:
 	docker-compose up -d

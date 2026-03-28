@@ -1,4 +1,12 @@
 services:
+  python-base:
+    profiles:
+      - build
+    image: ${PYTHON_BASE_IMAGE:-agentic-thin-waist-python-base:latest}
+    build:
+      context: .
+      dockerfile: ./Dockerfile.base
+
   # Aux services
   postgres:
     image: postgres:15
@@ -79,9 +87,12 @@ services:
 
   # D1: Experiment API - Orchestration Layer
   experiment-api:
+    image: agentic-thin-waist-experiment-api:latest
     build:
       context: .
       dockerfile: ./services/experiment-api/Dockerfile
+      args:
+        PYTHON_BASE_IMAGE: ${PYTHON_BASE_IMAGE:-agentic-thin-waist-python-base:latest}
     container_name: experiment-api
     ports:
       - "8000:8000"
@@ -114,9 +125,12 @@ services:
 
   # D1: CTP Service - Network Representation
   ctp-service:
+    image: agentic-thin-waist-ctp-service:latest
     build:
       context: .
       dockerfile: ./services/ctp-service/Dockerfile
+      args:
+        PYTHON_BASE_IMAGE: ${PYTHON_BASE_IMAGE:-agentic-thin-waist-python-base:latest}
     container_name: ctp-service
     ports:
       - "8001:8001"
@@ -134,9 +148,12 @@ services:
 
   # D1: Substrate Worker - Network Execution
   substrate-worker:
+    image: agentic-thin-waist-substrate-worker:latest
     build:
       context: .
       dockerfile: ./services/substrate-worker/Dockerfile
+      args:
+        PYTHON_BASE_IMAGE: ${PYTHON_BASE_IMAGE:-agentic-thin-waist-python-base:latest}
     container_name: substrate-worker
     ports:
       - "8002:8002"
@@ -240,9 +257,12 @@ services:
 
   # D3: Telemetry Service - Telemetry and Results
   telemetry-service:
+    image: agentic-thin-waist-telemetry-service:latest
     build:
       context: .
       dockerfile: ./services/telemetry-service/Dockerfile
+      args:
+        PYTHON_BASE_IMAGE: ${PYTHON_BASE_IMAGE:-agentic-thin-waist-python-base:latest}
     container_name: telemetry-service
     ports:
       - "8004:8004"
@@ -282,9 +302,12 @@ services:
 
   # D5: Orchestration Service - Claude + OpenClaw
   orchestration:
+    image: agentic-thin-waist-orchestration:latest
     build:
-      context: ./services/orchestration
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./services/orchestration/Dockerfile
+      args:
+        PYTHON_BASE_IMAGE: ${PYTHON_BASE_IMAGE:-agentic-thin-waist-python-base:latest}
     container_name: orchestration
     ports:
       - "8005:8005"

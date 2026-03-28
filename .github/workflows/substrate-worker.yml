@@ -5,6 +5,8 @@ on:
   pull_request:
     branches: [main]
     paths:
+      - 'Dockerfile.base'
+      - 'requirements.txt'
       - 'services/substrate-worker/**'
       - 'shared/**'
 
@@ -19,14 +21,17 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Build shared Python base image
+        run: docker build -f Dockerfile.base -t agentic-thin-waist-python-base:latest .
+
       - name: Build Docker image
-        run: docker build -f services/substrate-worker/Dockerfile -t substrate-worker .
+        run: docker build -f services/substrate-worker/Dockerfile -t agentic-thin-waist-substrate-worker:latest .
 
       - name: Run tests
         run: |
           docker run --rm \
             -v ${{ github.workspace }}/services/substrate-worker/tests:/app/tests \
-            substrate-worker \
+            agentic-thin-waist-substrate-worker:latest \
             python -m pytest tests/ -v --tb=short
 
       - name: Start service via Docker Compose

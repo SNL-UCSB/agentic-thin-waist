@@ -1,12 +1,16 @@
-FROM python:3.10-alpine
+ARG PYTHON_BASE_IMAGE=agentic-thin-waist-python-base:latest
+FROM ${PYTHON_BASE_IMAGE}
 
 WORKDIR /app
 
 # Install packages
-RUN apk add --no-cache make
-# Copy requirements
-COPY services/telemetry-service/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends make \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY services/telemetry-service/requirements.txt /tmp/service-requirements.txt
+RUN pip install -r /tmp/service-requirements.txt \
+    && rm -f /tmp/service-requirements.txt
 
 # Copy application code
 COPY services/telemetry-service/ .

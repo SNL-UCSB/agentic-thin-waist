@@ -5,6 +5,8 @@ on:
   pull_request:
     branches: [main]
     paths:
+      - 'Dockerfile.base'
+      - 'requirements.txt'
       - 'services/telemetry-service/**'
       - 'shared/**'
 
@@ -19,14 +21,17 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Build shared Python base image
+        run: docker build -f Dockerfile.base -t agentic-thin-waist-python-base:latest .
+
       - name: Build Docker image
-        run: docker build -f services/telemetry-service/Dockerfile -t telemetry-service .
+        run: docker build -f services/telemetry-service/Dockerfile -t agentic-thin-waist-telemetry-service:latest .
 
       - name: Run tests
         run: |
           docker run --rm \
             -v ${{ github.workspace }}/services/telemetry-service/tests:/app/tests \
-            telemetry-service \
+            agentic-thin-waist-telemetry-service:latest \
             python -m pytest tests/ -v --tb=short
 
       - name: Start service via Docker Compose
