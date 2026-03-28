@@ -3,22 +3,18 @@ from __future__ import annotations
 import subprocess
 
 import pytest
-from pydantic import BaseModel
-
-from netgent.client.ping import (
+from client.ping import (
     PingBinaryNotFoundError,
     PingClient,
     PingProcessError,
 )
+from pydantic import BaseModel
 
 
 def test_ping_client_builds_expected_command(mocker):
-    mocker.patch(
-        "netgent.client.ping.client.shutil.which",
-        return_value="/usr/bin/ping",
-    )
+    mocker.patch("client.ping.client.require_execution_binary")
     mock_run = mocker.patch(
-        "netgent.client.ping.client.subprocess.run",
+        "client.ping.client.subprocess.run",
         return_value=subprocess.CompletedProcess(
             args=[],
             returncode=0,
@@ -47,12 +43,9 @@ def test_ping_client_builds_expected_command(mocker):
 
 
 def test_ping_client_parses_output(mocker):
+    mocker.patch("client.ping.client.require_execution_binary")
     mocker.patch(
-        "netgent.client.ping.client.shutil.which",
-        return_value="/usr/bin/ping",
-    )
-    mocker.patch(
-        "netgent.client.ping.client.subprocess.run",
+        "client.ping.client.subprocess.run",
         return_value=subprocess.CompletedProcess(
             args=[],
             returncode=0,
@@ -86,12 +79,9 @@ def test_ping_client_raises_when_binary_is_missing():
 
 
 def test_ping_client_raises_with_partial_result_on_failure(mocker):
+    mocker.patch("client.ping.client.require_execution_binary")
     mocker.patch(
-        "netgent.client.ping.client.shutil.which",
-        return_value="/usr/bin/ping",
-    )
-    mocker.patch(
-        "netgent.client.ping.client.subprocess.run",
+        "client.ping.client.subprocess.run",
         return_value=subprocess.CompletedProcess(
             args=[],
             returncode=1,
@@ -111,3 +101,57 @@ def test_ping_client_raises_with_partial_result_on_failure(mocker):
     assert error.result is not None
     assert error.result.packet_loss_percent == 100.0
     assert error.returncode == 1
+
+
+def test_ping_client_prefixes_command_with_namespace_when_local_disabled(mocker):
+    mocker.patch("client.ping.client.require_execution_binary")
+    mocker.patch(
+        "client.ping.client.build_execution_command",
+        return_value=[
+            "nsenter",
+            "-t",
+            "1",
+            "-m",
+            "--",
+            "ip",
+            "netns",
+            "exec",
+            "ns1",
+            "ping",
+            "-c",
+            "2",
+            "1.1.1.1",
+        ],
+    )
+    mock_run = mocker.patch(
+        "client.ping.client.subprocess.run",
+        return_value=subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout="",
+            stderr="",
+        ),
+    )
+
+    PingClient().run("1.1.1.1", count=2)
+
+    mock_run.assert_called_once_with(
+        [
+            "nsenter",
+            "-t",
+            "1",
+            "-m",
+            "--",
+            "ip",
+            "netns",
+            "exec",
+            "ns1",
+            "ping",
+            "-c",
+            "2",
+            "1.1.1.1",
+        ],
+        capture_output=True,
+        check=False,
+        text=True,
+    )

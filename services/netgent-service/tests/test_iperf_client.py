@@ -4,22 +4,18 @@ import json
 import subprocess
 
 import pytest
-from pydantic import BaseModel
-
-from netgent.client.iperf import (
+from client.iperf import (
     IPerf3BinaryNotFoundError,
     IPerf3Client,
     IPerf3ProcessError,
 )
+from pydantic import BaseModel
 
 
 def test_iperf3_client_builds_expected_command(mocker):
-    mocker.patch(
-        "netgent.client.iperf.client.shutil.which",
-        return_value="/usr/bin/iperf3",
-    )
+    mocker.patch("client.iperf.client.require_execution_binary")
     mock_run = mocker.patch(
-        "netgent.client.iperf.client.subprocess.run",
+        "client.iperf.client.subprocess.run",
         return_value=subprocess.CompletedProcess(
             args=[],
             returncode=0,
@@ -72,12 +68,9 @@ def test_iperf3_client_builds_expected_command(mocker):
 
 
 def test_iperf3_client_parses_json_output(mocker):
+    mocker.patch("client.iperf.client.require_execution_binary")
     mocker.patch(
-        "netgent.client.iperf.client.shutil.which",
-        return_value="/usr/bin/iperf3",
-    )
-    mocker.patch(
-        "netgent.client.iperf.client.subprocess.run",
+        "client.iperf.client.subprocess.run",
         return_value=subprocess.CompletedProcess(
             args=[],
             returncode=0,
@@ -115,12 +108,9 @@ def test_iperf3_client_raises_when_binary_is_missing():
 
 
 def test_iperf3_client_raises_with_partial_result_on_failure(mocker):
+    mocker.patch("client.iperf.client.require_execution_binary")
     mocker.patch(
-        "netgent.client.iperf.client.shutil.which",
-        return_value="/usr/bin/iperf3",
-    )
-    mocker.patch(
-        "netgent.client.iperf.client.subprocess.run",
+        "client.iperf.client.subprocess.run",
         return_value=subprocess.CompletedProcess(
             args=[],
             returncode=1,
@@ -136,3 +126,65 @@ def test_iperf3_client_raises_with_partial_result_on_failure(mocker):
     assert error.result is not None
     assert error.result.error == "unable to connect to server"
     assert error.returncode == 1
+
+
+def test_iperf3_client_prefixes_command_with_namespace_when_local_disabled(mocker):
+    mocker.patch("client.iperf.client.require_execution_binary")
+    mocker.patch(
+        "client.iperf.client.build_execution_command",
+        return_value=[
+            "nsenter",
+            "-t",
+            "1",
+            "-m",
+            "--",
+            "ip",
+            "netns",
+            "exec",
+            "ns1",
+            "iperf3",
+            "-J",
+            "-c",
+            "iperf.example.net",
+            "-p",
+            "5201",
+            "-t",
+            "10",
+        ],
+    )
+    mock_run = mocker.patch(
+        "client.iperf.client.subprocess.run",
+        return_value=subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout="{}",
+            stderr="",
+        ),
+    )
+
+    IPerf3Client().run("iperf.example.net")
+
+    mock_run.assert_called_once_with(
+        [
+            "nsenter",
+            "-t",
+            "1",
+            "-m",
+            "--",
+            "ip",
+            "netns",
+            "exec",
+            "ns1",
+            "iperf3",
+            "-J",
+            "-c",
+            "iperf.example.net",
+            "-p",
+            "5201",
+            "-t",
+            "10",
+        ],
+        capture_output=True,
+        check=False,
+        text=True,
+    )

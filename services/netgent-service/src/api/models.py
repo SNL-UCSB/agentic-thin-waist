@@ -18,17 +18,17 @@ class WorkflowSpecification(Base):
     __tablename__ = "workflow_specifications"
 
     id = sa.Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
-    application_id = sa.Column(
-        UUID(as_uuid=True),
-        sa.ForeignKey("available_workflows.id"),
-        nullable=False,
-        index=True,
-    )
     workflow = sa.Column(
         sa.JSON,
         nullable=False,
         default=dict,
         server_default=sa.text("'{}'::json"),
+    )
+    type = sa.Column(
+        sa.String(16),
+        nullable=False,
+        default="shell",
+        server_default=sa.text("'shell'"),
     )
     specification = sa.Column(sa.Text, nullable=False)
     created_at = sa.Column(
@@ -43,10 +43,6 @@ class WorkflowSpecification(Base):
         onupdate=lambda: datetime.now(timezone.utc),
     )
 
-    application = relationship(
-        "AvailableWorkflows",
-        back_populates="workflow_specifications",
-    )
     workflow_runs = relationship(
         "WorkflowJob",
         back_populates="workflow_specification",
@@ -60,12 +56,6 @@ class WorkflowJob(Base):
     __tablename__ = "workflow_runs"
 
     id = sa.Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
-    application_id = sa.Column(
-        UUID(as_uuid=True),
-        sa.ForeignKey("available_workflows.id"),
-        nullable=False,
-        index=True,
-    )
     workflow_id = sa.Column(
         UUID(as_uuid=True),
         sa.ForeignKey("workflow_specifications.id"),
@@ -74,12 +64,6 @@ class WorkflowJob(Base):
     )
     status = sa.Column(sa.String(32), nullable=False, index=True)
     metadata_ = sa.Column("metadata", JSONB, nullable=False, default=dict)
-    parameters = sa.Column(
-        sa.JSON,
-        nullable=False,
-        default=dict,
-        server_default=sa.text("'{}'::json"),
-    )
     created_at = sa.Column(
         sa.DateTime(timezone=True),
         nullable=False,
@@ -97,7 +81,6 @@ class WorkflowJob(Base):
         back_populates="workflow_runs",
     )
     artifacts = relationship("WorkflowArtifact", back_populates="workflow")
-    application = relationship("AvailableWorkflows", back_populates="workflow_runs")
 
 
 class WorkflowArtifact(Base):
@@ -125,19 +108,3 @@ class WorkflowArtifact(Base):
     )
 
     workflow = relationship("WorkflowJob", back_populates="artifacts")
-
-
-class AvailableWorkflows(Base):
-    __tablename__ = "available_workflows"
-
-    id = sa.Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
-    name = sa.Column(sa.String(128), nullable=False, unique=True, index=True)
-    notes = sa.Column(sa.Text, nullable=False)
-    prompt = sa.Column(sa.Text, nullable=False)
-
-    workflow_specifications = relationship(
-        "WorkflowSpecification",
-        back_populates="application",
-        cascade="all, delete-orphan",
-    )
-    workflow_runs = relationship("WorkflowJob", back_populates="application")

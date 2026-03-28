@@ -3,7 +3,6 @@
 from .init import (
     build_psycopg_conninfo,
     build_s3_client,
-    create_availability_workflow,
     create_engine,
     create_session_factory,
     init_db,
@@ -11,12 +10,16 @@ from .init import (
     init_s3_bucket,
 )
 from .job import create_job, get_job, update_job_status
-from .workflow import create_workflow, get_workflow, update_workflow
+from .workflow import (
+    create_workflow,
+    get_workflow,
+    list_workflow_summaries,
+    update_workflow,
+)
 
 __all__ = [
     "build_psycopg_conninfo",
     "create_job",
-    "create_availability_workflow",
     "create_engine",
     "create_session_factory",
     "create_workflow",
@@ -26,6 +29,7 @@ __all__ = [
     "init_queue",
     "build_s3_client",
     "init_s3_bucket",
+    "list_workflow_summaries",
     "update_job_status",
     "update_workflow",
 ]

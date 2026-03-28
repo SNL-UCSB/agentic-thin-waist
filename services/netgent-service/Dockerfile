@@ -15,19 +15,21 @@ ENV UV_PROJECT_ENVIRONMENT=/opt/netgent-venv
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         iperf3 \
+        iproute2 \
         iputils-ping \
     && rm -rf /var/lib/apt/lists/*
 
 # Resolve and install project dependencies with uv.
 COPY services/netgent-service/pyproject.toml ./pyproject.toml
-RUN uv sync --python /usr/local/bin/python3 --no-dev --no-install-project
+COPY services/netgent-service/uv.lock ./uv.lock
+RUN uv sync --frozen --python /usr/local/bin/python3 --no-dev --no-install-project
 
 # Copy application code
 COPY services/netgent-service/src/ src/
 COPY shared/ /shared/
 
 ENV PATH="/opt/netgent-venv/bin:$PATH"
-ENV PYTHONPATH="/app/src:$PYTHONPATH"
+ENV PYTHONPATH="/app/src:/app/src/netgent/src:/shared:$PYTHONPATH"
 
 EXPOSE 8003
 

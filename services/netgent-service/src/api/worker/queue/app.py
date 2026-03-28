@@ -2,18 +2,19 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
-from typing import Any
+from typing import Any, Literal
+
+from agent.agent import create_agent as create_netgent_agent
 
 from api.utils import (
     create_session_factory,
     get_job,
     get_workflow,
     update_job_status,
+    update_workflow,
 )
 from api.worker import get_queue_app
-from netgent.engine.main import NetGentEngine
 
 logger = logging.getLogger(__name__)
 
@@ -21,8 +22,11 @@ queue_app = get_queue_app()
 
 
 @queue_app.task(queue="workflows", name="run_netgent")
-def run_netgent(job_id: str) -> None:
+def run_netgent(job_id: str, type: Literal["shell", "browser"] = "shell") -> None:
     session_factory = create_session_factory()
+    specification = ""
+    workflow_id = None
+    workflow_type: Literal["shell", "browser"] = "shell"
     workflow_definition: dict[str, Any] = {}
 
     try:
@@ -41,12 +45,37 @@ def run_netgent(job_id: str) -> None:
                 session.commit()
                 return
 
+            workflow_id = workflow.id
+            specification = workflow.specification
+            workflow_type = workflow.type
             workflow_definition = workflow.workflow
             update_job_status(session, job_id, "running")
             session.commit()
 
-        engine = NetGentEngine()
-        asyncio.run(engine.execute(workflow=workflow_definition))
+        netgent_agent = create_netgent_agent()
+        result = netgent_agent.invoke(
+            {
+                "task": specification,
+                "messages": [],
+                "workflow": workflow_definition,
+                "type": type or workflow_type,
+            }
+        )
+
+        generated_workflow = workflow_definition
+        if isinstance(result, dict):
+            candidate_workflow = result.get("workflow")
+            if isinstance(candidate_workflow, dict):
+                generated_workflow = candidate_workflow
+
+        if workflow_id is not None and generated_workflow:
+            with session_factory() as session:
+                update_workflow(
+                    session,
+                    workflow_id,
+                    workflow_definition=generated_workflow,
+                )
+                session.commit()
 
     except Exception:
         logger.exception("NetGent worker execution failed for job %s", job_id)

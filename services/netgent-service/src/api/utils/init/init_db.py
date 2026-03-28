@@ -10,8 +10,6 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 
 from ...models import Base
-from .init_columns import create_availability_workflow
-
 
 DEFAULT_DB_HOST: Final[str] = "postgres"
 DEFAULT_DB_NAME: Final[str] = "telemetry"
@@ -70,8 +68,6 @@ def init_db(database_url: str | None = None, *, echo: bool = False) -> Engine:
         autocommit=False,
         expire_on_commit=False,
     )
-    with session_factory() as session:
-        create_availability_workflow(session)
     return engine
 
 
