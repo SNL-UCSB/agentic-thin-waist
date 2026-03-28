@@ -1,7 +1,7 @@
 {
   "dependencies": ["."],
   "graphs": {
-    "agent": "./src/netgent/agent/agent.py:graph"
+    "netgent": "./src/netgent/src/agent/agent.py:create_agent"
   },
   "env": ".env"
 }
