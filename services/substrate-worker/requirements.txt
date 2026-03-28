@@ -1,4 +1,1 @@
 # Substrate Worker Requirements
-
-# API server
-httpx>=0.24.0
