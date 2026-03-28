@@ -81,11 +81,14 @@ def test_execution_manager_run_experiments_aggregates_single_success(monkeypatch
     reason="Set RUN_REAL_STACK_TESTS=1 to run real stack executor test",
 )
 def test_execution_manager_real_stack_generates_pcap(monkeypatch):
-    # Preconditions: substrate-worker (:8002) and experiment-api (:8006) must be running.
+    # Preconditions: substrate-worker (:8002) and experiment-api must be reachable.
+    # Default matches DownstreamClients / docker internal port 8000; override with
+    # EXPERIMENT_API_URL (e.g. http://localhost:18000) if your compose maps a host port.
+    experiment_api_url = os.getenv("EXPERIMENT_API_URL", "http://localhost:8000").rstrip("/")
     assert requests.get("http://localhost:8002/health", timeout=5).status_code == 200
-    assert requests.get("http://localhost:8006/health", timeout=5).status_code == 200
+    assert requests.get(f"{experiment_api_url}/health", timeout=5).status_code == 200
 
-    monkeypatch.setenv("EXPERIMENT_API_URL", "http://localhost:8006")
+    monkeypatch.setenv("EXPERIMENT_API_URL", experiment_api_url)
     monkeypatch.setenv("SUBSTRATE_WORKER_URL", "http://localhost:8002")
     monkeypatch.setenv("ORCH_CAPTURE_DURATION_SECONDS", "8")
     monkeypatch.setenv("ORCH_CAPTURE_TIMEOUT_SECONDS", "60")
@@ -109,8 +112,14 @@ def test_execution_manager_real_stack_generates_pcap(monkeypatch):
     assert item["capture_status"]["exit_code"] == 0
     assert item["capture_status"]["pcap_path"].endswith(".pcap")
 
-    # Validate file appears in host capture directory (bind mount used in this setup).
-    capture_dir = Path(
-        "/home/haarika/imp_files/thinwaist/agentic-thin-waist/netreplica/config/captures"
-    )
-    assert (capture_dir / f"{experiment_id}.pcap").exists()
+    # Validate file on host: NETREPLICA_CAPTURE_DIR or repo-relative netreplica/config/captures.
+    pcap_path = item["capture_status"].get("pcap_path") or ""
+    capture_dir = os.getenv("NETREPLICA_CAPTURE_DIR")
+    if capture_dir:
+        expected = Path(capture_dir) / f"{experiment_id}.pcap"
+    elif pcap_path and Path(pcap_path).is_absolute() and Path(pcap_path).exists():
+        expected = Path(pcap_path)
+    else:
+        repo_root = Path(__file__).resolve().parents[3]
+        expected = repo_root / "netreplica" / "config" / "captures" / f"{experiment_id}.pcap"
+    assert expected.exists(), f"expected pcap at {expected}"
