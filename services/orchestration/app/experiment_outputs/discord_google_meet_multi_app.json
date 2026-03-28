@@ -1,0 +1,52 @@
+{
+  "intent_id": "discord_google_meet_multi_app",
+  "intent": "Run Discord and Google Meet together at 15 Mbps to understand how they share bandwidth.",
+  "without_examples": {
+    "applications": [
+      "discord",
+      "google-meet"
+    ],
+    "capacities": [
+      15
+    ],
+    "latencies": null,
+    "cc_algorithms": null,
+    "aqm_policy": null,
+    "ctp_cluster": null,
+    "duration_seconds": null,
+    "num_trials": 1,
+    "clarification_needed": [],
+    "design_type": [
+      "concurrent"
+    ],
+    "reasoning": "The user explicitly wants Discord and Google Meet running together ('together') at 15 Mbps to observe how they compete for bandwidth. This maps directly to a single concurrent experiment \u2014 both applications active simultaneously on the same 15 Mbps link. No latency, CC algorithm, AQM policy, or cross-traffic was specified, so those will fall back to defaults (50 ms, cubic, fq_codel, no CTP). Duration defaults to 120s per the application defaults for both discord and google-meet (they share the same default). No clarification is needed; the intent is clear and the parameters are physically meaningful \u2014 15 Mbps is above the 2 Mbps minimum for both real-time apps, so no constraint violations are triggered."
+  },
+  "with_examples": {
+    "applications": [
+      "discord",
+      "google-meet"
+    ],
+    "capacities": [
+      15
+    ],
+    "latencies": null,
+    "cc_algorithms": null,
+    "aqm_policy": null,
+    "ctp_cluster": null,
+    "duration_seconds": null,
+    "num_trials": 1,
+    "clarification_needed": [
+      "Latency is not specified \u2014 will default to 50 ms. If you are interested in realistic conferencing conditions, consider a latency sweep (e.g., [20, 50, 100, 200] ms), since both Discord and Google Meet are real-time apps that degrade noticeably above 300 ms.",
+      "Number of trials is not specified \u2014 defaulting to 1. For bandwidth-sharing studies, variability can be significant; 3\u20135 trials are recommended for statistical reliability.",
+      "No CC algorithm specified \u2014 will default to cubic. Should a CC comparison (e.g., cubic vs bbr) be included to see how algorithm choice affects bandwidth sharing?",
+      "No AQM policy specified \u2014 will default to fq_codel. Note that fq_codel's per-flow fairness properties may directly influence how Discord and Google Meet share bandwidth, so varying AQM (e.g., fifo vs fq_codel) could be scientifically informative.",
+      "No cross-traffic specified \u2014 no CTP will be applied. Should a background traffic profile (e.g., ctp_low_background for typical home use) be included to simulate a more realistic environment?"
+    ],
+    "design_type": [
+      "isolated",
+      "isolated",
+      "concurrent"
+    ],
+    "reasoning": "The intent explicitly asks to run Discord and Google Meet 'together' to study bandwidth sharing, which maps directly to a concurrent experiment design. Per the behavioral rules, when two or more distinct applications are mentioned, at least one concurrent experiment is required to observe interaction effects \u2014 and here concurrency is the primary stated goal. I will include three experiments: Discord in isolation (baseline), Google Meet in isolation (baseline), and both running concurrently on the same 15 Mbps link (the key experiment of interest). The 15 Mbps capacity is well above the 2 Mbps minimum warning threshold for both real-time/live workloads (discord, google-meet), so no constraint violations are triggered. Defaults apply: latency=50 ms, cc_algorithm=cubic, aqm_policy=fq_codel, no CTP, num_trials=1. Duration will use each application's default (120s for both Discord and Google Meet, which is appropriate for capturing steady-state conferencing behavior). The isolation baselines are essential for quantifying how much each application's throughput and quality degrades when sharing the link versus running alone."
+  }
+}

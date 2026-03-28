@@ -755,6 +755,8 @@ Document common patterns (capacity sweeps, latency sweeps, CC comparisons, basel
 - Verify experiment dispatch, status polling, and result aggregation
 - Verify partial failure handling (3 of 6 experiments succeed)
 
+**Implementation note (D5 `executor.py`)**: Per-iteration tool pipeline is **CTP validate** (optional, via `validate_ctp`) → **Experiment API** `POST /experiments` (pending; Telemetry DB when wired) → **substrate** `shape` → **substrate** `capture` → telemetry query → **PATCH** experiment status. See `tests/test_executor_pipeline.py`.
+
 **Estimated time**: 4-5 hours
 
 ---

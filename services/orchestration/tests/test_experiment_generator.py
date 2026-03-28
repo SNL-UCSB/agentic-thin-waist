@@ -114,7 +114,7 @@ def test_youtube_zoom_at_10_25_50_mbps_from_examples():
         assert e.latency_ms == 50
         assert e.cc_algorithm == "cubic"
         assert e.aqm_policy == "fq_codel"
-        assert e.ctp_cluster is "ctp_low_background"
+        assert e.ctp_cluster == "cluster0"
     ids = [e.experiment_id for e in experiments]
     assert ids[0].endswith("-001")
     assert ids[-1].endswith("-006")

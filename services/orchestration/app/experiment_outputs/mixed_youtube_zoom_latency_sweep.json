@@ -1,0 +1,73 @@
+{
+  "intent_id": "mixed_youtube_zoom_latency_sweep",
+  "intent": "Compare YouTube and Zoom performance over a latency sweep at 20, 80, and 150 ms on a 25 Mbps link.",
+  "without_examples": {
+    "applications": [
+      "youtube",
+      "zoom"
+    ],
+    "capacities": [
+      25
+    ],
+    "latencies": [
+      20,
+      80,
+      150
+    ],
+    "cc_algorithms": null,
+    "aqm_policy": null,
+    "ctp_cluster": null,
+    "duration_seconds": null,
+    "num_trials": 1,
+    "clarification_needed": [
+      "No cross-traffic specified \u2014 assuming no CTP (clean baseline). Clarify if background traffic should be included.",
+      "No number of trials specified \u2014 defaulting to 1. Clarify if statistical replication is desired.",
+      "Should YouTube and Zoom also be tested concurrently (sharing the 25 Mbps link) to observe interaction effects, or only in isolation?"
+    ],
+    "design_type": [
+      "isolated",
+      "isolated",
+      "concurrent"
+    ],
+    "reasoning": "The intent clearly specifies a latency sweep (20, 80, 150 ms) over a fixed 25 Mbps link for two applications: YouTube and Zoom. This maps to an application comparison crossed with a latency sweep. Per system prompt rules, since two distinct applications are mentioned, the design MUST include at least one concurrent experiment where both run simultaneously. I therefore include: (1) isolated experiments for each application at each latency point (a 2-app \u00d7 3-latency = 6-experiment grid), and (2) concurrent experiments where YouTube and Zoom share the 25 Mbps link at each latency (3 more experiments), for 9 total. No CC algorithm was specified, so cubic (default) will be used. No AQM was specified, so fq_codel (default) will be used. No cross-traffic was specified, so ctp_cluster is null (clean baseline). Duration will use per-application defaults: 60s for YouTube and 120s for Zoom; concurrent runs will use the longer of the two (120s). The latency sweep will stress-test Zoom especially at 150 ms (approaching the 300 ms warning threshold for real-time apps) and YouTube at 150 ms (well within comfortable range). The design_type list reflects: isolated (YouTube+Zoom separate sweeps) and concurrent (both together), summarized here as the three design intents present in the full experiment set."
+  },
+  "with_examples": {
+    "applications": [
+      "youtube",
+      "zoom"
+    ],
+    "capacities": [
+      25
+    ],
+    "latencies": [
+      20,
+      80,
+      150
+    ],
+    "cc_algorithms": null,
+    "aqm_policy": null,
+    "ctp_cluster": null,
+    "duration_seconds": null,
+    "num_trials": 1,
+    "clarification_needed": [
+      "No CC algorithm specified \u2014 will default to cubic. Clarify if a CC comparison is part of the intent.",
+      "No AQM policy specified \u2014 will default to fq_codel.",
+      "No cross-traffic specified \u2014 no CTP will be applied. Clarify if background traffic should be included.",
+      "No number of trials specified \u2014 will default to 1. More trials (e.g., 3\u20135) are recommended for statistical reliability across a latency sweep.",
+      "The latency value of 150 ms triggers a constraint warning for Zoom (and google-meet/discord): real-time communication degrades at latency > 300 ms, but 150 ms is approaching the range where call quality may be noticeably impaired. This is still within safe bounds but worth noting.",
+      "Duration will follow per-application defaults (YouTube: 60s, Zoom: 120s) since none was specified. Confirm if a unified duration is preferred for cleaner comparison."
+    ],
+    "design_type": [
+      "isolated",
+      "isolated",
+      "isolated",
+      "isolated",
+      "isolated",
+      "isolated",
+      "concurrent",
+      "concurrent",
+      "concurrent"
+    ],
+    "reasoning": "The intent specifies a latency sweep at three values (20, 80, 150 ms) for two applications (YouTube and Zoom) on a fixed 25 Mbps link \u2014 a classic latency sweep crossed with an application comparison. This maps to a Cartesian product: 2 apps \u00d7 3 latency values = 6 isolated experiments. Per the behavioral rules, since two distinct applications are mentioned, at least one concurrent experiment per latency point is also required to observe interaction effects, adding 3 concurrent experiments for a total of 9. Capacity is fixed at 25 Mbps, well above both the YouTube (~3 Mbps) and Zoom (~1.5 Mbps) minimum thresholds \u2014 no capacity constraint warnings apply. The latency values (20, 80, 150 ms) are all within the valid range [0, 10000] ms. The 150 ms point does not exceed the 300 ms warning threshold for Zoom, but it is worth noting as a moderately elevated latency for real-time conferencing. No CC algorithm or AQM policy was specified, so defaults of cubic and fq_codel will apply. No cross-traffic was mentioned, so ctp_cluster is null. Duration will follow application defaults (YouTube: 60s, Zoom: 120s). num_trials defaults to 1."
+  }
+}

@@ -1,5 +1,40 @@
 # Orchestration Service
 
+## Development: `thinwaist` virtualenv
+
+Use a dedicated Python **3.10+** environment for this service. **Activate it in every new shell** before `pip`, `pytest`, `uvicorn`, or `scripts/`:
+
+```bash
+# One-time create (if you don’t have it yet):
+python3 -m venv ~/imp_files/virtualenvs/thinwaist
+
+# Every session — activate first:
+source ~/imp_files/virtualenvs/thinwaist/bin/activate
+# Your prompt should show (thinwaist); then:
+cd services/orchestration   # from agentic-thin-waist repo root
+pip install -r requirements.txt
+pytest tests/ -q
+```
+
+Deactivate when done: `deactivate`.
+
+Execution pipeline (see `app/engine/executor.py`): optional **CTP validate** → **Experiment API** `POST /experiments` (pending, persisted via Telemetry when wired) → **substrate** `shape` → **substrate** `capture` → poll → Telemetry results → `PATCH` experiment status.
+
+Orchestration run state (`/orchestration/{id}`) is persisted in **`app/engine/orchestration_store.py`**: Telemetry HTTP when `TELEMETRY_SERVICE_URL` is set, else SQLite (`ORCH_SQLITE_PATH` or `~/.agentic_thin_waist/orchestrations.db`). Tests use an isolated DB via `conftest.py`.
+
+**Integration demo (CTP → shape → PCAP capture):** activate `thinwaist`, then from `services/orchestration`:
+
+```bash
+source ~/imp_files/virtualenvs/thinwaist/bin/activate
+cd services/orchestration
+python scripts/run_integration_pipeline_demo.py
+python scripts/run_integration_pipeline_demo.py --mode executor
+# Fail-fast: stops on first broken service; add -v for tracebacks.
+# Substrate-only (skip CTP): python scripts/run_integration_pipeline_demo.py --skip-ctp-check
+```
+
+**Start CTP + Postgres + Telemetry (Docker):** from repo root, `./services/orchestration/scripts/start_ctp_telemetry_stack.sh` brings up Postgres, applies `services/ctp-service/app/database/schema.sql` to database `ctp_corpus`, and starts `ctp-service` (Telemetry needs MinIO; if port **9000** is busy, free it and run `docker compose up -d minio telemetry-service`). Docker Compose expects `services/netgent-service/.env` to exist (can be an empty file) for validation.
+
 **Port**: 8005
 **Deliverable**: D5 (Agentic Orchestration — Natural Language Intent → Experiment Specs)
 **Priority**: CRITICAL
