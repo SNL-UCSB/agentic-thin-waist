@@ -85,7 +85,9 @@ def test_orchestration_can_register_and_read_back_experiment_via_experiment_api(
     assert fetched == created
 
     all_experiments = clients.list_experiments()
-    matching = [item for item in all_experiments if item["experiment_id"] == experiment_id]
+    matching = [
+        item for item in all_experiments if item["experiment_id"] == experiment_id
+    ]
     assert len(matching) == 1
     assert matching[0]["status"] == "pending"
     assert matching[0]["spec"]["capacity_mbps"] == pytest.approx(

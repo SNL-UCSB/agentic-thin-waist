@@ -30,14 +30,14 @@ def _wait_for_ctp_health(timeout_seconds: float = 90.0) -> str:
                 and payload.get("postgresql_connected") is True
             ):
                 return health_url
-            last_error = (
-                f"unexpected status={response.status_code} payload={payload!r}"
-            )
+            last_error = f"unexpected status={response.status_code} payload={payload!r}"
         except (ValueError, requests.RequestException) as exc:
             last_error = str(exc)
         time.sleep(1)
 
-    raise AssertionError(f"service at {health_url} did not become healthy: {last_error}")
+    raise AssertionError(
+        f"service at {health_url} did not become healthy: {last_error}"
+    )
 
 
 def _db_connect():
@@ -279,8 +279,12 @@ def seeded_ctp_dataset(ctp_service_ready: str) -> dict:
     finally:
         with _db_connect() as conn:
             with conn.cursor() as cur:
-                cur.execute("DELETE FROM ctp_nodes WHERE dataset_name = %s", (dataset_name,))
-                cur.execute("DELETE FROM datasets WHERE dataset_name = %s", (dataset_name,))
+                cur.execute(
+                    "DELETE FROM ctp_nodes WHERE dataset_name = %s", (dataset_name,)
+                )
+                cur.execute(
+                    "DELETE FROM datasets WHERE dataset_name = %s", (dataset_name,)
+                )
 
 
 def test_orchestration_ctp_health_reports_real_db_connectivity(
@@ -318,9 +322,10 @@ def test_orchestration_can_list_live_ctps(
     assert highest["intensity"]["mean_mbps"] == pytest.approx(
         seeded_rows[0]["intensity"]["mean_mbps"]
     )
-    assert highest["structure"]["contributor_count"] == seeded_rows[0]["structure"][
-        "contributor_count"
-    ]
+    assert (
+        highest["structure"]["contributor_count"]
+        == seeded_rows[0]["structure"]["contributor_count"]
+    )
 
 
 def test_orchestration_can_select_live_ctps(
