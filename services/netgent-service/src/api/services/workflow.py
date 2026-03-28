@@ -32,11 +32,9 @@ class WorkflowService:
         self,
         session,
         job: WorkflowJob,
-        *,
-        type: str = "shell",
     ) -> str | None:
         try:
-            run_netgent.defer(job_id=str(job.id), type=type)
+            run_netgent.defer(job_id=str(job.id))
         except Exception as exc:
             update_job_status(session, job.id, "failed")
             metadata = dict(job.metadata_ or {})
@@ -72,7 +70,7 @@ class WorkflowService:
             )
             session.commit()
 
-            defer_error = self._defer_job(session, job, type=request.type)
+            defer_error = self._defer_job(session, job)
             if defer_error is not None:
                 return GenerateWorkflowResponse(
                     workflow_id=str(specification.id),
@@ -119,7 +117,7 @@ class WorkflowService:
             )
             session.commit()
 
-            defer_error = self._defer_job(session, job, type=specification.type)
+            defer_error = self._defer_job(session, job)
             if defer_error is not None:
                 return ExecuteWorkflowResponse(
                     job_id=str(job.id),

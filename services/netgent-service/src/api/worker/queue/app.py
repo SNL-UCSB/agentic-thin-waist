@@ -22,7 +22,7 @@ queue_app = get_queue_app()
 
 
 @queue_app.task(queue="workflows", name="run_netgent")
-def run_netgent(job_id: str, type: Literal["shell", "browser"] = "shell") -> None:
+def run_netgent(job_id: str) -> None:
     session_factory = create_session_factory()
     specification = ""
     workflow_id = None
@@ -58,7 +58,7 @@ def run_netgent(job_id: str, type: Literal["shell", "browser"] = "shell") -> Non
                 "task": specification,
                 "messages": [],
                 "workflow": workflow_definition,
-                "type": type or workflow_type,
+                "type": workflow_type,
             }
         )
 
