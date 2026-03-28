@@ -1,0 +1,14 @@
+FROM python:3.10-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+
+COPY requirements.txt /tmp/base-requirements.txt
+
+RUN pip install --upgrade pip \
+    && pip install -r /tmp/base-requirements.txt \
+    && rm -f /tmp/base-requirements.txt

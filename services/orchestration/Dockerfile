@@ -1,10 +1,13 @@
-FROM python:3.10-slim
+ARG PYTHON_BASE_IMAGE=agentic-thin-waist-python-base:latest
+FROM ${PYTHON_BASE_IMAGE}
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY services/orchestration/requirements.txt /tmp/service-requirements.txt
+RUN pip install -r /tmp/service-requirements.txt \
+    && rm -f /tmp/service-requirements.txt
 
-COPY . .
+COPY services/orchestration/ .
+COPY shared/ shared/
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8005"]

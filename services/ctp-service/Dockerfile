@@ -3,7 +3,8 @@
 # Build:  docker build -t ctp-service .
 # Run:    docker run -p 8001:8001 --env-file .env ctp-service
 
-FROM python:3.10-slim
+ARG PYTHON_BASE_IMAGE=agentic-thin-waist-python-base:latest
+FROM ${PYTHON_BASE_IMAGE}
 
 # ---------------------------------------------------------------------------
 # System tools (tshark, joincap, reordercap, tcprewrite)
@@ -31,8 +32,9 @@ RUN curl -fsSL \
 # ---------------------------------------------------------------------------
 WORKDIR /app
 
-COPY services/ctp-service/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY services/ctp-service/requirements.txt /tmp/service-requirements.txt
+RUN pip install -r /tmp/service-requirements.txt \
+    && rm -f /tmp/service-requirements.txt
 
 COPY services/ctp-service/app/ app/
 

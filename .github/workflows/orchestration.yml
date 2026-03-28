@@ -5,31 +5,30 @@ on:
   pull_request:
     branches: [main]
     paths:
+      - 'Dockerfile.base'
+      - 'requirements.txt'
       - 'services/orchestration/**'
       - 'shared/**'
 
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: services/orchestration
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Copy shared module into build context
-        run: cp -r ../../shared ./shared
+      - name: Build shared Python base image
+        run: docker build -f Dockerfile.base -t agentic-thin-waist-python-base:latest .
 
       - name: Build Docker image
-        run: docker build -t orchestration .
+        run: docker build -f services/orchestration/Dockerfile -t agentic-thin-waist-orchestration:latest .
 
       - name: Run tests
         run: |
           docker run --rm \
             -v ${{ github.workspace }}/services/orchestration/tests:/app/tests \
-            orchestration \
+            agentic-thin-waist-orchestration:latest \
             python -m pytest tests/ -v --tb=short
 
       - name: Start service via Docker Compose
