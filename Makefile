@@ -62,7 +62,7 @@ logs-service:
 	docker-compose logs -f $(SERVICE)
 
 test:
-	docker compose -f docker-compose.yml -f docker-compose.test.yml up --build --abort-on-container-exit --exit-code-from tests tests
+	docker compose -f docker-compose.yml -f docker-compose.test.yml up --build --abort-on-container-exit --exit-code-from orchestration-tests orchestration-tests
 	@echo "Tests completed. Run 'make logs' to see output."
 
 test-local:

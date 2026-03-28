@@ -6,6 +6,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      ctp-service:
+        condition: service_healthy
       telemetry-service:
         condition: service_healthy
     env_file:
@@ -13,6 +15,7 @@ services:
     environment:
       PYTHONPATH: /workspace/services/orchestration:/workspace
       DB_HOST: postgres
+      CTP_SERVICE_URL: http://ctp-service:8001
       TELEMETRY_SERVICE_URL: http://telemetry-service:8004
     networks:
       - agentic-network
