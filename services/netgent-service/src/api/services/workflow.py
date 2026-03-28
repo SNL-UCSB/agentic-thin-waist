@@ -2,9 +2,7 @@ from __future__ import annotations
 
 from uuid import UUID, uuid4
 
-import sqlalchemy as sa
-
-from ..models import AvailableWorkflows, WorkflowJob, WorkflowSpecification
+from ..models import WorkflowJob, WorkflowSpecification
 from ..schemas import (
     AvailableWorkflowItem,
     AvailableWorkflowsResponse,
@@ -20,6 +18,7 @@ from ..utils import (
     create_workflow,
     get_job,
     get_workflow,
+    list_workflow_summaries,
     update_job_status,
 )
 from ..worker.queue.app import run_netgent
@@ -29,7 +28,11 @@ class WorkflowService:
     def __init__(self):
         self.session_factory = create_session_factory()
 
-    def _defer_job(self, session, job: WorkflowJob) -> str | None:
+    def _defer_job(
+        self,
+        session,
+        job: WorkflowJob,
+    ) -> str | None:
         try:
             run_netgent.defer(job_id=str(job.id))
         except Exception as exc:
@@ -43,24 +46,11 @@ class WorkflowService:
 
     def generate(self, request: GenerateWorkflowRequest) -> GenerateWorkflowResponse:
         with self.session_factory() as session:
-            available_workflow = session.execute(
-                sa.select(AvailableWorkflows).where(
-                    AvailableWorkflows.name == request.application
-                )
-            ).scalar_one_or_none()
-            if available_workflow is None:
-                return GenerateWorkflowResponse(
-                    workflow_id="",
-                    job_id="",
-                    status="failed",
-                    error=f"Unsupported Application Error: {request.application}",
-                )
-
             specification = create_workflow(
                 session,
                 WorkflowSpecification(
                     id=uuid4(),
-                    application_id=available_workflow.id,
+                    type=request.type,
                     specification=request.specification,
                     workflow={},  # Will be Filled Later
                 ),
@@ -70,13 +60,12 @@ class WorkflowService:
                 session,
                 WorkflowJob(
                     id=uuid4(),
-                    application_id=available_workflow.id,
                     workflow_id=specification.id,
                     status="pending",
                     metadata_={
                         "timeout": request.timeout,
+                        "type": request.type,
                     },
-                    parameters=request.parameters,
                 ),
             )
             session.commit()
@@ -121,11 +110,9 @@ class WorkflowService:
                 session,
                 WorkflowJob(
                     id=uuid4(),
-                    application_id=specification.application_id,
                     workflow_id=specification.id,
                     status="pending",
                     metadata_={"timeout": request.timeout},
-                    parameters=request.parameters,
                 ),
             )
             session.commit()
@@ -174,15 +161,8 @@ class WorkflowService:
 
     def get_available(self) -> AvailableWorkflowsResponse:
         with self.session_factory() as session:
-            available_workflows = (
-                session.execute(sa.select(AvailableWorkflows)).scalars().all()
-            )
-            return AvailableWorkflowsResponse(
-                applications=[
-                    AvailableWorkflowItem(
-                        application=available_workflow.name,
-                        notes=available_workflow.notes,
-                    )
-                    for available_workflow in available_workflows
-                ]
-            )
+            workflows = [
+                AvailableWorkflowItem(**workflow)
+                for workflow in list_workflow_summaries(session)
+            ]
+            return AvailableWorkflowsResponse(workflows=workflows)

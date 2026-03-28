@@ -1,3 +1,7 @@
+FROM golang:1.25-bookworm AS ndt-builder
+
+RUN go install github.com/m-lab/ndt7-client-go/cmd/ndt7-client@latest
+
 FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -13,6 +17,8 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
+
+COPY --from=ndt-builder /go/bin/ndt7-client /usr/local/bin/ndt-client
 
 COPY services/substrate-worker/requirements.txt .
 RUN pip3 install -r requirements.txt

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Any, Literal
+
 from pydantic import BaseModel, Field
 
 WorkflowStatus = Literal["pending", "running", "completed", "failed", "timeout"]
@@ -12,9 +13,8 @@ HealthStatus = Literal["healthy", "unhealthy"]
 
 class GenerateWorkflowRequest(BaseModel):
     specification: str = Field(min_length=1)
-    parameters: dict[str, str] = Field(default_factory=dict)
     timeout: int | None = Field(default=None, ge=1)
-    application: str = Field(min_length=1)
+    type: Literal["shell", "browser"] = "shell"
 
 
 class GenerateWorkflowResponse(BaseModel):
@@ -30,7 +30,6 @@ class HealthResponse(BaseModel):
 
 class ExecuteWorkflowRequest(BaseModel):
     workflow_id: str
-    parameters: dict[str, str] = Field(default_factory=dict)
     timeout: int | None = Field(default=None, ge=1)
 
 
@@ -49,21 +48,10 @@ class WorkflowResultResponse(BaseModel):
 
 
 class AvailableWorkflowItem(BaseModel):
-    application: str
-    notes: str
+    workflow_id: str
+    specification: str
+    last_executed_at: datetime | None = None
 
 
 class AvailableWorkflowsResponse(BaseModel):
-    applications: list[AvailableWorkflowItem]
-
-
-class WorkflowState(BaseModel):
-    id: str
-    action: str
-    parameters: dict[str, Any] = Field(default_factory=dict)
-
-
-class WorkflowTransition(BaseModel):
-    from_state: str
-    to_state: str
-    condition: str | None = None
+    workflows: list[AvailableWorkflowItem]

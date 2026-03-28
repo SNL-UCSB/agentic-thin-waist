@@ -16,6 +16,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Create repo .env from example
+        run: cp .env.example .env
+
       - name: Get changed Python files
         id: changed
         run: |
