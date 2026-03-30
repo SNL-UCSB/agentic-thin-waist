@@ -3,18 +3,19 @@ from __future__ import annotations
 import subprocess
 
 import pytest
+from pydantic import BaseModel
+
 from netgent.src.client.ndt import (
     NDT7BinaryNotFoundError,
     NDT7Client,
     NDT7ProcessError,
 )
-from pydantic import BaseModel
 
 
 def test_ndt7_client_builds_expected_command(mocker):
-    mocker.patch("client.ndt.client.require_execution_binary")
+    mocker.patch("netgent.src.client.ndt.client.require_execution_binary")
     mock_run = mocker.patch(
-        "client.ndt.client.subprocess.run",
+        "netgent.src.client.ndt.client.subprocess.run",
         return_value=subprocess.CompletedProcess(
             args=[],
             returncode=0,
@@ -59,9 +60,9 @@ def test_ndt7_client_builds_expected_command(mocker):
 
 
 def test_ndt7_client_parses_json_events(mocker):
-    mocker.patch("client.ndt.client.require_execution_binary")
+    mocker.patch("netgent.src.client.ndt.client.require_execution_binary")
     mocker.patch(
-        "client.ndt.client.subprocess.run",
+        "netgent.src.client.ndt.client.subprocess.run",
         return_value=subprocess.CompletedProcess(
             args=[],
             returncode=0,
@@ -93,9 +94,9 @@ def test_ndt7_client_parses_json_events(mocker):
 
 
 def test_ndt7_client_accepts_final_summary_payload(mocker):
-    mocker.patch("client.ndt.client.require_execution_binary")
+    mocker.patch("netgent.src.client.ndt.client.require_execution_binary")
     mocker.patch(
-        "client.ndt.client.subprocess.run",
+        "netgent.src.client.ndt.client.subprocess.run",
         return_value=subprocess.CompletedProcess(
             args=[],
             returncode=0,
@@ -133,9 +134,9 @@ def test_ndt7_client_raises_when_binary_is_missing():
 
 
 def test_ndt7_client_raises_with_partial_result_on_process_failure(mocker):
-    mocker.patch("client.ndt.client.require_execution_binary")
+    mocker.patch("netgent.src.client.ndt.client.require_execution_binary")
     mocker.patch(
-        "client.ndt.client.subprocess.run",
+        "netgent.src.client.ndt.client.subprocess.run",
         return_value=subprocess.CompletedProcess(
             args=[],
             returncode=1,
@@ -155,9 +156,9 @@ def test_ndt7_client_raises_with_partial_result_on_process_failure(mocker):
 
 
 def test_ndt7_client_prefixes_command_with_namespace_when_local_disabled(mocker):
-    mocker.patch("client.ndt.client.require_execution_binary")
+    mocker.patch("netgent.src.client.ndt.client.require_execution_binary")
     mocker.patch(
-        "client.ndt.client.build_execution_command",
+        "netgent.src.client.ndt.client.build_execution_command",
         return_value=[
             "nsenter",
             "-t",
@@ -177,7 +178,7 @@ def test_ndt7_client_prefixes_command_with_namespace_when_local_disabled(mocker)
         ],
     )
     mock_run = mocker.patch(
-        "client.ndt.client.subprocess.run",
+        "netgent.src.client.ndt.client.subprocess.run",
         return_value=subprocess.CompletedProcess(
             args=[],
             returncode=0,
