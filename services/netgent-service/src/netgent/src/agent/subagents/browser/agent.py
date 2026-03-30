@@ -145,9 +145,11 @@ async def run_workflow(state: BrowserState) -> dict[str, Any]:
         }
     return {
         "result": final_result,
-        "workflow": response.get("workflow", workflow)
-        if isinstance(response, dict)
-        else workflow,
+        "workflow": (
+            response.get("workflow", workflow)
+            if isinstance(response, dict)
+            else workflow
+        ),
     }
 
 

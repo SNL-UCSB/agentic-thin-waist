@@ -405,9 +405,11 @@ def generate_selectors(interacted_element: Any) -> list[str]:
         _append_candidate(
             candidates,
             seen,
-            f"{tag}{_attribute_selector(key, value)}"
-            if tag
-            else _attribute_selector(key, value),
+            (
+                f"{tag}{_attribute_selector(key, value)}"
+                if tag
+                else _attribute_selector(key, value)
+            ),
         )
 
     if class_selector and tag:

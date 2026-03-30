@@ -9,7 +9,9 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.graph import END, START, MessagesState
 from langgraph.graph.state import StateGraph
 
-from netgent.src.agent.subagents.browser.agent import create_agent as create_browser_agent
+from netgent.src.agent.subagents.browser.agent import (
+    create_agent as create_browser_agent,
+)
 from netgent.src.agent.subagents.shell.agent import create_agent as create_shell_agent
 from netgent.src.engine.controller import ProgramController
 from netgent.src.engine.executor import StateExecutor

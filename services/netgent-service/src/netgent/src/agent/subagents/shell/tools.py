@@ -3,7 +3,11 @@ from typing import Literal
 
 from langchain.tools import tool
 
-from netgent.src.agent.subagents.shell.schema import RunIPerf3Tool, RunNDT7Tool, RunPingTool
+from netgent.src.agent.subagents.shell.schema import (
+    RunIPerf3Tool,
+    RunNDT7Tool,
+    RunPingTool,
+)
 from netgent.src.client.iperf import (
     IPerf3BinaryNotFoundError,
     IPerf3Client,
