@@ -5,8 +5,8 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - 'services/orchestration/**'
-      - 'shared/**'
+      - "services/orchestration/**"
+      - "shared/**"
 
 jobs:
   build-and-test:
@@ -30,4 +30,6 @@ jobs:
             python -m pytest tests/ -v --tb=short
 
       - name: Start service via Docker Compose
+        env:
+          GOOGLE_API_KEY: dummy
         run: docker compose up -d --wait orchestration
