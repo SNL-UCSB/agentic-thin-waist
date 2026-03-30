@@ -2,32 +2,46 @@ from __future__ import annotations
 
 from typing import Any
 
-from agent.subagents.shell.prompts import DECIDE_PROMPT, TASK_PROMPT
-from agent.subagents.shell.schema import (
+from netgent.src.agent.subagents.shell.prompts import DECIDE_PROMPT, TASK_PROMPT
+from netgent.src.agent.subagents.shell.schema import (
     RunIPerf3Tool,
     RunNDT7Tool,
     RunPingTool,
     SendMessage,
 )
-from agent.subagents.shell.tool_nodes import (
+from netgent.src.agent.subagents.shell.tool_nodes import (
     bad_tool_name,
     run_iperf3,
     run_ndt7,
     run_ping,
     send_message,
 )
-from dotenv import load_dotenv
-from engine.controller import ProgramController
-from engine.executor import StateExecutor
-from engine.runner import WorkflowRunner
-from engine.schema import WorkflowAction, WorkflowCheck, WorkflowSchema, WorkflowState
-from langchain_core.messages import AIMessage, ToolMessage
+
+try:
+    from dotenv import load_dotenv
+except ModuleNotFoundError:  # pragma: no cover - optional dependency
+
+    def load_dotenv(*args: Any, **kwargs: Any) -> bool:
+        return False
+
+
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.runtime import Runtime
 from pydantic import BaseModel, ConfigDict
-from registry.actions.network import NETWORK_ACTIONS
-from registry.triggers.base import always_true
+
+from netgent.src.engine.controller import ProgramController
+from netgent.src.engine.executor import StateExecutor
+from netgent.src.engine.runner import WorkflowRunner
+from netgent.src.engine.schema import (
+    WorkflowAction,
+    WorkflowCheck,
+    WorkflowSchema,
+    WorkflowState,
+)
+from netgent.src.registry.actions.network import NETWORK_ACTIONS
+from netgent.src.registry.triggers.base import always_true
 
 load_dotenv()
 
@@ -64,8 +78,9 @@ WORKFLOW_ACTION_TYPES = {
 
 
 def add_task_message(state: ShellRunAgentState) -> dict[str, list]:
-    if state["messages"]:
-        return {}
+    for message in state["messages"]:
+        if isinstance(message, (HumanMessage, AIMessage, ToolMessage)):
+            return {}
     return {"messages": TASK_PROMPT.invoke({"task": state["task"]}).messages}
 
 

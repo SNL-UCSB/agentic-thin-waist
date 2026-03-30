@@ -4,7 +4,13 @@ import os
 import shutil
 import subprocess
 
-from dotenv import load_dotenv
+try:
+    from dotenv import load_dotenv
+except ModuleNotFoundError:  # pragma: no cover - optional dependency
+
+    def load_dotenv(*args: object, **kwargs: object) -> bool:
+        return False
+
 
 load_dotenv()
 

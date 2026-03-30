@@ -8,6 +8,7 @@ import procrastinate
 
 from api.config import APIConfig
 from api.utils.init.init_queue import build_psycopg_conninfo
+from api.worker.constants import WORKFLOW_EXECUTE_QUEUE, WORKFLOW_GENERATE_QUEUE
 
 
 @lru_cache(maxsize=1)
@@ -20,7 +21,7 @@ def get_queue_app() -> procrastinate.App:
         connector=connector,
         import_paths=["api.worker.queue.app"],
         worker_defaults={
-            "queues": ["workflows"],
+            "queues": [WORKFLOW_GENERATE_QUEUE, WORKFLOW_EXECUTE_QUEUE],
             "concurrency": config.queue_worker_concurrency,
         },
     )

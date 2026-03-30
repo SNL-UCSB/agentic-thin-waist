@@ -3,7 +3,7 @@ from __future__ import annotations
 import subprocess
 
 import pytest
-from client.ndt import (
+from netgent.src.client.ndt import (
     NDT7BinaryNotFoundError,
     NDT7Client,
     NDT7ProcessError,

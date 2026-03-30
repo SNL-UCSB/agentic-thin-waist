@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from typing import Final
 
@@ -17,6 +18,7 @@ DEFAULT_S3_BUCKET_NAME: Final[str] = "netgent"
 DEFAULT_S3_CONNECTION_RETRIES: Final[int] = 3
 DEFAULT_S3_CONNECTION_TIMEOUT_SECONDS: Final[int] = 60
 DEFAULT_AWS_REGION: Final[str] = "us-east-1"
+DEFAULT_S3_PUBLIC_READ: Final[str] = "true"
 
 
 def build_s3_client():
@@ -92,5 +94,28 @@ def init_s3_bucket(bucket_name: str | None = None):
         if error_code not in {"404", "NoSuchBucket", "NotFound"}:
             raise
         s3_client.create_bucket(Bucket=resolved_bucket_name)
+
+    if os.getenv("NETGENT_S3_PUBLIC_READ", DEFAULT_S3_PUBLIC_READ).lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
+        policy = {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Sid": "PublicReadGetObject",
+                    "Effect": "Allow",
+                    "Principal": "*",
+                    "Action": ["s3:GetObject"],
+                    "Resource": [f"arn:aws:s3:::{resolved_bucket_name}/*"],
+                }
+            ],
+        }
+        s3_client.put_bucket_policy(
+            Bucket=resolved_bucket_name,
+            Policy=json.dumps(policy, separators=(",", ":")),
+        )
 
     return s3_client

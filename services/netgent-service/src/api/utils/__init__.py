@@ -1,5 +1,6 @@
 """Utility helpers for NetGent API initialization."""
 
+from .artifacts import upload_job_artifacts
 from .init import (
     build_psycopg_conninfo,
     build_s3_client,
@@ -19,6 +20,7 @@ from .workflow import (
 
 __all__ = [
     "build_psycopg_conninfo",
+    "upload_job_artifacts",
     "create_job",
     "create_engine",
     "create_session_factory",

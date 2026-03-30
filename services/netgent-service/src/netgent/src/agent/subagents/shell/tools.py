@@ -1,23 +1,24 @@
 import json
 from typing import Literal
 
-from agent.subagents.shell.schema import RunIPerf3Tool, RunNDT7Tool, RunPingTool
-from client.iperf import (
+from langchain.tools import tool
+
+from netgent.src.agent.subagents.shell.schema import RunIPerf3Tool, RunNDT7Tool, RunPingTool
+from netgent.src.client.iperf import (
     IPerf3BinaryNotFoundError,
     IPerf3Client,
     IPerf3Error,
 )
-from client.ndt import (
+from netgent.src.client.ndt import (
     NDT7BinaryNotFoundError,
     NDT7Client,
     NDT7Error,
 )
-from client.ping import (
+from netgent.src.client.ping import (
     PingBinaryNotFoundError,
     PingClient,
     PingError,
 )
-from langchain.tools import tool
 
 
 @tool(args_schema=RunIPerf3Tool)

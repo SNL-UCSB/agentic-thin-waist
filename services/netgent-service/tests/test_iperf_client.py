@@ -4,7 +4,7 @@ import json
 import subprocess
 
 import pytest
-from client.iperf import (
+from netgent.src.client.iperf import (
     IPerf3BinaryNotFoundError,
     IPerf3Client,
     IPerf3ProcessError,

@@ -3,7 +3,7 @@ from __future__ import annotations
 import subprocess
 
 import pytest
-from client.ping import (
+from netgent.src.client.ping import (
     PingBinaryNotFoundError,
     PingClient,
     PingProcessError,
