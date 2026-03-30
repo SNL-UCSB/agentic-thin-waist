@@ -97,7 +97,7 @@ The NetForge Service is the core of the platform, implementing NetForge's three-
 
 ### Supporting Services
 
-**NetGent Service (port 8003)**: NFA-based browser automation for application workflows. Compiles natural-language specifications into executable state machines. Handles YouTube, Netflix, Zoom, NDT speedtests, and other application-level interactions.
+**NetGent Service (port 8003)**: Application workflow service for browser and shell tasks. It persists natural-language workflow specs, generates executable workflows asynchronously, and runs them via job-based `generate -> execute -> result` APIs.
 
 **Telemetry Service (port 8004)**: Telemetry storage and results query interface. Tags measurements with contextual metadata (static config, dynamic CTP, application, transport) to enable rich queries across experimental dimensions.
 
@@ -126,7 +126,7 @@ Refactor NetReplica's monolithic `controller.py` into three services mapping to 
 ### D2: NetGent Programmatic API (PRIORITY: HIGH)
 **Lead**: Eugene + Jaber | **Start**: `services/netgent-service/README.md`
 
-Expose NetGent's NFA-based workflow engine as a programmatic API that agents can call. Wrap the existing LangGraph StateGraph implementation with clean `execute_workflow()`, `compile_nfa()`, `validate_workflow()` entry points. Make the LLM injectable per-call for OpenClaw integration.
+Expose NetGent's workflow engine as a programmatic API that agents can call. The current service contract is asynchronous and job-based: create a workflow with `POST /workflows/generate`, run it with `POST /workflows/execute`, and poll `GET /workflows/result/{job_id}` for both phases.
 
 ### D3: Telemetry and Storage Pipeline (PRIORITY: HIGH)
 **Lead**: Manni | **Start**: `services/telemetry-service/README.md`
@@ -150,7 +150,7 @@ Three independent tracks running in parallel. Phase 1 (weeks 1–2) is independe
 | Track | Owner | Work |
 |-------|-------|------|
 | **NetForge Service** | Jaber, Satyam, Snithik | Track A: dataclasses, typed interfaces, `run_experiment()`. Track B: three-service SOA scaffold with mocked CTP and substrate |
-| **NetGent API** | Eugene + Jaber | Programmatic API wrapper, NFA compiler integration, TOOLS.md for OpenClaw |
+| **NetGent API** | Eugene + Jaber | Job-based workflow API, browser/shell execution integration, TOOLS.md for OpenClaw |
 | **Telemetry + Storage** | Manni | Schema design, contextual tree tagging, query API with mock data |
 | **Orchestration** | Haarika | OpenClaw integration, tool declarations, intent → experiment mapping (after NSDI camera-ready) |
 | **Architecture + CI** | Sylee | Service boundary review, Docker Compose, CI/CD, testing infrastructure |

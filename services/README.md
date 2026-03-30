@@ -310,51 +310,47 @@ class TelemetrySnapshot:
 
 **Location**: `./netgent-service/`
 
-**Purpose**: Application-level execution plane. Executes application workflows — both browser-based (YouTube, Netflix, Zoom via NFA/Selenium) and host-level processes (ping, speed tests, shell commands) — generating application-specific traffic and measuring QoE.
+**Purpose**: Application-level execution plane. Persists natural-language workflow specifications, generates executable workflows asynchronously, and runs browser or shell workflows under the configured network conditions.
 
 **Responsibilities**:
-- Compile NetGent workflows from NFA specification (browser-based applications)
-- Execute browser automation (YouTube, Netflix, Zoom, etc.)
-- Execute host-level processes (ping, NDT speed tests, iperf3, shell commands)
-- Collect QoE metrics: video startup time, rebuffer events, bitrate
-- Maintain an **active application registry**: the authoritative list of supported applications
-- Store workflow logs and artifacts
+- Accept natural-language workflow specifications and persist them in PostgreSQL
+- Queue generation jobs that produce or refine executable workflow JSON
+- Queue execution jobs against previously generated workflows
+- Execute browser automation and host-level network tools
+- Upload run artifacts to S3 or MinIO and return artifact metadata by job
+- Expose stored workflows for discovery via `/workflows/available`
 
 **Key Endpoints**:
-- `POST /workflows/compile` — Compile NFA from spec
-- `POST /workflows/generate` — Run workflow under current network conditions
-- `GET /workflows/results/{workflow_id}` — Retrieve execution results
-- `GET /workflows/available` — List available NFA workflows
-- `POST /workflows/qoe/measure` — Extract QoE metrics from logs
+- `POST /workflows/generate` — Create a workflow record and queue generation
+- `POST /workflows/execute` — Queue execution for a generated workflow
+- `GET /workflows/result/{job_id}` — Retrieve job status and metadata
+- `GET /workflows/available` — List stored workflows and latest execution timestamp
 
-**Core Contracts**:
+**Current Job Contract**:
 ```python
 @dataclass
-class WorkflowResult:
+class GenerateWorkflowResponse:
     workflow_id: str
-    application: str  # "youtube", "netflix", "zoom"
-    status: str  # "success", "failure", "timeout"
-    states_executed: List[str]
-    qoe_metrics: dict  # startup_time_ms, rebuffer_events, bitrate
-    duration_seconds: float
+    job_id: str
+    status: str  # "pending", "running", "completed", "failed", "timeout"
 
 @dataclass
-class QoEMetrics:
-    video_startup_time_ms: float
-    mean_bitrate_mbps: float
-    rebuffer_events: int
-    rebuffer_duration_ms: float
+class WorkflowResultResponse:
+    workflow_id: str
+    job_id: str
+    status: str
+    metadata: dict
 ```
 
 **Dependencies**: Substrate Worker (network coordination). NetGent does not communicate directly with Telemetry Service; the Experiment API handles result storage.
 
 **Implementation**:
 1. NetGent NFA execution engine integration
-2. NFA compiler from JSON specs
+2. Job-based workflow generation and execution
 3. Selenium or Puppeteer for browser automation
-4. QoE metric extractors per application
+4. Shell tool wrappers for ping, NDT, and iperf3
 5. Workflow state logging and error handling
-6. Timeout management (30-second default)
+6. Timeout propagation through job metadata
 7. Artifact storage
 
 ---
@@ -369,15 +365,15 @@ Experiment API / Controller (experiment specification + sequencing)
     ├→ [Pre-flight checks]
     │   ├→ CTP Service: Is the requested CTP replay-ready? (cold start check)
     │   │   └→ If not ready: instruct CTP Service to prepare, wait for confirmation
-    │   ├→ NetGent Service: Is the requested application supported? (GET /workflows/available)
-    │   │   └→ If not supported: reject experiment (application onboarding is out-of-band)
+    │   ├→ NetGent Service: Is the required workflow already generated? (GET /workflows/available)
+    │   │   └→ If not present: generate it first, then dispatch execution
     │   └→ Substrate Worker: Is the worker available?
     │
     ├→ [Per-iteration dispatch — one at a time]
     │   ├→ CTP Service (validate bottleneck regime, export replay-ready PCAP)
     │   ├→ Substrate Worker (configure bottleneck via tc)
     │   ├→ Substrate Worker (replay CTP traffic via tcpreplay, start capture)
-    │   ├→ NetGent Service (execute NFA workflow, collect QoE)
+    │   ├→ NetGent Service (generate workflow if needed, then execute and collect artifacts)
     │   ├→ Substrate Worker (stop capture, measure dynamic state)
     │   └→ Telemetry Service (persist result + contextual tree)
     │
@@ -391,7 +387,7 @@ The Experiment API orchestrates the sequencing implicitly: it manages phase tran
 
 1. **CTP readiness (cold start)**: The controller queries the CTP Service to confirm the requested CTP is replay-ready. If the CTP requires preparation (extracting from a larger dataset, transforming, etc.), the controller instructs the CTP Service to prepare it and waits for confirmation before proceeding. This prevents iteration failures due to missing replay data.
 
-2. **Application support (NetGent readiness)**: The controller queries NetGent's active application registry (`GET /workflows/available`) to confirm the requested application is supported. If the application is not in the registry, the experiment cannot proceed — adding new application support is a separate, out-of-band process (not part of the thin waist pipeline).
+2. **Workflow readiness (NetGent state)**: The controller can query `/workflows/available` to discover previously generated workflows, but the current implementation does not expose an application-family registry. If the needed workflow is missing, the controller must submit `POST /workflows/generate` and poll that job to completion before calling `POST /workflows/execute`.
 
 3. **Substrate availability**: The controller confirms at least one Substrate Worker is available and healthy.
 

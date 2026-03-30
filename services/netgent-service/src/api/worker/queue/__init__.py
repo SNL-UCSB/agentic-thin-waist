@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from api.worker import get_queue_app
+from .app import execute_netgent_workflow, generate_netgent_workflow
 
-from .app import run_netgent
-
-__all__ = ["get_queue_app", "run_netgent"]
+__all__ = ["generate_netgent_workflow", "execute_netgent_workflow"]

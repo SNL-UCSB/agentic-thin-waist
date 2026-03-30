@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from typing import Literal
 
-from client.iperf import IPerf3Client, IPerf3Result
-from client.ndt import NDT7Client, NDT7Result
-from client.ping import PingClient, PingResult
-from registry.actions.base import action
-from registry.actions.exception import ActionError
+from netgent.src.client.iperf import IPerf3Client, IPerf3Result
+from netgent.src.client.ndt import NDT7Client, NDT7Result
+from netgent.src.client.ping import PingClient, PingResult
+from netgent.src.registry.actions.base import action
+from netgent.src.registry.actions.exception import ActionError
 
 
 @action(name="iperf")

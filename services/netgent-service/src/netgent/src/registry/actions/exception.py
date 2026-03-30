@@ -1,4 +1,4 @@
-from registry.exception import NetGentWorkflowError
+from netgent.src.registry.exception import NetGentWorkflowError
 
 
 class ActionException(NetGentWorkflowError):

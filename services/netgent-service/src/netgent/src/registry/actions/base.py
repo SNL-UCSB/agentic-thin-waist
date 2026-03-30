@@ -7,9 +7,9 @@ from dataclasses import dataclass
 from functools import partial
 from typing import Any, TypeVar
 
-from registry.actions.exception import ActionError
-from registry.base import RegistryBase, RegistryDefinition
-from registry.context import Context, ContextInput
+from netgent.src.registry.actions.exception import ActionError
+from netgent.src.registry.base import RegistryBase, RegistryDefinition
+from netgent.src.registry.context import Context, ContextInput
 
 ActionType = TypeVar("ActionType", bound="Action")
 RegisteredAction = type["Action"] | Callable[..., Any]

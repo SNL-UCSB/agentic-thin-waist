@@ -5,7 +5,7 @@ from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from registry.context import Context, ContextInput
+from netgent.src.registry.context import Context, ContextInput
 
 
 @dataclass(frozen=True, slots=True)
@@ -194,7 +194,7 @@ class RegistryBase:
         return merged
 
     def _build_runtime_context(self, ctx: ContextInput) -> Context:
-        runtime_context = self.context.copy()
+        runtime_context = self.context
         if ctx is not None:
             runtime_context.update(ctx)
         return runtime_context

@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Literal
-
-from agent.agent import create_agent as create_netgent_agent
 
 from api.utils import (
     create_session_factory,
@@ -13,16 +12,49 @@ from api.utils import (
     get_workflow,
     update_job_status,
     update_workflow,
+    upload_job_artifacts,
 )
 from api.worker import get_queue_app
+from api.worker.constants import WORKFLOW_EXECUTE_QUEUE, WORKFLOW_GENERATE_QUEUE
+from netgent.src.agent.agent import create_agent as create_netgent_agent
 
 logger = logging.getLogger(__name__)
 
 queue_app = get_queue_app()
 
 
-@queue_app.task(queue="workflows", name="run_netgent")
-def run_netgent(job_id: str) -> None:
+async def _ainvoke_netgent_agent(
+    *,
+    specification: str,
+    workflow_definition: dict[str, Any],
+    workflow_type: Literal["shell", "browser"],
+) -> Any:
+    netgent_agent = create_netgent_agent()
+    return await netgent_agent.ainvoke(
+        {
+            "task": specification,
+            "messages": [],
+            "workflow": workflow_definition,
+            "type": workflow_type,
+        }
+    )
+
+
+def _fail_job(job_id: str, *, error: str | None = None) -> None:
+    session_factory = create_session_factory()
+    with session_factory() as session:
+        job = get_job(session, job_id)
+        if job is None:
+            return
+        update_job_status(session, job_id, "failed")
+        if error is not None:
+            metadata = dict(job.metadata_ or {})
+            metadata["error"] = error
+            job.metadata_ = metadata
+        session.commit()
+
+
+def _run_netgent_job(job_id: str, *, operation: Literal["generate", "execute"]) -> None:
     session_factory = create_session_factory()
     specification = ""
     workflow_id = None
@@ -49,46 +81,82 @@ def run_netgent(job_id: str) -> None:
             specification = workflow.specification
             workflow_type = workflow.type
             workflow_definition = workflow.workflow
+
+            if operation == "execute" and not workflow_definition:
+                metadata = dict(job.metadata_ or {})
+                metadata["error"] = "Workflow has not been generated yet"
+                job.metadata_ = metadata
+                update_job_status(session, job_id, "failed")
+                session.commit()
+                return
+
             update_job_status(session, job_id, "running")
             session.commit()
 
-        netgent_agent = create_netgent_agent()
-        result = netgent_agent.invoke(
-            {
-                "task": specification,
-                "messages": [],
-                "workflow": workflow_definition,
-                "type": workflow_type,
-            }
+        result = asyncio.run(
+            _ainvoke_netgent_agent(
+                specification=specification,
+                workflow_definition=(
+                    {} if operation == "generate" else workflow_definition
+                ),
+                workflow_type=workflow_type,
+            )
         )
 
-        generated_workflow = workflow_definition
+        updated_workflow = workflow_definition
         if isinstance(result, dict):
             candidate_workflow = result.get("workflow")
             if isinstance(candidate_workflow, dict):
-                generated_workflow = candidate_workflow
+                updated_workflow = candidate_workflow
 
-        if workflow_id is not None and generated_workflow:
+        if workflow_id is not None and updated_workflow:
             with session_factory() as session:
                 update_workflow(
                     session,
                     workflow_id,
-                    workflow_definition=generated_workflow,
+                    workflow_definition=updated_workflow,
                 )
                 session.commit()
 
-    except Exception:
-        logger.exception("NetGent worker execution failed for job %s", job_id)
-        with session_factory() as session:
-            job = get_job(session, job_id)
-            if job is not None:
-                update_job_status(session, job_id, "failed")
-                session.commit()
-            return
+        artifacts = upload_job_artifacts(
+            job_id=job_id,
+            workflow_type=workflow_type,
+            result=result,
+        )
+
+    except Exception as exc:
+        logger.exception(
+            "NetGent %s worker execution failed for job %s", operation, job_id
+        )
+        _fail_job(job_id, error=str(exc))
+        return
 
     with session_factory() as session:
         job = get_job(session, job_id)
         if job is None:
             return
+        metadata = dict(job.metadata_ or {})
+        metadata["artifacts"] = artifacts
+        metadata["artifact_prefix"] = {
+            "bucket": artifacts[0]["bucket"] if artifacts else None,
+            "prefix": f"{job_id}/",
+        }
+        job.metadata_ = metadata
         update_job_status(session, job_id, "completed")
         session.commit()
+
+
+@queue_app.task(
+    queue=WORKFLOW_GENERATE_QUEUE,
+    name="generate_netgent_workflow",
+)
+def generate_netgent_workflow(job_id: str) -> None:
+    _run_netgent_job(job_id, operation="generate")
+
+
+@queue_app.task(
+    queue=WORKFLOW_EXECUTE_QUEUE,
+    name="execute_netgent_workflow",
+)
+def execute_netgent_workflow(job_id: str) -> None:
+    _run_netgent_job(job_id, operation="execute")

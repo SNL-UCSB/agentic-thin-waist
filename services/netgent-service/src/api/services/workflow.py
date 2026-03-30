@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Literal
 from uuid import UUID, uuid4
 
 from ..models import WorkflowJob, WorkflowSpecification
@@ -21,7 +22,7 @@ from ..utils import (
     list_workflow_summaries,
     update_job_status,
 )
-from ..worker.queue.app import run_netgent
+from ..worker.queue.app import execute_netgent_workflow, generate_netgent_workflow
 
 
 class WorkflowService:
@@ -32,9 +33,14 @@ class WorkflowService:
         self,
         session,
         job: WorkflowJob,
+        *,
+        operation: Literal["generate", "execute"],
     ) -> str | None:
         try:
-            run_netgent.defer(job_id=str(job.id))
+            if operation == "generate":
+                generate_netgent_workflow.defer(job_id=str(job.id))
+            else:
+                execute_netgent_workflow.defer(job_id=str(job.id))
         except Exception as exc:
             update_job_status(session, job.id, "failed")
             metadata = dict(job.metadata_ or {})
@@ -65,12 +71,13 @@ class WorkflowService:
                     metadata_={
                         "timeout": request.timeout,
                         "type": request.type,
+                        "operation": "generate",
                     },
                 ),
             )
             session.commit()
 
-            defer_error = self._defer_job(session, job)
+            defer_error = self._defer_job(session, job, operation="generate")
             if defer_error is not None:
                 return GenerateWorkflowResponse(
                     workflow_id=str(specification.id),
@@ -105,6 +112,13 @@ class WorkflowService:
                     status="failed",
                     error="Workflow not found",
                 )
+            if not specification.workflow:
+                return ExecuteWorkflowResponse(
+                    job_id="",
+                    workflow_id=request.workflow_id,
+                    status="failed",
+                    error="Workflow has not been generated yet",
+                )
 
             job = create_job(
                 session,
@@ -112,12 +126,15 @@ class WorkflowService:
                     id=uuid4(),
                     workflow_id=specification.id,
                     status="pending",
-                    metadata_={"timeout": request.timeout},
+                    metadata_={
+                        "timeout": request.timeout,
+                        "operation": "execute",
+                    },
                 ),
             )
             session.commit()
 
-            defer_error = self._defer_job(session, job)
+            defer_error = self._defer_job(session, job, operation="execute")
             if defer_error is not None:
                 return ExecuteWorkflowResponse(
                     job_id=str(job.id),

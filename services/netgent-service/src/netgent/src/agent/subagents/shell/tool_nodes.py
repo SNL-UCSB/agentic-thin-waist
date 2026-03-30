@@ -3,25 +3,26 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
-from client.iperf import (
+from langchain_core.messages import ToolMessage
+
+from netgent.src.client.iperf import (
     IPerf3BinaryNotFoundError,
     IPerf3Client,
     IPerf3Error,
 )
-from client.ndt import (
+from netgent.src.client.ndt import (
     NDT7BinaryNotFoundError,
     NDT7Client,
     NDT7Error,
 )
-from client.ping import (
+from netgent.src.client.ping import (
     PingBinaryNotFoundError,
     PingClient,
     PingError,
 )
-from langchain_core.messages import ToolMessage
 
 if TYPE_CHECKING:
-    from agent.subagents.shell.agent import ShellRunAgentState
+    from netgent.src.agent.subagents.shell.agent import ShellRunAgentState
 
 
 def bad_tool_name(state: ShellRunAgentState) -> dict[str, list[ToolMessage]]:

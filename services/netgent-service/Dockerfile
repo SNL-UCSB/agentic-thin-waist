@@ -29,7 +29,7 @@ COPY services/netgent-service/src/ src/
 COPY shared/ /shared/
 
 ENV PATH="/opt/netgent-venv/bin:$PATH"
-ENV PYTHONPATH="/app/src:/app/src/netgent/src:/shared:$PYTHONPATH"
+ENV PYTHONPATH="/app/src:/shared:$PYTHONPATH"
 
 EXPOSE 8003
 

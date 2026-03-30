@@ -62,7 +62,7 @@ The Experiment API is the **controller** — the single point of coordination fo
 Before dispatching any iteration, the controller performs pre-flight checks:
 
 1. **CTP cold start check**: Query CTP Service to confirm the requested CTP is replay-ready. If the CTP requires preparation (extraction, transformation), the controller instructs CTP Service to prepare it and waits for confirmation. This prevents iteration failures due to missing replay data.
-2. **Application support check**: Query NetGent's active application registry (`GET /workflows/available`) to confirm the requested application is supported. If not in the registry, the experiment cannot proceed — adding new application support is out-of-band.
+2. **NetGent workflow readiness check**: Query NetGent for stored workflows (`GET /workflows/available`) or submit `POST /workflows/generate` for the required workflow specification before execution. The current NetGent implementation does not expose a separate application-family registry.
 3. **Substrate availability**: Confirm at least one Substrate Worker is available and healthy.
 
 ## Extended Responsibilities
@@ -71,7 +71,7 @@ The Experiment API is responsible for:
 
 1. **Intent specification**: Accept experiment definitions with static bottleneck regime attributes and dynamic CTP parameters
 2. **Experiment orchestration (controller)**: Coordinate Intent Plane (Link, Bottleneck), Representation Plane (CrossTraffic with CTP operations), and Execution Plane (tc, tshark, tcpreplay) — dispatching one iteration at a time
-3. **Pre-flight validation**: CTP readiness check, application support check, substrate availability check before any dispatch
+3. **Pre-flight validation**: CTP readiness check, NetGent workflow readiness check, substrate availability check before any dispatch
 4. **Bottleneck regime management**: Manage the combination of static attributes and dynamic pressure that defines a bottleneck regime
 5. **Lifecycle management**: Create, validate, provision, execute, and archive experiments with state machine enforcement
 6. **Result aggregation**: Collect measurements and analysis from multiple services into unified ExperimentResult
@@ -240,7 +240,7 @@ The Experiment API references CTPs by name or by cluster attributes (see CTP Ser
 - ctp_operations are valid: extract, select, transform, merge
 - ctp_cluster (optional): cluster ID from CTP Service cluster taxonomy; when provided, overrides ctp_name with cluster-based selection
 - ctp_sampling (optional): sampling strategy when using clusters — `{"strategy": "random", "n_samples": 5}` or `{"strategy": "all"}`
-- applications: non-empty list; each entry has application in list of supported apps and workflow_spec matching that application's capabilities. Multiple entries run concurrently on the same bottleneck.
+- applications: non-empty list; each entry must include an application label plus a concrete `workflow_spec`. In the current NetGent implementation, readiness is established by generating that workflow successfully before execution. Multiple entries run concurrently on the same bottleneck.
 - duration_seconds > 0
 - num_trials >= 1
 - experiment_id is unique
@@ -698,11 +698,11 @@ class ExperimentResult:
 - **Failure Mode**: Return 503 on kernel module unavailability or privilege errors; retry with backoff
 
 ### NetGent Service (Application Execution)
-- **Endpoint**: POST `/workflows/generate`
-- **Purpose**: Execute application workflow (e.g., watch-video-60s) under shaped network conditions
-- **Inputs**: application, workflow_spec, duration_seconds, capture settings
-- **Outputs**: Metrics (QoE, transport), PCAP path, any errors
-- **Failure Mode**: Timeout after 60s; return 504 Gateway Timeout; log partial results
+- **Endpoints**: POST `/workflows/generate`, POST `/workflows/execute`, GET `/workflows/result/{job_id}`
+- **Purpose**: Generate a workflow from natural language, then execute the saved workflow asynchronously under shaped network conditions
+- **Inputs**: `specification`, workflow `type`, optional `timeout`, then `workflow_id` for execution
+- **Outputs**: Job status, artifact metadata, and uploaded run outputs keyed by `job_id`
+- **Failure Mode**: Generation or execution job returns `failed` with `metadata.error`; callers poll `GET /workflows/result/{job_id}` instead of expecting a synchronous terminal response
 
 ### Telemetry Service (Representation Plane — Data Layer)
 - **Endpoint**: POST `/results`, POST `/artifacts/{id}/upload`

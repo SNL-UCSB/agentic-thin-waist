@@ -1,161 +1,224 @@
 import asyncio
 import json
 import os
-from datetime import datetime
-from pathlib import Path
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+import tempfile
+from typing import Any, NotRequired
 
-from browser_use import Agent, Browser, ChatGoogle, Controller
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.graph import END, START, MessagesState
 from langgraph.graph.state import StateGraph
-from langgraph.runtime import Runtime
-from playwright.async_api import Playwright, async_playwright
-from pydantic import BaseModel, ConfigDict
+from playwright.async_api import async_playwright
 
-from agent.subagents.browser.script_generator import save_history_and_script
-
-model = ChatGoogleGenerativeAI(model="gemini-3.1-flash-lite-preview")
-browser_model = ChatGoogle(model="gemini-3.1-flash-lite-preview")
-DEFAULT_ARTIFACTS_DIR = Path(
-    os.getenv("NETGENT_BROWSER_ARTIFACTS_DIR", "artifacts/browser")
+from netgent.src.agent.subagents.browser.execute.agent import (
+    create_agent as create_execute_agent,
 )
-DEFAULT_MAX_STEPS = int(os.getenv("BROWSER_USE_MAX_STEPS", "30"))
-DEFAULT_HEADLESS = os.getenv("BROWSER_USE_HEADLESS", "false").lower() == "true"
-EXCLUDED_BROWSER_USE_ACTIONS = [
-    "search_google",
-    "extract_structured_data",
-    "read_sheet_contents",
-    "read_cell_contents",
-    "update_cell_contents",
-    "clear_cell_contents",
-    "select_cell_or_range",
-    "fallback_input_into_single_selected_cell",
-    "upload_file",
-]
+from netgent.src.agent.subagents.browser.generate.agent import (
+    create_agent as create_browser_generate_agent,
+)
+from netgent.src.agent.subagents.browser.util import open_browser_session
+from netgent.src.engine.controller import ProgramController
+from netgent.src.engine.executor import StateExecutor
+from netgent.src.engine.runner import WorkflowRunner
+from netgent.src.registry.actions.playwright import PLAYWRIGHT_ACTIONS
+from netgent.src.registry.triggers.base import always_true
+from netgent.src.registry.triggers.playwright import PLAYWRIGHT_TRIGGERS
 
 
 class BrowserState(MessagesState):
     task: str
-    final_result: str | None = None
-    history_path: str | None = None
-    script_path: str | None = None
-    manifest_path: str | None = None
-    script_warnings: list[str] = []
+    workflow: dict[str, Any] | None = None
+    result: dict[str, Any] | None = None
+    generate_result: dict[str, Any] | None = None
+    steps: NotRequired[int]
 
 
-class BrowserContext(BaseModel):
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-    playwright: Playwright
+def route_run_workflow(state: BrowserState):
+    if state.get("workflow"):
+        return "run_workflow"
+    return "generate_workflow"
 
 
-def _browserless_ws_endpoint() -> str | None:
-    endpoint = os.getenv("BROWSERLESS_WS_ENDPOINT", "").strip()
-    if not endpoint:
-        return None
-
-    remote_debugging_address = os.getenv(
-        "BROWSERLESS_REMOTE_DEBUGGING_ADDRESS", ""
-    ).strip()
-    if not remote_debugging_address:
-        return endpoint
-
-    split = urlsplit(endpoint)
-    query = dict(parse_qsl(split.query, keep_blank_values=True))
-    launch = {}
-
-    if query.get("launch"):
-        try:
-            launch = json.loads(query["launch"])
-        except json.JSONDecodeError:
-            launch = {}
-
-    args = list(launch.get("args", []))
-    debug_arg = f"--remote-debugging-address={remote_debugging_address}"
-    if debug_arg not in args:
-        args.append(debug_arg)
-
-    launch["args"] = args
-    query["launch"] = json.dumps(launch, separators=(",", ":"))
-
-    return urlunsplit(
-        (split.scheme, split.netloc, split.path, urlencode(query), split.fragment)
-    )
-
-
-async def _open_browser(playwright: Playwright):
-    ws_endpoint = _browserless_ws_endpoint()
-    if ws_endpoint:
-        return await playwright.chromium.connect(ws_endpoint)
-    return await playwright.chromium.launch(headless=DEFAULT_HEADLESS)
-
-
-async def execute_task(state: BrowserState, runtime: Runtime[BrowserContext]):
-    browser = await _open_browser(runtime.context.playwright)
+async def generate_workflow(state: BrowserState) -> dict[str, Any]:
+    playwright = await async_playwright().start()
+    generate_agent = create_browser_generate_agent()
     try:
-        browser_context = await browser.new_context()
-        page = await browser_context.new_page()
-        controller = Controller(exclude_actions=EXCLUDED_BROWSER_USE_ACTIONS)
-        browser_agent = Agent(
-            browser=Browser(
-                browser=browser,
-                browser_context=browser_context,
-                page=page,
-                playwright=runtime.context.playwright,
-            ),
-            controller=controller,
-            llm=browser_model,
-            task=state["task"],
-            headless=DEFAULT_HEADLESS,
-        )
-        history = await browser_agent.run(max_steps=DEFAULT_MAX_STEPS)
-
-        run_dir = DEFAULT_ARTIFACTS_DIR / datetime.now().strftime("%Y%m%d-%H%M%S")
-        artifacts = save_history_and_script(
-            task=state["task"],
-            history=history,
-            output_dir=run_dir,
+        response = await generate_agent.ainvoke(
+            {
+                "task": state["task"],
+                "messages": [],
+                "steps": state.get("steps"),
+            },
+            context={"playwright": playwright},
         )
 
         return {
-            "final_result": history.final_result(),
-            **artifacts,
+            "generate_result": response.get("result"),
+            "workflow": response.get("workflow"),
         }
     finally:
-        await browser.close()
+        await playwright.stop()
+
+
+def route_run_generated_workflow(state: BrowserState):
+    result = state.get("generate_result")
+    workflow = state.get("workflow")
+    if isinstance(result, dict) and result.get("success", False):
+        if isinstance(workflow, dict):
+            return "run_workflow"
+    return END
+
+
+async def run_workflow(state: BrowserState) -> dict[str, Any]:
+    workflow = state.get("workflow")
+    if not isinstance(workflow, dict):
+        return {
+            "result": {
+                "success": False,
+                "error": "Workflow must be generated before running it",
+            }
+        }
+    agent = create_execute_agent()
+    playwright = await async_playwright().start()
+    har_file = tempfile.NamedTemporaryFile(suffix=".har", delete=False)
+    har_file.close()
+    har_path = har_file.name
+    browser_instance, browser_context, page = await open_browser_session(
+        playwright, record_har_path=har_path
+    )
+    runner = WorkflowRunner(
+        controller=ProgramController(
+            triggers=(always_true, *PLAYWRIGHT_TRIGGERS),
+            context={"page": page},
+        ),
+        executor=StateExecutor(
+            actions=PLAYWRIGHT_ACTIONS,
+            context={"page": page},
+        ),
+        config={},
+    )
+    response: dict[str, Any] | None = None
+    try:
+        response = await agent.ainvoke(
+            {
+                "task": state["task"],
+                "messages": state["messages"],
+                "workflow": workflow,
+            },
+            context={
+                "playwright": playwright,
+                "browser": browser_instance,
+                "browser_context": browser_context,
+                "page": page,
+                "runner": runner,
+            },
+        )
+    except Exception as exc:
+        response = {
+            "result": {
+                "success": False,
+                "error": str(exc),
+            }
+        }
+    finally:
+        await browser_context.close()
+        await browser_instance.close()
+        await playwright.stop()
+
+    har_result: dict[str, Any] | None = None
+    if os.path.exists(har_path):
+        try:
+            har_result = json.loads(open(har_path, encoding="utf-8").read())
+        except Exception:
+            har_result = None
+        finally:
+            try:
+                os.unlink(har_path)
+            except OSError:
+                pass
+    response_result = response.get("result") if isinstance(response, dict) else None
+    if isinstance(response_result, dict):
+        final_result = dict(response_result)
+        final_result["har"] = har_result
+    else:
+        final_result = {
+            "data": response_result,
+            "har": har_result,
+        }
+    return {
+        "result": final_result,
+        "workflow": (
+            response.get("workflow", workflow)
+            if isinstance(response, dict)
+            else workflow
+        ),
+    }
 
 
 def create_agent():
-    graph = StateGraph(state_schema=BrowserState, context_schema=BrowserContext)
-    graph.add_node("execute_task", execute_task)
-    graph.add_edge(START, "execute_task")
-    graph.add_edge("execute_task", END)
+    graph = StateGraph(state_schema=BrowserState)
+    graph.add_node("generate_workflow", generate_workflow)
+    graph.add_node("run_workflow", run_workflow)
+    graph.add_conditional_edges(
+        START,
+        route_run_workflow,
+        {
+            "generate_workflow": "generate_workflow",
+            "run_workflow": "run_workflow",
+        },
+    )
+    graph.add_conditional_edges(
+        "generate_workflow",
+        route_run_generated_workflow,
+        {
+            "run_workflow": "run_workflow",
+            END: END,
+        },
+    )
+    graph.add_edge("run_workflow", END)
     return graph.compile()
 
 
 async def main():
-    playwright = await async_playwright().start()
-    try:
-        browser_agent = create_agent()
-        response = await browser_agent.ainvoke(
+    task = (
+        "Run a simple browser workflow. "
+        "First navigate to a test page. "
+        "Second wait for 5 seconds."
+    )
+    workflow = {
+        "specification": (
+            "Run a simple browser workflow. "
+            "First navigate to a test page. "
+            "Second wait for 5 seconds."
+        ),
+        "states": [
             {
-                "task": os.getenv(
-                    "BROWSER_USE_TASK",
-                    "1. Go to YouTube, 2. Search for A Active Content Creator, 3. Go to the First Stream 4. Watch the Video for 10 Seconds. 5. You must skip any ads on the screen. 6. Skip some parts of the Video",
-                )
-            },
-            context={"playwright": playwright},
-        )
-        print(f"Result: {response.get('final_result')}")
-        print(f"History: {response.get('history_path')}")
-        print(f"Script: {response.get('script_path')}")
-        if response.get("script_warnings"):
-            print("Warnings:")
-            for warning in response["script_warnings"]:
-                print(f"- {warning}")
-        return response
-    finally:
-        await playwright.stop()
+                "checks": [{"type": "always_true", "params": {}}],
+                "actions": [
+                    {
+                        "type": "go_to_url",
+                        "params": {
+                            "url": "data:text/html,<html><body><h1>Workflow Runner Test</h1></body></html>",
+                            "new_tab": False,
+                        },
+                    },
+                    {
+                        "type": "wait",
+                        "params": {"seconds": 5},
+                    },
+                ],
+                "end_state": "Workflow Completed",
+            }
+        ],
+    }
+    browser_agent = create_agent()
+    response = await browser_agent.ainvoke(
+        {
+            "task": os.getenv("BROWSER_USE_TASK", task),
+            "messages": [],
+            "workflow": workflow,
+        },
+    )
+    print(response)
+    return response
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from registry.triggers.base import trigger
+from netgent.src.registry.triggers.base import trigger
 
 
 @trigger(name="always_true")
