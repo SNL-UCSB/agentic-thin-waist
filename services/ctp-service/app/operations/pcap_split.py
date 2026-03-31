@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import logging
 import multiprocessing as mp
+from collections import OrderedDict
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -108,20 +109,36 @@ def split_pcap_by_ip(
         "Splitting '%s' by internal IP (subnets: %s)", pcap_input.name, internal_subnets
     )
 
-    # (ip_str, direction) → open PcapWriter
-    writers: Dict[Tuple[str, str], PcapWriter] = {}
+    # LRU cache of open PcapWriters: (ip_str, direction) → PcapWriter.
+    # Bounded to _MAX_OPEN_WRITERS to stay within OS file-descriptor limits.
+    # When the cache is full the least-recently-used writer is closed and
+    # evicted; subsequent packets for that (ip, direction) reopen the file
+    # in append mode so no data is lost.
+    _MAX_OPEN_WRITERS = 512
+    writers: OrderedDict[Tuple[str, str], PcapWriter] = OrderedDict()
     # (ip_str) → {"upload": Path, "download": Path}
     result: Dict[str, Dict[str, Path]] = {}
 
     def _get_writer(ip: str, direction: str) -> PcapWriter:
-        """Open (or return cached) a PcapWriter for the given (ip, direction)."""
+        """Return a PcapWriter for (ip, direction), evicting LRU entry if needed."""
         key = (ip, direction)
-        if key not in writers:
-            user_dir = output_dir / "users" / ip / direction
-            user_dir.mkdir(parents=True, exist_ok=True)
-            path = user_dir / f"{stem}.pcap"
-            writers[key] = PcapWriter(str(path), append=False, sync=False)
-            result.setdefault(ip, {})[direction] = path
+        if key in writers:
+            writers.move_to_end(key)
+            return writers[key]
+
+        user_dir = output_dir / "users" / ip / direction
+        user_dir.mkdir(parents=True, exist_ok=True)
+        path = user_dir / f"{stem}.pcap"
+
+        # Evict LRU writer when at capacity
+        if len(writers) >= _MAX_OPEN_WRITERS:
+            _, lru_writer = writers.popitem(last=False)
+            lru_writer.close()
+
+        # First time → create/truncate; subsequent reopens (after LRU eviction) → append
+        append = path.exists() and ip in result and direction in result[ip]
+        writers[key] = PcapWriter(str(path), append=append, sync=False)
+        result.setdefault(ip, {})[direction] = path
         return writers[key]
 
     packets_total = 0
