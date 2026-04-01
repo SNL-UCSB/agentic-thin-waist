@@ -151,18 +151,19 @@ class HealthResponse(BaseModel):
 
 class ReplayRequest(BaseModel):
     ctp_file: str = Field(
-        ..., description="CTP pcap filename inside CTP_DIR (e.g., 'youtube_10mbps')"
+        ...,
+        description=(
+            "CTP base name without direction prefix or .pcap extension "
+            "(e.g., 'cluster26_tree10_profile424'). "
+            "Download PCAP is read from CTP_DIR/download/<ctp_file>.pcap; "
+            "upload from CTP_DIR/upload/<ctp_file>.pcap."
+        ),
     )
-    interface: str = Field(..., description="Target interface (e.g., veth1)")
-    rate: Optional[str] = Field(
-        None,
-        description="Replay rate in Mbps (e.g., '10'). If omitted, use original rate.",
-    )
-    loop: bool = Field(False, description="Repeat replay indefinitely")
     duration_seconds: Optional[int] = Field(None, description="Stop after N seconds")
-    pnat: Optional[str] = Field(
-        None,
-        description="PNAT rewrite rules e.g. '169.231.0.0/16:172.16.1.1,128.111.0.0/16:172.16.1.1'",
+    pnat: str = Field(
+        ...,
+        description="PNAT rewrite rules mapping internal subnets to the target IP "
+                    "e.g. '169.231.0.0/16:172.16.1.1,128.111.0.0/16:172.16.1.1'",
     )
 
 
@@ -170,17 +171,14 @@ class ReplayResponse(BaseModel):
     replay_id: str
     status: str
     ctp_file: str
-    interface: str
-    rate: str
+    pnat: str
 
 
 class ReplayStatusResponse(BaseModel):
     replay_id: str
-    status: str  # "running", "finished", "not_found"
+    status: str  # "running" if either direction is still active, "finished" when both done
     ctp_file: str
-    interface: str
-    rate: str
-    pnat: Optional[str]
+    pnat: str
     start_time: str
 
 
@@ -768,38 +766,35 @@ def health() -> HealthResponse:
 
 @app.post("/replay", response_model=ReplayResponse)
 def start_replay(cfg: ReplayRequest) -> ReplayResponse:
-    ctp_path = f"{CTP_DIR}/{cfg.ctp_file}.pcap"
+    download_path = f"{CTP_DIR}/download/{cfg.ctp_file}.pcap"
+    upload_path = f"{CTP_DIR}/upload/{cfg.ctp_file}.pcap"
 
-    if not os.path.exists(ctp_path):
-        raise HTTPException(status_code=400, detail=f"CTP file not found: {ctp_path}")
+    missing = [p for p in (download_path, upload_path) if not os.path.exists(p)]
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"CTP file(s) not found: {', '.join(missing)}",
+        )
 
-    # Use tcpreplay-edit when pnat rewriting is needed, plain tcpreplay otherwise
-    binary = "tcpreplay-edit" if cfg.pnat else "tcpreplay"
+    def _build_cmd(ns: str, iface: str, pcap_path: str) -> str:
+        parts = [f"ip netns exec {ns} tcpreplay-edit", f"-i {iface}",
+                 f"--pnat={cfg.pnat}"]
+        if cfg.duration_seconds:
+            parts.append(f"--duration={cfg.duration_seconds}")
+        parts.append(pcap_path)
+        return " ".join(parts)
 
-    cmd_parts = [
-        f"ip netns exec ns1 {binary}",
-        f"-i {cfg.interface}",
-    ]
-
-    # Add rate only if provided
-    if cfg.rate:
-        cmd_parts.append(f"--mbps={cfg.rate}")
-
-    if cfg.pnat:
-        cmd_parts.append(f"--pnat={cfg.pnat}")
-
-    if cfg.loop:
-        cmd_parts.append("--loop=0")
-
-    if cfg.duration_seconds:
-        cmd_parts.append(f"--duration={cfg.duration_seconds}")
-
-    cmd_parts.append(ctp_path)
-    cmd = " ".join(cmd_parts)
+    # Download: injected from ns2 (server side) on veth3 → simulates incoming traffic
+    # Upload:   injected from ns1 (client side) on veth1 → simulates outgoing traffic
+    dl_cmd = _build_cmd("ns2", "veth3", download_path)
+    ul_cmd = _build_cmd("ns1", "veth1", upload_path)
 
     try:
-        proc = subprocess.Popen(
-            cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        dl_proc = subprocess.Popen(
+            dl_cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+        ul_proc = subprocess.Popen(
+            ul_cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to start tcpreplay: {exc}")
@@ -808,10 +803,9 @@ def start_replay(cfg: ReplayRequest) -> ReplayResponse:
     ACTIVE_REPLAYS[replay_id] = {
         "replay_id": replay_id,
         "ctp_file": cfg.ctp_file,
-        "interface": cfg.interface,
-        "rate": cfg.rate,
         "pnat": cfg.pnat,
-        "process": proc,
+        "download_proc": dl_proc,
+        "upload_proc": ul_proc,
         "start_time": datetime.utcnow().isoformat(),
     }
 
@@ -819,8 +813,7 @@ def start_replay(cfg: ReplayRequest) -> ReplayResponse:
         replay_id=replay_id,
         status="started",
         ctp_file=cfg.ctp_file,
-        interface=cfg.interface,
-        rate=cfg.rate,
+        pnat=cfg.pnat,
     )
 
 
@@ -833,17 +826,15 @@ def get_replay(replay_id: str) -> ReplayStatusResponse:
             status_code=404, detail=f"Replay session not found: {replay_id}"
         )
 
-    # Poll the process to check if it's still running
-    proc: subprocess.Popen = session["process"]
-    status = "running" if proc.poll() is None else "finished"
+    dl_proc: subprocess.Popen = session["download_proc"]
+    ul_proc: subprocess.Popen = session["upload_proc"]
+    status = "running" if (dl_proc.poll() is None or ul_proc.poll() is None) else "finished"
 
     return ReplayStatusResponse(
         replay_id=replay_id,
         status=status,
         ctp_file=session["ctp_file"],
-        interface=session["interface"],
-        rate=session["rate"],
-        pnat=session.get("pnat"),
+        pnat=session["pnat"],
         start_time=session["start_time"],
     )
 
@@ -857,15 +848,13 @@ def delete_replay(replay_id: str):
             status_code=404, detail=f"Replay session not found: {replay_id}"
         )
 
-    proc: subprocess.Popen = session["process"]
-
-    # Only terminate if still running
-    if proc.poll() is None:
-        proc.terminate()
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()  # force kill if terminate didn't work
+    for proc in (session["download_proc"], session["upload_proc"]):
+        if proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
 
     del ACTIVE_REPLAYS[replay_id]
 

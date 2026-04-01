@@ -674,10 +674,8 @@ class TestCaptureEndpoint:
 
 class TestReplayEndpoint:
     VALID_REPLAY_PAYLOAD = {
-        "ctp_file": "youtube_10mbps",
-        "interface": "veth4",
-        "rate": "10",
-        "loop": False,
+        "ctp_file": "cluster26_tree10_profile424",
+        "pnat": "169.231.0.0/16:172.16.1.1,128.111.0.0/16:172.16.1.1",
     }
 
     @patch("os.path.exists", return_value=True)
@@ -692,15 +690,18 @@ class TestReplayEndpoint:
         body = resp.json()
         assert body["status"] == "started"
         assert "replay_id" in body
-        assert body["ctp_file"] == "youtube_10mbps"
-        assert body["interface"] == "veth4"
-        assert body["rate"] == "10"
+        assert body["ctp_file"] == "cluster26_tree10_profile424"
+        assert body["pnat"] == self.VALID_REPLAY_PAYLOAD["pnat"]
 
     @patch("os.path.exists", return_value=False)
-    def test_replay_missing_ctp_file(self, _):
+    def test_replay_missing_ctp_files(self, _):
         resp = client.post("/replay", json=self.VALID_REPLAY_PAYLOAD)
         assert resp.status_code == 400
-        assert "CTP file not found" in resp.json()["detail"]
+        assert "CTP file(s) not found" in resp.json()["detail"]
+
+    def test_replay_missing_pnat_rejected(self):
+        resp = client.post("/replay", json={"ctp_file": "cluster26_tree10_profile424"})
+        assert resp.status_code == 422
 
     @patch("os.path.exists", return_value=True)
     @patch("subprocess.Popen")
@@ -715,37 +716,60 @@ class TestReplayEndpoint:
 
     @patch("os.path.exists", return_value=True)
     @patch("subprocess.Popen")
-    def test_replay_uses_tcpreplay_edit_with_pnat(self, mock_popen, _exists):
-        mock_proc = MagicMock()
-        mock_proc.poll.return_value = None
-        mock_popen.return_value = mock_proc
-
-        payload = {**self.VALID_REPLAY_PAYLOAD, "pnat": "169.231.0.0/16:172.16.1.1"}
-        client.post("/replay", json=payload)
-
-        cmd_used = mock_popen.call_args[0][0]
-        assert "tcpreplay-edit" in cmd_used
-        assert "--pnat=" in cmd_used
-
-    @patch("os.path.exists", return_value=True)
-    @patch("subprocess.Popen")
-    def test_replay_uses_plain_tcpreplay_without_pnat(self, mock_popen, _exists):
+    def test_replay_launches_two_processes(self, mock_popen, _exists):
         mock_proc = MagicMock()
         mock_proc.poll.return_value = None
         mock_popen.return_value = mock_proc
 
         client.post("/replay", json=self.VALID_REPLAY_PAYLOAD)
-
-        cmd_used = mock_popen.call_args[0][0]
-        assert "tcpreplay-edit" not in cmd_used
-        assert "tcpreplay" in cmd_used
+        assert mock_popen.call_count == 2
 
     @patch("os.path.exists", return_value=True)
     @patch("subprocess.Popen")
-    def test_replay_status_running(self, mock_popen, _exists):
+    def test_replay_download_in_ns2_veth3(self, mock_popen, _exists):
         mock_proc = MagicMock()
         mock_proc.poll.return_value = None
         mock_popen.return_value = mock_proc
+
+        client.post("/replay", json=self.VALID_REPLAY_PAYLOAD)
+        calls = [c[0][0] for c in mock_popen.call_args_list]
+        dl_cmd = next(c for c in calls if "download" in c)
+        assert "ns2" in dl_cmd
+        assert "veth3" in dl_cmd
+
+    @patch("os.path.exists", return_value=True)
+    @patch("subprocess.Popen")
+    def test_replay_upload_in_ns1_veth1(self, mock_popen, _exists):
+        mock_proc = MagicMock()
+        mock_proc.poll.return_value = None
+        mock_popen.return_value = mock_proc
+
+        client.post("/replay", json=self.VALID_REPLAY_PAYLOAD)
+        calls = [c[0][0] for c in mock_popen.call_args_list]
+        ul_cmd = next(c for c in calls if "upload" in c)
+        assert "ns1" in ul_cmd
+        assert "veth1" in ul_cmd
+
+    @patch("os.path.exists", return_value=True)
+    @patch("subprocess.Popen")
+    def test_replay_always_uses_tcpreplay_edit(self, mock_popen, _exists):
+        mock_proc = MagicMock()
+        mock_proc.poll.return_value = None
+        mock_popen.return_value = mock_proc
+
+        client.post("/replay", json=self.VALID_REPLAY_PAYLOAD)
+        calls = [c[0][0] for c in mock_popen.call_args_list]
+        assert all("tcpreplay-edit" in cmd for cmd in calls)
+        assert all("--pnat=" in cmd for cmd in calls)
+
+    @patch("os.path.exists", return_value=True)
+    @patch("subprocess.Popen")
+    def test_replay_status_running_when_either_proc_running(self, mock_popen, _exists):
+        dl_proc = MagicMock()
+        dl_proc.poll.return_value = None  # download still running
+        ul_proc = MagicMock()
+        ul_proc.poll.return_value = 0     # upload finished
+        mock_popen.side_effect = [dl_proc, ul_proc]
 
         start_resp = client.post("/replay", json=self.VALID_REPLAY_PAYLOAD)
         replay_id = start_resp.json()["replay_id"]
@@ -756,10 +780,12 @@ class TestReplayEndpoint:
 
     @patch("os.path.exists", return_value=True)
     @patch("subprocess.Popen")
-    def test_replay_status_finished(self, mock_popen, _exists):
-        mock_proc = MagicMock()
-        mock_proc.poll.return_value = 0
-        mock_popen.return_value = mock_proc
+    def test_replay_status_finished_when_both_procs_done(self, mock_popen, _exists):
+        dl_proc = MagicMock()
+        dl_proc.poll.return_value = 0
+        ul_proc = MagicMock()
+        ul_proc.poll.return_value = 0
+        mock_popen.side_effect = [dl_proc, ul_proc]
 
         start_resp = client.post("/replay", json=self.VALID_REPLAY_PAYLOAD)
         replay_id = start_resp.json()["replay_id"]
@@ -773,10 +799,12 @@ class TestReplayEndpoint:
 
     @patch("os.path.exists", return_value=True)
     @patch("subprocess.Popen")
-    def test_replay_delete_stops_process(self, mock_popen, _exists):
-        mock_proc = MagicMock()
-        mock_proc.poll.return_value = None
-        mock_popen.return_value = mock_proc
+    def test_replay_delete_stops_both_processes(self, mock_popen, _exists):
+        dl_proc = MagicMock()
+        dl_proc.poll.return_value = None
+        ul_proc = MagicMock()
+        ul_proc.poll.return_value = None
+        mock_popen.side_effect = [dl_proc, ul_proc]
 
         start_resp = client.post("/replay", json=self.VALID_REPLAY_PAYLOAD)
         replay_id = start_resp.json()["replay_id"]
@@ -784,7 +812,8 @@ class TestReplayEndpoint:
         del_resp = client.delete(f"/replay/{replay_id}")
         assert del_resp.status_code == 200
         assert del_resp.json()["status"] == "stopped"
-        mock_proc.terminate.assert_called_once()
+        dl_proc.terminate.assert_called_once()
+        ul_proc.terminate.assert_called_once()
         assert replay_id not in main_module.ACTIVE_REPLAYS
 
     def test_replay_delete_not_found(self):

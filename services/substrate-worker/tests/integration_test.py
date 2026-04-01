@@ -421,14 +421,9 @@ class TestReplayIntegration:
     Error-path tests always run. Success-path tests skip if CTP file is missing.
     """
 
-    CTP_FILE = (
-        "out_70_profile8"  # matches actual filename in /home/netreplica/config/ctp
-    )
+    CTP_FILE = "cluster26_tree10_profile424"
     REPLAY_PAYLOAD = {
         "ctp_file": CTP_FILE,
-        "interface": "veth1",
-        "rate": "10",
-        "loop": False,
         "duration_seconds": 40,
         "pnat": "169.231.0.0/16:172.16.1.1,128.111.0.0/16:172.16.1.1",
     }
@@ -474,8 +469,8 @@ class TestReplayIntegration:
         assert r.status_code == 400
         assert "CTP file not found" in r.json()["detail"]
 
-    def test_replay_missing_required_fields_rejected(self):
-        bad = {k: v for k, v in self.REPLAY_PAYLOAD.items() if k != "interface"}
+    def test_replay_missing_pnat_rejected(self):
+        bad = {k: v for k, v in self.REPLAY_PAYLOAD.items() if k != "pnat"}
         r = requests.post(f"{BASE}/replay", json=bad, timeout=10)
         assert r.status_code == 422
 
@@ -502,7 +497,7 @@ class TestReplayIntegration:
     def test_replay_response_fields(self):
         if self.skipped:
             pytest.skip("CTP file not found")
-        for field in ["replay_id", "status", "ctp_file", "interface", "rate"]:
+        for field in ["replay_id", "status", "ctp_file", "pnat"]:
             assert field in self.body, f"Missing field: {field}"
 
     def test_replay_response_status_is_started(self):
@@ -515,15 +510,10 @@ class TestReplayIntegration:
             pytest.skip("CTP file not found")
         assert self.body["ctp_file"] == self.CTP_FILE
 
-    def test_replay_response_interface_matches(self):
+    def test_replay_response_pnat_matches(self):
         if self.skipped:
             pytest.skip("CTP file not found")
-        assert self.body["interface"] == self.REPLAY_PAYLOAD["interface"]
-
-    def test_replay_response_rate_matches(self):
-        if self.skipped:
-            pytest.skip("CTP file not found")
-        assert self.body["rate"] == self.REPLAY_PAYLOAD["rate"]
+        assert self.body["pnat"] == self.REPLAY_PAYLOAD["pnat"]
 
     def test_replay_status_returns_200(self):
         if self.skipped:
@@ -538,14 +528,7 @@ class TestReplayIntegration:
     def test_replay_status_fields(self):
         if self.skipped:
             pytest.skip("CTP file not found")
-        for field in [
-            "replay_id",
-            "status",
-            "ctp_file",
-            "interface",
-            "rate",
-            "start_time",
-        ]:
+        for field in ["replay_id", "status", "ctp_file", "pnat", "start_time"]:
             assert field in self.status_body, f"Missing field: {field}"
 
     def test_replay_status_replay_id_matches(self):
