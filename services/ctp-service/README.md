@@ -472,8 +472,8 @@ All settings are controlled by environment variables prefixed `CTP_`.
 # Development
 uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
 
-# Production (via Docker — uses gunicorn + UvicornWorker)
-docker-compose up postgres ctp-service
+# Production (via Docker Compose — builds image, starts postgres, then ctp-service)
+sudo docker compose up --build ctp-service
 ```
 
 ### Run the CLI pipeline (Extract)
@@ -601,50 +601,19 @@ pytest services/ctp-service/tests/ -v
 
 ## Docker Setup and Usage
 
-### Step 1 — Build the Image
+### Step 1 — Configure Environment
 
-Run from the repo root:
-
-```bash
-cd agentic-thin-waist/
-sudo docker build -t ctp-service -f services/ctp-service/Dockerfile .
-```
-
-### Step 2 — Start Infrastructure
-
-#### 2a. Create a shared Docker network
-
-```bash
-sudo docker network create ctp-net
-```
-
-#### 2b. Start PostgreSQL
-
-```bash
-sudo docker run -d \
-  --name ctp-postgres \
-  --network ctp-net \
-  -e POSTGRES_USER=ctp_user \
-  -e POSTGRES_PASSWORD=ctp_pass \
-  -e POSTGRES_DB=ctp_corpus \
-  -v pgdata:/var/lib/postgresql/data \
-  postgres:15
-```
-
-#### 2c. Apply the database schema
-
-```bash
-sudo docker exec -i ctp-postgres psql \
-  -U ctp_user -d ctp_corpus \
-  < services/ctp-service/app/database/schema.sql
-```
-
-### Step 3 — Configure Environment
-
-Create `services/ctp-service/.env`:
+In the root `.env` file, set the paths for PCAP input and output directories:
 
 ```ini
-CTP_DATABASE_URL=postgresql://ctp_user:ctp_pass@ctp-postgres:5432/ctp_corpus
+CTP_DIR=/path/to/pcap/input
+CTP_OUTPUT_DIR=/path/to/output/dir
+```
+
+All other CTP settings (`CTP_DATABASE_URL`, `CTP_PORT`, etc.) should also be present in the root `.env`. Example values:
+
+```ini
+CTP_DATABASE_URL=postgresql://admin:admin123@postgres:5432/telemetry
 CTP_PORT=8001
 CTP_LOG_LEVEL=INFO
 CTP_WORKERS=4
@@ -653,21 +622,15 @@ CTP_BURST_INTERVAL_MS=100
 CTP_GATEWAY_SUBNET=169.231.0.0/16
 ```
 
-### Step 4 — Start the CTP Service
+### Step 2 — Start the CTP Service
 
-Replace the two `-v` mount paths with your actual input and output directories.
+From the repo root, run:
 
 ```bash
-sudo docker run \
-  --name ctp-service \
-  --network ctp-net \
-  -p 8001:8001 \
-  --env-file services/ctp-service/.env \
-  --cap-add=NET_ADMIN \
-  -v /path/to/pcap/input:/path/to/pcap/input:ro \
-  -v /path/to/output/dir:/path/to/output/dir \
-  ctp-service
+sudo docker compose up --build ctp-service
 ```
+
+This will automatically build the image, start PostgreSQL (waiting for it to be healthy), and launch the CTP service. The PCAP input directory is mounted read-only; the output directory is mounted read-write.
 
 ### Step 5 — API Usage Examples
 
