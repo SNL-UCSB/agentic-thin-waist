@@ -768,7 +768,7 @@ class TestReplayEndpoint:
         dl_proc = MagicMock()
         dl_proc.poll.return_value = None  # download still running
         ul_proc = MagicMock()
-        ul_proc.poll.return_value = 0     # upload finished
+        ul_proc.poll.return_value = 0  # upload finished
         mock_popen.side_effect = [dl_proc, ul_proc]
 
         start_resp = client.post("/replay", json=self.VALID_REPLAY_PAYLOAD)

@@ -163,7 +163,7 @@ class ReplayRequest(BaseModel):
     pnat: str = Field(
         ...,
         description="PNAT rewrite rules mapping internal subnets to the target IP "
-                    "e.g. '169.231.0.0/16:172.16.1.1,128.111.0.0/16:172.16.1.1'",
+        "e.g. '169.231.0.0/16:172.16.1.1,128.111.0.0/16:172.16.1.1'",
     )
 
 
@@ -176,7 +176,9 @@ class ReplayResponse(BaseModel):
 
 class ReplayStatusResponse(BaseModel):
     replay_id: str
-    status: str  # "running" if either direction is still active, "finished" when both done
+    status: (
+        str  # "running" if either direction is still active, "finished" when both done
+    )
     ctp_file: str
     pnat: str
     start_time: str
@@ -777,8 +779,11 @@ def start_replay(cfg: ReplayRequest) -> ReplayResponse:
         )
 
     def _build_cmd(ns: str, iface: str, pcap_path: str) -> str:
-        parts = [f"ip netns exec {ns} tcpreplay-edit", f"-i {iface}",
-                 f"--pnat={cfg.pnat}"]
+        parts = [
+            f"ip netns exec {ns} tcpreplay-edit",
+            f"-i {iface}",
+            f"--pnat={cfg.pnat}",
+        ]
         if cfg.duration_seconds:
             parts.append(f"--duration={cfg.duration_seconds}")
         parts.append(pcap_path)
@@ -828,7 +833,9 @@ def get_replay(replay_id: str) -> ReplayStatusResponse:
 
     dl_proc: subprocess.Popen = session["download_proc"]
     ul_proc: subprocess.Popen = session["upload_proc"]
-    status = "running" if (dl_proc.poll() is None or ul_proc.poll() is None) else "finished"
+    status = (
+        "running" if (dl_proc.poll() is None or ul_proc.poll() is None) else "finished"
+    )
 
     return ReplayStatusResponse(
         replay_id=replay_id,
