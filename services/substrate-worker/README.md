@@ -313,34 +313,30 @@ Gracefully terminates tshark; PCAP file is retained on disk.
 
 ### 7. Replay CTP Traffic (POST /replay)
 
-Start a tcpreplay session against a PCAP file from CTP_DIR.
+Start bidirectional CTP background traffic replay. Two `tcpreplay-edit` processes are launched simultaneously:
+- **Download** (incoming): `CTP_DIR/download/<ctp_file>.pcap` injected from `ns2` on `veth3`
+- **Upload** (outgoing): `CTP_DIR/upload/<ctp_file>.pcap` injected from `ns1` on `veth1`
 
 **Request**:
 ```json
 {
-  "ctp_file": "out_70_profile8",
-  "interface": "veth1",
-  "rate": "10",
-  "loop": false,
+  "ctp_file": "cluster26_tree10_profile424",
   "duration_seconds": 60,
-  "pnat": "169.231.0.0/16:172.16.1.1"
+  "pnat": "169.231.0.0/16:172.16.1.1,128.111.0.0/16:172.16.1.1"
 }
 ```
 
-- `ctp_file`: filename (without `.pcap`) in `CTP_DIR`
-- `rate`: replay rate in Mbps (optional)
-- `loop`: repeat indefinitely
-- `duration_seconds`: auto-stop after N seconds (optional)
-- `pnat`: IP rewrite rule `"src_net:dst_ip[,...]"` — uses `tcpreplay-edit` when provided
+- `ctp_file`: base filename (without direction prefix or `.pcap`). Both `CTP_DIR/download/<ctp_file>.pcap` and `CTP_DIR/upload/<ctp_file>.pcap` must exist.
+- `pnat`: required IP rewrite rule mapping internal subnets to the target client IP — passed to `tcpreplay-edit --pnat`
+- `duration_seconds`: auto-stop both directions after N seconds (optional)
 
 **Response** (200 OK):
 ```json
 {
   "replay_id": "550e8400-e29b-41d4-a716-446655440001",
   "status": "started",
-  "ctp_file": "out_70_profile8",
-  "interface": "veth1",
-  "rate": "10"
+  "ctp_file": "cluster26_tree10_profile424",
+  "pnat": "169.231.0.0/16:172.16.1.1,128.111.0.0/16:172.16.1.1"
 }
 ```
 
@@ -353,13 +349,13 @@ Start a tcpreplay session against a PCAP file from CTP_DIR.
 {
   "replay_id": "...",
   "status": "running",
-  "ctp_file": "out_70_profile8",
-  "interface": "veth1",
-  "rate": "10",
-  "pnat": "169.231.0.0/16:172.16.1.1",
+  "ctp_file": "cluster26_tree10_profile424",
+  "pnat": "169.231.0.0/16:172.16.1.1,128.111.0.0/16:172.16.1.1",
   "start_time": "2026-03-25T10:00:00"
 }
 ```
+
+`status` is `"running"` if either direction is still active; `"finished"` when both are done.
 
 ---
 
@@ -414,12 +410,9 @@ duration_seconds: Optional[int]
 
 ### ReplayRequest
 ```python
-ctp_file: str
-interface: str
-rate: Optional[str]           # In Mbps
-loop: bool                    # Default False
+ctp_file: str                 # Base name; resolves to CTP_DIR/download/<name>.pcap and CTP_DIR/upload/<name>.pcap
+pnat: str                     # Required: "src_net:dst_ip[,...]" passed to tcpreplay-edit --pnat
 duration_seconds: Optional[int]
-pnat: Optional[str]           # "src_net:dst_ip[,...]"
 ```
 
 ## Implementation Notes
@@ -579,17 +572,10 @@ curl -X DELETE http://localhost:8002/capture/{capture_id}
 
 ### Replay CTP background traffic
 
+Launches download (ns2→veth3) and upload (ns1→veth1) simultaneously:
+
 ```bash
-curl -X POST "http://localhost:8002/replay" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "ctp_file": "out_70_profile8",
-    "interface": "veth1",
-    "rate": "10",
-    "loop": false,
-    "duration_seconds": 60,
-    "pnat": "169.231.0.0/16:172.16.1.1"
-  }'
+curl -X POST http://localhost:8002/replay -H "Content-Type: application/json" -d '{"ctp_file":"cluster26_tree10_profile424","pnat":"169.231.0.0/16:172.16.1.1,128.111.0.0/16:172.16.1.1","duration_seconds":60}'
 ```
 
 Poll replay status:
