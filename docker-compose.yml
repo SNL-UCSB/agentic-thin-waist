@@ -365,6 +365,7 @@ services:
       - agentic-network
     volumes:
       - ./services/orchestration:/app
+      - /var/run/docker.sock:/var/run/docker.sock
     healthcheck:
       test:
         [

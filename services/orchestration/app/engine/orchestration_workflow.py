@@ -9,7 +9,11 @@ from __future__ import annotations
 import logging
 import os
 import time
-from typing import Any
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from app.engine.connectivity import ConnectivityManager, WorkerInfo
 
 logger = logging.getLogger(__name__)
 
@@ -687,12 +691,46 @@ def _wait_and_stop_capture(
 # ---------------------------------------------------------------------------
 
 
+def _run_iteration_on_worker(
+    base_clients: DownstreamClients,
+    spec: dict[str, Any],
+    orch_id: str,
+    idx: int,
+    connectivity_manager: "ConnectivityManager",
+) -> dict[str, Any]:
+    """Create an ephemeral worker, run one iteration, then destroy the worker.
+
+    Used by the parallel execution path in :func:`run_orchestration`.
+    Each call has its own :class:`OrchestrationRunRecorder` so iteration stages
+    don't race with the shared recorder.
+    """
+    from app.engine.connectivity import ConnectivityManager as _CM  # noqa: F401
+
+    worker_info: WorkerInfo | None = None
+    iter_recorder = OrchestrationRunRecorder()
+    try:
+        worker_info = connectivity_manager.create_worker({})
+        iter_clients = DownstreamClients(substrate_worker_url=worker_info.endpoint)
+        result = run_single_iteration(iter_clients, spec, orch_id, idx, iter_recorder)
+        result["worker_id"] = worker_info.worker_id
+        result["_iteration_stages"] = iter_recorder.stages
+        return result
+    finally:
+        if worker_info is not None:
+            try:
+                connectivity_manager.destroy_worker(worker_info.worker_id)
+            except Exception as exc:
+                logger.warning("Failed to destroy worker %s: %s", worker_info.worker_id, exc)
+
+
 def run_orchestration(
     orch_id: str,
     intent: str,
     parsed_intent: dict[str, Any],
     *,
     clients: DownstreamClients | None = None,
+    connectivity_manager: "ConnectivityManager | None" = None,
+    max_parallel_workers: int = 1,
 ) -> dict[str, Any]:
     """Full orchestration workflow: spec generation → preflight → iterations → aggregation.
 
@@ -754,13 +792,62 @@ def run_orchestration(
 
     # --- D. Per-iteration dispatch ---
     iteration_results: list[dict[str, Any]] = []
-    for idx, spec in enumerate(experiment_specs):
-        iter_result = run_single_iteration(clients, spec, orch_id, idx, recorder)
-        iteration_results.append(iter_result)
 
+    use_parallel = (
+        connectivity_manager is not None
+        and max_parallel_workers > 1
+        and len(experiment_specs) > 1
+    )
+
+    if use_parallel:
+        # Parallel path: each iteration gets its own ephemeral worker.
+        # Iterations run concurrently; the shared recorder only sees top-level stages.
+        with ThreadPoolExecutor(max_workers=max_parallel_workers) as pool:
+            futures = [
+                pool.submit(
+                    _run_iteration_on_worker,
+                    clients,
+                    spec,
+                    orch_id,
+                    idx,
+                    connectivity_manager,
+                )
+                for idx, spec in enumerate(experiment_specs)
+            ]
+            # Preserve original order
+            iteration_results = [f.result() for f in futures]
         orch_record["results"] = iteration_results
         orch_record["lifecycle_stages"] = recorder.stages
         save_orchestration(orch_record)
+    else:
+        # Sequential path (default): optionally provision a per-iteration worker.
+        for idx, spec in enumerate(experiment_specs):
+            worker_info: "WorkerInfo | None" = None
+            iter_clients = clients
+            if connectivity_manager is not None:
+                worker_info = connectivity_manager.create_worker({})
+                iter_clients = DownstreamClients(
+                    substrate_worker_url=worker_info.endpoint
+                )
+            try:
+                iter_result = run_single_iteration(
+                    iter_clients, spec, orch_id, idx, recorder
+                )
+                if worker_info is not None:
+                    iter_result["worker_id"] = worker_info.worker_id
+            finally:
+                if worker_info is not None and connectivity_manager is not None:
+                    try:
+                        connectivity_manager.destroy_worker(worker_info.worker_id)
+                    except Exception as exc:
+                        logger.warning(
+                            "Failed to destroy worker %s: %s", worker_info.worker_id, exc
+                        )
+            iteration_results.append(iter_result)
+
+            orch_record["results"] = iteration_results
+            orch_record["lifecycle_stages"] = recorder.stages
+            save_orchestration(orch_record)
 
     # --- E + F. Aggregate ---
     successful = sum(1 for r in iteration_results if r.get("status") == "success")

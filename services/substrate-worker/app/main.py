@@ -202,6 +202,30 @@ class CongestionResponse(BaseModel):
     current_algorithm: str
     available_algorithms: List[str]
     status: str
+
+
+class CtpFetchRequest(BaseModel):
+    ctp_pointer: str = Field(
+        ...,
+        description=(
+            "URL, absolute path, or plain base name identifying the CTP to fetch. "
+            "URL: fetches ?direction=download and ?direction=upload from the base URL. "
+            "Absolute path: path to the download PCAP; upload derived by replacing /download/ with /upload/. "
+            "Plain name: verifies files are already present in CTP_DIR."
+        ),
+    )
+    ctp_root: Optional[str] = Field(
+        None,
+        description="Override the CTP root directory (defaults to CTP_DIR env var).",
+    )
+
+
+class CtpFetchResponse(BaseModel):
+    status: str
+    name: str
+    download_path: str
+    upload_path: str
+    fetched: bool
     applied_commands: List[str] = []
 
 
@@ -963,3 +987,28 @@ def get_congestion(namespace: Optional[str] = None) -> CongestionResponse:
         status="ok",
         applied_commands=[],
     )
+
+
+@app.post("/ctp/fetch", response_model=CtpFetchResponse)
+def fetch_ctp_endpoint(req: CtpFetchRequest) -> CtpFetchResponse:
+    """Fetch download + upload PCAPs for a CTP pointer into the local CTP directory.
+
+    The worker resolves *ctp_pointer* (URL, absolute path, or plain base name),
+    downloads or copies both PCAP files, and places them under::
+
+        <ctp_root>/download/<name>.pcap
+        <ctp_root>/upload/<name>.pcap
+
+    On success the endpoint returns the resolved paths so the caller can confirm
+    placement before issuing a ``POST /replay``.
+    """
+    from ctp_fetcher import fetch_ctp
+
+    try:
+        result = fetch_ctp(req.ctp_pointer, req.ctp_root)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    return CtpFetchResponse(status="ok", **result)
