@@ -1,0 +1,21 @@
+{
+  "specification": "test browser workflow",
+  "states": [
+    {
+      "checks": [
+        {
+          "type": "always_true",
+          "params": {}
+        }
+      ],
+      "actions": [
+        {
+          "type": "go_to_url",
+          "params": {
+            "url": "https://example.com"
+          }
+        }
+      ]
+    }
+  ]
+}

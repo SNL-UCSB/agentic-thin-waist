@@ -6,8 +6,8 @@ from fastapi.testclient import TestClient
 with patch(
     "subprocess.run", return_value=MagicMock(returncode=0, stdout="", stderr="")
 ):
-    from app.main import app, _build_qdisc_args, apply_shaping, BottleneckState
-    import app.main as main_module
+    from substrate.main import app, _build_qdisc_args, apply_shaping, BottleneckState
+    import substrate.main as main_module
 
 client = TestClient(app)
 
@@ -129,7 +129,7 @@ class TestBottleneckStateModel:
 
 class TestHealthEndpoint:
     @patch(
-        "app.main.HEALTH_CACHE",
+        "substrate.main.HEALTH_CACHE",
         {
             "status": "ok",
             "root_privileges": True,
@@ -153,7 +153,7 @@ class TestHealthEndpoint:
         assert "timestamp" in data
 
     @patch(
-        "app.main.HEALTH_CACHE",
+        "substrate.main.HEALTH_CACHE",
         {
             "status": "degraded",
             "root_privileges": False,
@@ -172,7 +172,7 @@ class TestHealthEndpoint:
         assert data["root_privileges"] is False
 
     @patch(
-        "app.main.HEALTH_CACHE",
+        "substrate.main.HEALTH_CACHE",
         {
             "status": "degraded",
             "root_privileges": True,
@@ -194,7 +194,7 @@ class TestHealthEndpoint:
         assert data["qdisc_support"] is False
 
     @patch(
-        "app.main.HEALTH_CACHE",
+        "substrate.main.HEALTH_CACHE",
         {
             "status": "ok",
             "root_privileges": True,
@@ -244,7 +244,7 @@ class TestStateEndpoint:
         main_module.CURRENT_BOTTLENECK_STATE = BottleneckState(
             download_mbps=10, upload_mbps=5, latency_ms=50, qdisc="fq_codel"
         )
-        with patch("app.main._verify_bottleneck_state") as mock_verify:
+        with patch("substrate.main._verify_bottleneck_state") as mock_verify:
             client.get("/state")
             mock_verify.assert_not_called()
 
@@ -272,34 +272,34 @@ class TestApplyShapingLatency:
         buffer_packets=1000,
     )
 
-    @patch("app.main.run_cmd")
+    @patch("substrate.main.run_cmd")
     def test_both_adds_netem_on_veth1_and_veth3(self, mock_run):
         cmds = apply_shaping(**self.BASE_ARGS, latency_location="both")
         add_cmds = [c for c in cmds if "qdisc add" in c and "netem" in c]
         assert any("ns1" in c and "veth1" in c for c in add_cmds)
         assert any("ns2" in c and "veth3" in c for c in add_cmds)
 
-    @patch("app.main.run_cmd")
+    @patch("substrate.main.run_cmd")
     def test_downstream_adds_netem_only_on_veth1(self, mock_run):
         cmds = apply_shaping(**self.BASE_ARGS, latency_location="downstream")
         add_cmds = [c for c in cmds if "qdisc add" in c and "netem" in c]
         assert any("ns1" in c and "veth1" in c for c in add_cmds)
         assert not any("ns2" in c and "veth3" in c for c in add_cmds)
 
-    @patch("app.main.run_cmd")
+    @patch("substrate.main.run_cmd")
     def test_upstream_adds_netem_only_on_veth3(self, mock_run):
         cmds = apply_shaping(**self.BASE_ARGS, latency_location="upstream")
         add_cmds = [c for c in cmds if "qdisc add" in c and "netem" in c]
         assert any("ns2" in c and "veth3" in c for c in add_cmds)
         assert not any("ns1" in c and "veth1" in c for c in add_cmds)
 
-    @patch("app.main.run_cmd")
+    @patch("substrate.main.run_cmd")
     def test_no_location_does_not_add_netem(self, mock_run):
         cmds = apply_shaping(**self.BASE_ARGS, latency_location=None)
         add_cmds = [c for c in cmds if "netem" in c and "del" not in c]
         assert add_cmds == []
 
-    @patch("app.main.run_cmd")
+    @patch("substrate.main.run_cmd")
     def test_zero_latency_does_not_add_netem(self, mock_run):
         cmds = apply_shaping(
             **{**self.BASE_ARGS, "latency_ms": 0}, latency_location="both"
@@ -307,21 +307,21 @@ class TestApplyShapingLatency:
         add_cmds = [c for c in cmds if "netem" in c and "del" not in c]
         assert add_cmds == []
 
-    @patch("app.main.run_cmd")
+    @patch("substrate.main.run_cmd")
     def test_always_cleans_up_both_interfaces(self, mock_run):
         cmds = apply_shaping(**self.BASE_ARGS, latency_location=None)
         del_cmds = [c for c in cmds if "tc qdisc del" in c]
         assert any("ns1" in c and "veth1" in c for c in del_cmds)
         assert any("ns2" in c and "veth3" in c for c in del_cmds)
 
-    @patch("app.main.run_cmd")
+    @patch("substrate.main.run_cmd")
     def test_netem_delay_value_in_command(self, mock_run):
         cmds = apply_shaping(**self.BASE_ARGS, latency_location="both")
         add_cmds = [c for c in cmds if "qdisc add" in c and "netem" in c]
         assert len(add_cmds) == 2
         assert all("50ms" in c for c in add_cmds)
 
-    @patch("app.main.run_cmd")
+    @patch("substrate.main.run_cmd")
     def test_no_veth6_in_any_command(self, mock_run):
         cmds = apply_shaping(**self.BASE_ARGS, latency_location="both")
         assert not any("veth6" in c for c in cmds)
@@ -331,14 +331,14 @@ class TestApplyShapingLatency:
 
 
 class TestShapeEndpoint:
-    @patch("app.main._verify_bottleneck_state")
+    @patch("substrate.main._verify_bottleneck_state")
     @patch("subprocess.run", return_value=MagicMock(returncode=0))
     def test_shape_returns_shaped_status(self, _run, _verify):
         resp = client.post("/shape", json=VALID_SHAPE_PAYLOAD)
         assert resp.status_code == 200
         assert resp.json()["status"] == "shaped"
 
-    @patch("app.main._verify_bottleneck_state")
+    @patch("substrate.main._verify_bottleneck_state")
     @patch("subprocess.run", return_value=MagicMock(returncode=0))
     def test_shape_returns_correct_bottleneck_state(self, _run, _verify):
         resp = client.post("/shape", json=VALID_SHAPE_PAYLOAD)
@@ -350,20 +350,20 @@ class TestShapeEndpoint:
         assert state["qdisc"] == "fq_codel"
         assert state["buffer_packets"] == 1000
 
-    @patch("app.main._verify_bottleneck_state")
+    @patch("substrate.main._verify_bottleneck_state")
     @patch("subprocess.run", return_value=MagicMock(returncode=0))
     def test_shape_returns_applied_commands(self, _run, _verify):
         resp = client.post("/shape", json=VALID_SHAPE_PAYLOAD)
         assert len(resp.json()["applied_commands"]) > 0
 
-    @patch("app.main._verify_bottleneck_state")
+    @patch("substrate.main._verify_bottleneck_state")
     @patch("subprocess.run", return_value=MagicMock(returncode=0))
     def test_shape_calls_verify_once(self, _run, mock_verify):
         """verify must be called exactly once per /shape call."""
         client.post("/shape", json=VALID_SHAPE_PAYLOAD)
         mock_verify.assert_called_once()
 
-    @patch("app.main._verify_bottleneck_state")
+    @patch("substrate.main._verify_bottleneck_state")
     @patch("subprocess.run", return_value=MagicMock(returncode=0))
     def test_shape_updates_global_state(self, _run, _verify):
         client.post("/shape", json=VALID_SHAPE_PAYLOAD)
@@ -417,7 +417,7 @@ class TestShapeEndpoint:
         )
 
     def test_shape_zero_latency_allowed(self):
-        with patch("app.main._verify_bottleneck_state"), patch(
+        with patch("substrate.main._verify_bottleneck_state"), patch(
             "subprocess.run", return_value=MagicMock(returncode=0)
         ):
             resp = client.post("/shape", json={**VALID_SHAPE_PAYLOAD, "latency_ms": 0})
@@ -427,7 +427,7 @@ class TestShapeEndpoint:
         bad = {**VALID_SHAPE_PAYLOAD, "latency_location": "invalid"}
         assert client.post("/shape", json=bad).status_code == 422
 
-    @patch("app.main._verify_bottleneck_state")
+    @patch("substrate.main._verify_bottleneck_state")
     @patch("subprocess.run", return_value=MagicMock(returncode=0))
     def test_shape_no_latency_location_accepted(self, _run, _verify):
         payload = {**VALID_SHAPE_PAYLOAD, "latency_location": None}
@@ -435,7 +435,7 @@ class TestShapeEndpoint:
         assert resp.status_code == 200
         assert resp.json()["bottleneck_state"]["latency_location"] is None
 
-    @patch("app.main._verify_bottleneck_state")
+    @patch("substrate.main._verify_bottleneck_state")
     @patch("subprocess.run", return_value=MagicMock(returncode=0))
     def test_shape_upstream_latency_location(self, _run, _verify):
         payload = {**VALID_SHAPE_PAYLOAD, "latency_location": "upstream"}
@@ -443,7 +443,7 @@ class TestShapeEndpoint:
         assert resp.status_code == 200
         assert resp.json()["bottleneck_state"]["latency_location"] == "upstream"
 
-    @patch("app.main._verify_bottleneck_state")
+    @patch("substrate.main._verify_bottleneck_state")
     @patch("subprocess.run", return_value=MagicMock(returncode=0))
     def test_shape_downstream_latency_location(self, _run, _verify):
         payload = {**VALID_SHAPE_PAYLOAD, "latency_location": "downstream"}
@@ -451,7 +451,7 @@ class TestShapeEndpoint:
         assert resp.status_code == 200
         assert resp.json()["bottleneck_state"]["latency_location"] == "downstream"
 
-    @patch("app.main._verify_bottleneck_state")
+    @patch("substrate.main._verify_bottleneck_state")
     @patch("subprocess.run", side_effect=subprocess.CalledProcessError(1, "tc"))
     def test_shape_tc_failure_returns_500(self, _run, _verify):
         resp = client.post("/shape", json=VALID_SHAPE_PAYLOAD)
@@ -482,7 +482,7 @@ class TestShapeEndpoint:
         assert resp.status_code == 422
         assert "limit" in resp.json()["detail"]
 
-    @patch("app.main._verify_bottleneck_state")
+    @patch("substrate.main._verify_bottleneck_state")
     @patch("subprocess.run", return_value=MagicMock(returncode=0))
     def test_shape_qdisc_params_stored_in_state(self, _run, _verify):
         params = {"target": "5ms", "interval": "100ms"}
@@ -494,14 +494,14 @@ class TestShapeEndpoint:
         state = resp.json()["bottleneck_state"]
         assert state["qdisc_params"] == params
 
-    @patch("app.main._verify_bottleneck_state")
+    @patch("substrate.main._verify_bottleneck_state")
     @patch("subprocess.run", return_value=MagicMock(returncode=0))
     def test_shape_qdisc_params_none_by_default(self, _run, _verify):
         resp = client.post("/shape", json=VALID_SHAPE_PAYLOAD)
         assert resp.status_code == 200
         assert resp.json()["bottleneck_state"]["qdisc_params"] is None
 
-    @patch("app.main._verify_bottleneck_state")
+    @patch("substrate.main._verify_bottleneck_state")
     @patch("subprocess.run", return_value=MagicMock(returncode=0))
     def test_shape_acm_qdisc_default_buffer_packets_allowed(self, _run, _verify):
         """Default buffer_packets (1000) with AQM qdisc is fine — no error."""
@@ -511,7 +511,7 @@ class TestShapeEndpoint:
         )
         assert resp.status_code == 200
 
-    @patch("app.main._verify_bottleneck_state")
+    @patch("substrate.main._verify_bottleneck_state")
     @patch("subprocess.run", return_value=MagicMock(returncode=0))
     def test_shape_limit_in_qdisc_params_for_acm_qdisc_allowed(self, _run, _verify):
         """Explicit 'limit' in qdisc_params for AQM is allowed (advanced use)."""
@@ -530,7 +530,7 @@ class TestShapeEndpoint:
 
 
 class TestCaptureEndpoint:
-    @patch("app.main._get_interfaces", return_value=["veth2", "veth4"])
+    @patch("substrate.main._get_interfaces", return_value=["veth2", "veth4"])
     @patch("subprocess.Popen")
     def test_capture_started(self, mock_popen, _ifaces):
         mock_proc = MagicMock()
@@ -552,7 +552,7 @@ class TestCaptureEndpoint:
         assert body["interface"] == "veth2"
         assert body["capture_filter"] == "tcp port 443"
 
-    @patch("app.main._get_interfaces", return_value=["veth2"])
+    @patch("substrate.main._get_interfaces", return_value=["veth2"])
     @patch("subprocess.Popen")
     def test_capture_stored_in_active_captures(self, mock_popen, _ifaces):
         mock_proc = MagicMock()
@@ -570,7 +570,7 @@ class TestCaptureEndpoint:
         capture_id = resp.json()["capture_id"]
         assert capture_id in main_module.ACTIVE_CAPTURES
 
-    @patch("app.main._get_interfaces", return_value=["veth2"])
+    @patch("substrate.main._get_interfaces", return_value=["veth2"])
     def test_capture_unknown_interface(self, _):
         resp = client.post(
             "/capture",
@@ -584,7 +584,7 @@ class TestCaptureEndpoint:
         assert "Unknown interface" in resp.json()["detail"]
 
     def test_capture_empty_filename_rejected(self):
-        with patch("app.main._get_interfaces", return_value=["veth2"]):
+        with patch("substrate.main._get_interfaces", return_value=["veth2"]):
             resp = client.post(
                 "/capture",
                 json={
@@ -595,7 +595,7 @@ class TestCaptureEndpoint:
             )
             assert resp.status_code == 400
 
-    @patch("app.main._get_interfaces", return_value=["veth2"])
+    @patch("substrate.main._get_interfaces", return_value=["veth2"])
     @patch("subprocess.Popen")
     def test_capture_status_running(self, mock_popen, _ifaces):
         mock_proc = MagicMock()
@@ -616,7 +616,7 @@ class TestCaptureEndpoint:
         assert status_resp.status_code == 200
         assert status_resp.json()["status"] == "running"
 
-    @patch("app.main._get_interfaces", return_value=["veth2"])
+    @patch("substrate.main._get_interfaces", return_value=["veth2"])
     @patch("subprocess.Popen")
     def test_capture_status_finished(self, mock_popen, _ifaces):
         mock_proc = MagicMock()
@@ -641,7 +641,7 @@ class TestCaptureEndpoint:
         resp = client.get("/capture/nonexistent-id")
         assert resp.status_code == 404
 
-    @patch("app.main._get_interfaces", return_value=["veth2"])
+    @patch("substrate.main._get_interfaces", return_value=["veth2"])
     @patch("subprocess.Popen")
     def test_capture_delete_stops_process(self, mock_popen, _ifaces):
         mock_proc = MagicMock()

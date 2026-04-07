@@ -1,11 +1,12 @@
+import os
+import subprocess
+import time
+import uuid
+from datetime import datetime
+from typing import Dict, List, Literal, Optional
+
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
-import subprocess
-import os
-from typing import Dict, List, Literal, Optional
-from datetime import datetime
-import uuid
-import time
 
 # =========================
 # Global variables
@@ -229,6 +230,35 @@ class CtpFetchResponse(BaseModel):
     applied_commands: List[str] = []
 
 
+class RunExperimentRequest(BaseModel):
+    # --- Shaping ---
+    upstream_iface: str = Field("veth4", description="Upload interface")
+    downstream_iface: str = Field("veth2", description="Download interface")
+    download_mbps: float = Field(..., gt=0, description="Download capacity in Mbps")
+    upload_mbps: float = Field(..., gt=0, description="Upload capacity in Mbps")
+    latency_ms: float = Field(0, ge=0, description="One-way delay in ms")
+    latency_location: Optional[Literal["upstream", "downstream", "both"]] = None
+    qdisc: str = Field("pfifo", description="Queue discipline")
+    buffer_packets: int = Field(1000, ge=1, description="Queue depth in packets")
+    qdisc_params: Optional[Dict[str, str]] = None
+    # --- Congestion ---
+    cca: str = Field("cubic", description="TCP congestion control algorithm")
+    cca_namespace: Optional[str] = Field(
+        None, description="Namespace for CCA (ns1, ns2, or null for all)"
+    )
+    # --- Workflow ---
+    workflow: Dict = Field(..., description="Workflow definition (state machine JSON)")
+    runtime: Literal["shell", "browser"] = Field(
+        "shell", description="Workflow runtime"
+    )
+
+
+class RunExperimentResponse(BaseModel):
+    status: str
+    runtime: str
+    result: List
+
+
 # =========================
 # Helper functions
 # =========================
@@ -402,8 +432,8 @@ def _verify_bottleneck_state() -> None:
     log: List[str] = []
 
     try:
-        import time
         import json as _json
+        import time
 
         # Upload test: ns1 → ns2
         _kill_iperf3_servers()
@@ -1002,7 +1032,7 @@ def fetch_ctp_endpoint(req: CtpFetchRequest) -> CtpFetchResponse:
     On success the endpoint returns the resolved paths so the caller can confirm
     placement before issuing a ``POST /replay``.
     """
-    from ctp_fetcher import fetch_ctp
+    from substrate.ctp_fetcher import fetch_ctp
 
     try:
         result = fetch_ctp(req.ctp_pointer, req.ctp_root)
@@ -1012,3 +1042,74 @@ def fetch_ctp_endpoint(req: CtpFetchRequest) -> CtpFetchResponse:
         raise HTTPException(status_code=502, detail=str(exc))
 
     return CtpFetchResponse(status="ok", **result)
+
+
+@app.post("/run", response_model=RunExperimentResponse)
+def run_experiment(req: RunExperimentRequest) -> RunExperimentResponse:
+    """Apply shaping + congestion, then execute a workflow in a single call.
+
+    Equivalent to calling ``POST /shape``, ``POST /congestion``, and running
+    the netgent workflow runner in sequence.
+    """
+    global CURRENT_BOTTLENECK_STATE, CURRENT_INTERFACES
+
+    # 1. Apply shaping
+    _validate_qdisc_request(req.qdisc, req.buffer_packets, req.qdisc_params)
+    state = BottleneckState(
+        download_mbps=req.download_mbps,
+        upload_mbps=req.upload_mbps,
+        latency_ms=req.latency_ms,
+        latency_location=req.latency_location,
+        qdisc=req.qdisc,
+        verified=False,
+        buffer_packets=req.buffer_packets,
+        qdisc_params=req.qdisc_params,
+    )
+    CURRENT_BOTTLENECK_STATE = state
+    CURRENT_INTERFACES = {
+        "downstream_iface": req.downstream_iface,
+        "upstream_iface": req.upstream_iface,
+    }
+    try:
+        apply_shaping(
+            downstream_iface=req.downstream_iface,
+            upstream_iface=req.upstream_iface,
+            download_mbps=req.download_mbps,
+            upload_mbps=req.upload_mbps,
+            latency_ms=req.latency_ms,
+            qdisc=req.qdisc,
+            buffer_packets=req.buffer_packets,
+            qdisc_params=req.qdisc_params,
+            latency_location=req.latency_location,
+        )
+    except subprocess.CalledProcessError as exc:
+        CURRENT_BOTTLENECK_STATE = None
+        CURRENT_INTERFACES = None
+        raise HTTPException(status_code=500, detail=f"tc command failed: {exc}")
+    except Exception as exc:
+        CURRENT_BOTTLENECK_STATE = None
+        CURRENT_INTERFACES = None
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    # 2. Apply congestion control
+    set_congestion(CongestionRequest(algorithm=req.cca, namespace=req.cca_namespace))
+
+    # 3. Run workflow
+    from netgent.src.main import run_workflow
+
+    try:
+        result = run_workflow(req.workflow, runtime=req.runtime)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Workflow failed: {exc}")
+
+    return RunExperimentResponse(
+        status="ok",
+        runtime=req.runtime,
+        result=result if isinstance(result, list) else [result],
+    )
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run("substrate.main:app", host="0.0.0.0", port=8002)

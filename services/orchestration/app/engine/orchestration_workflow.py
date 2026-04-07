@@ -720,7 +720,9 @@ def _run_iteration_on_worker(
             try:
                 connectivity_manager.destroy_worker(worker_info.worker_id)
             except Exception as exc:
-                logger.warning("Failed to destroy worker %s: %s", worker_info.worker_id, exc)
+                logger.warning(
+                    "Failed to destroy worker %s: %s", worker_info.worker_id, exc
+                )
 
 
 def run_orchestration(
@@ -841,7 +843,9 @@ def run_orchestration(
                         connectivity_manager.destroy_worker(worker_info.worker_id)
                     except Exception as exc:
                         logger.warning(
-                            "Failed to destroy worker %s: %s", worker_info.worker_id, exc
+                            "Failed to destroy worker %s: %s",
+                            worker_info.worker_id,
+                            exc,
                         )
             iteration_results.append(iter_result)
 

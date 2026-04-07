@@ -22,6 +22,7 @@ SUBSTRATE_DOCKER_NETWORK   Docker network to attach workers to (default: ``agent
 SUBSTRATE_WORKER_HOST      Host advertised in worker endpoint URLs (default: ``localhost``)
 DOCKER_SOCKET              Path to Docker Unix socket (default: ``/var/run/docker.sock``)
 """
+
 from __future__ import annotations
 
 import logging
@@ -48,9 +49,9 @@ class WorkerInfo:
     """Metadata for a provisioned substrate worker."""
 
     worker_id: str
-    endpoint: str                     # http://host:port
-    backend: str                      # "local_docker" | "aws" | "gcp" | "remote"
-    container_id: str | None = None   # Docker container ID (local_docker only)
+    endpoint: str  # http://host:port
+    backend: str  # "local_docker" | "aws" | "gcp" | "remote"
+    container_id: str | None = None  # Docker container ID (local_docker only)
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -111,13 +112,19 @@ class LocalDockerBackend(ConnectivityBackend):
             ctp_dir (str)        — host path for CTP PCAPs (mounted read-only)
             capture_dir (str)    — host path for capture output
         """
-        image = config.get("image", os.getenv("SUBSTRATE_WORKER_IMAGE", "substrate-worker"))
-        network = config.get("network", os.getenv("SUBSTRATE_DOCKER_NETWORK", "agentic-network"))
+        image = config.get(
+            "image", os.getenv("SUBSTRATE_WORKER_IMAGE", "substrate-worker")
+        )
+        network = config.get(
+            "network", os.getenv("SUBSTRATE_DOCKER_NETWORK", "agentic-network")
+        )
         telemetry_url = config.get(
             "telemetry_url",
             os.getenv("TELEMETRY_SERVICE_URL", "http://telemetry-service:8004"),
         )
-        ctp_dir = config.get("ctp_dir", os.getenv("SUBSTRATE_CTP_DIR", "/mnt/md0/ctp_test"))
+        ctp_dir = config.get(
+            "ctp_dir", os.getenv("SUBSTRATE_CTP_DIR", "/mnt/md0/ctp_test")
+        )
         capture_dir = config.get(
             "capture_dir", os.getenv("SUBSTRATE_CAPTURE_DIR", "/mnt/md0/cap_test")
         )
@@ -208,7 +215,10 @@ class LocalDockerBackend(ConnectivityBackend):
         )
         self._workers[worker_id] = info
         logger.info(
-            "Created worker %s → %s (container %s)", worker_id, endpoint, container_id[:12]
+            "Created worker %s → %s (container %s)",
+            worker_id,
+            endpoint,
+            container_id[:12],
         )
         return info
 
@@ -354,6 +364,70 @@ class ConnectivityManager:
     def get_worker_info(self, worker_id: str) -> WorkerInfo:
         """Return current :class:`WorkerInfo` for *worker_id*."""
         return self._backend.get_worker_info(worker_id)
+
+    def run_experiment(
+        self,
+        worker_id: str,
+        workflow: dict[str, Any],
+        *,
+        download_mbps: float,
+        upload_mbps: float,
+        latency_ms: float = 0.0,
+        qdisc: str = "pfifo",
+        buffer_packets: int = 1000,
+        latency_location: str | None = None,
+        qdisc_params: dict[str, str] | None = None,
+        cca: str = "cubic",
+        cca_namespace: str | None = None,
+        upstream_iface: str = "veth4",
+        downstream_iface: str = "veth2",
+        runtime: str = "shell",
+    ) -> dict[str, Any]:
+        """Shape the network and run a workflow on an existing worker.
+
+        Args:
+            worker_id:        ID returned by :meth:`create_worker`.
+            workflow:         Workflow definition dict (state machine JSON).
+            download_mbps:    Download capacity in Mbps.
+            upload_mbps:      Upload capacity in Mbps.
+            latency_ms:       One-way latency in ms (default: 0).
+            qdisc:            Queue discipline (default: ``pfifo``).
+            buffer_packets:   Queue depth in packets (default: 1000).
+            latency_location: Where to inject latency — ``upstream``, ``downstream``, ``both``, or ``None``.
+            qdisc_params:     Extra qdisc-specific parameters passed to tc.
+            cca:              TCP congestion control algorithm (default: ``cubic``).
+            cca_namespace:    Namespace for CCA — ``ns1``, ``ns2``, or ``None`` for all.
+            upstream_iface:   Upload interface inside the worker (default: ``veth4``).
+            downstream_iface: Download interface inside the worker (default: ``veth2``).
+            runtime:          Workflow runtime — ``shell`` or ``browser`` (default: ``shell``).
+
+        Returns:
+            The workflow result dict from ``POST /run``.
+        """
+        info = self._backend.get_worker_info(worker_id)
+        payload: dict[str, Any] = {
+            "upstream_iface": upstream_iface,
+            "downstream_iface": downstream_iface,
+            "download_mbps": download_mbps,
+            "upload_mbps": upload_mbps,
+            "latency_ms": latency_ms,
+            "latency_location": latency_location,
+            "qdisc": qdisc,
+            "buffer_packets": buffer_packets,
+            "qdisc_params": qdisc_params,
+            "cca": cca,
+            "cca_namespace": cca_namespace,
+            "workflow": workflow,
+            "runtime": runtime,
+        }
+        with httpx.Client(timeout=300) as client:
+            resp = client.post(f"{info.endpoint}/run", json=payload)
+        if resp.status_code != 200:
+            raise RuntimeError(
+                f"POST /run failed for worker {worker_id} "
+                f"(HTTP {resp.status_code}): {resp.text[:1000]}"
+            )
+        return resp.json()
 
     @property
     def backend_name(self) -> str:
