@@ -382,6 +382,9 @@ class ConnectivityManager:
         upstream_iface: str = "veth4",
         downstream_iface: str = "veth2",
         runtime: str = "shell",
+        experiment_id: str | None = None,
+        application: str | None = None,
+        telemetry_url: str | None = None,
     ) -> dict[str, Any]:
         """Shape the network and run a workflow on an existing worker.
 
@@ -400,9 +403,15 @@ class ConnectivityManager:
             upstream_iface:   Upload interface inside the worker (default: ``veth4``).
             downstream_iface: Download interface inside the worker (default: ``veth2``).
             runtime:          Workflow runtime — ``shell`` or ``browser`` (default: ``shell``).
+            experiment_id:    Identifier stored in telemetry (auto-generated if omitted).
+            application:      Application name stored in telemetry contextual tree.
+            telemetry_url:    Base URL of the Telemetry Service. Reads
+                              ``TELEMETRY_SERVICE_URL`` env var when omitted; set to
+                              an empty string to skip telemetry entirely.
 
         Returns:
-            The workflow result dict from ``POST /run``.
+            Dict with ``run_result`` (from ``POST /run``) and ``telemetry``
+            (from ``POST /results``, or ``None`` when telemetry is skipped).
         """
         info = self._backend.get_worker_info(worker_id)
         payload: dict[str, Any] = {
@@ -427,7 +436,64 @@ class ConnectivityManager:
                 f"POST /run failed for worker {worker_id} "
                 f"(HTTP {resp.status_code}): {resp.text[:1000]}"
             )
-        return resp.json()
+        run_result = resp.json()
+
+        # --- Telemetry persistence ---
+        resolved_telemetry_url = (
+            telemetry_url
+            if telemetry_url is not None
+            else os.getenv("TELEMETRY_SERVICE_URL", "http://telemetry-service:8004")
+        ).rstrip("/")
+
+        telemetry_save: dict[str, Any] | None = None
+        if resolved_telemetry_url:
+            exp_id = experiment_id or f"connectivity-{uuid.uuid4().hex[:12]}"
+            telemetry_payload = {
+                "experiment_id": exp_id,
+                "status": "success" if run_result.get("status") == "ok" else "failure",
+                "trial_number": 1,
+                "bottleneck_state": {
+                    "configured_capacity": download_mbps,
+                    "configured_latency": latency_ms,
+                    "measured_throughput": None,
+                    "measured_rtt": None,
+                },
+                "contextual_tree": {
+                    "c_static": {
+                        "capacity_mbps": download_mbps,
+                        "upload_mbps": upload_mbps,
+                        "latency_ms": latency_ms,
+                        "qdisc": qdisc,
+                        "buffer_packets": buffer_packets,
+                    },
+                    "c_app": {"application": application},
+                    "c_trans": {
+                        "congestion_control": cca,
+                        "runtime": runtime,
+                    },
+                },
+                "qoe_metrics": run_result,
+                "transport_state": {},
+                "pcap_path": "",
+            }
+            try:
+                with httpx.Client(timeout=10) as client:
+                    tel_resp = client.post(
+                        f"{resolved_telemetry_url}/results", json=telemetry_payload
+                    )
+                telemetry_save = tel_resp.json()
+                logger.info(
+                    "Telemetry saved for experiment %s (HTTP %s)",
+                    exp_id,
+                    tel_resp.status_code,
+                )
+            except Exception as exc:
+                telemetry_save = {"error": str(exc), "stored": False}
+                logger.warning(
+                    "Telemetry POST failed for experiment %s: %s", exp_id, exc
+                )
+
+        return {"run_result": run_result, "telemetry": telemetry_save}
 
     @property
     def backend_name(self) -> str:

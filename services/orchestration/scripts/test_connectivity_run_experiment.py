@@ -70,8 +70,8 @@ def main() -> None:
     print("  Waiting 3s for container to be ready...")
     time.sleep(3)
 
-    # 2. Run experiment
-    print("\n--- run_experiment() -> POST /run ---")
+    # 2. Run experiment + push to telemetry
+    print("\n--- run_experiment() -> POST /run + POST /results ---")
     try:
         result = mgr.run_experiment(
             worker_id=info.worker_id,
@@ -80,9 +80,15 @@ def main() -> None:
             upload_mbps=5.0,
             latency_ms=0.0,
             runtime="shell",
+            experiment_id="smoke-test-connectivity-001",
+            application="ping",
+            telemetry_url="http://telemetry-service:8004",
         )
-        print("  SUCCESS")
-        print(json.dumps(result, indent=2, default=str))
+        print("  run_result status :", result["run_result"].get("status"))
+        print(
+            "  telemetry response:",
+            json.dumps(result["telemetry"], indent=2, default=str),
+        )
     except Exception as exc:
         print(f"  FAILED: {exc}")
     finally:
