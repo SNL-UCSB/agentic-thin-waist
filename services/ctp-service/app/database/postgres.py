@@ -467,6 +467,36 @@ class Database:
 # ---------------------------------------------------------------------------
 
 
+# Default bin width in seconds (100 ms).  Used in the unnest fallback when
+# per-direction means are not yet stored (original DB without capped copy).
+_BIN_SEC: float = 0.1
+_MBPS_FACTOR: float = 8.0 / _BIN_SEC / 1_000_000.0  # bytes/bin → Mbps
+
+
+def _intensity_mean_expr(direction: str) -> str:
+    """Return a SQL expression for mean throughput in Mbps for *direction*.
+
+    For 'both' uses the pre-computed ``intensity->>'mean_mbps'`` (indexed).
+    For 'download'/'upload' uses the stored per-direction field when present,
+    falling back to an ``unnest()`` computation so the filter works on both
+    the original DB and the capped copy.
+    """
+    if direction == "both":
+        return "(intensity->>'mean_mbps')::FLOAT8"
+    col = "download_timeseries" if direction == "download" else "upload_timeseries"
+    stored = f"(intensity->>'{direction}_mean_mbps')::FLOAT8"
+    fallback = f"(SELECT AVG(v) * {_MBPS_FACTOR} FROM unnest({col}) v)"
+    return f"COALESCE({stored}, {fallback})"
+
+
+def _intensity_peak_expr(direction: str) -> str:
+    """Return a SQL expression for peak throughput in Mbps for *direction*."""
+    if direction == "both":
+        return "(intensity->>'peak_bps')::FLOAT8 / 1000000.0"
+    col = "download_timeseries" if direction == "download" else "upload_timeseries"
+    return f"(SELECT MAX(v) * {_MBPS_FACTOR} FROM unnest({col}) v)"
+
+
 def _build_where(query: SelectQuery) -> tuple[list[str], list[Any]]:
     """Build ``WHERE`` clauses and positional params from a :class:`SelectQuery`.
 
@@ -480,13 +510,19 @@ def _build_where(query: SelectQuery) -> tuple[list[str], list[Any]]:
         clauses.append("dataset_name = %s")
         params.append(query.dataset_name)
 
+    if query.is_transformed is not None:
+        clauses.append("is_transformed = %s")
+        params.append(query.is_transformed)
+
     if query.subnet_prefix_len is not None:
         clauses.append("masklen(subnet) = %s")
         params.append(query.subnet_prefix_len)
 
     if query.intensity_range_mbps:
         lo, hi = query.intensity_range_mbps
-        clauses.append("(intensity->>'mean_mbps')::FLOAT8 BETWEEN %s AND %s")
+        clauses.append(
+            f"{_intensity_mean_expr(query.intensity_direction)} BETWEEN %s AND %s"
+        )
         params.extend([lo, hi])
 
     if query.burstiness_pmr_range:
@@ -521,6 +557,10 @@ def _build_where(query: SelectQuery) -> tuple[list[str], list[Any]]:
         lo, hi = query.window_index_range
         clauses.append("window_index BETWEEN %s AND %s")
         params.extend([lo, hi])
+
+    if query.peak_intensity_max_mbps is not None:
+        clauses.append(f"{_intensity_peak_expr(query.intensity_direction)} <= %s")
+        params.append(query.peak_intensity_max_mbps)
 
     return clauses, params
 
@@ -584,6 +624,8 @@ def _row_to_ctp(row: Dict[str, Any]) -> CrossTrafficProfile:
             mean_bps=intensity_d.get("mean_bps", 0.0),
             peak_pps=intensity_d.get("peak_pps", 0.0),
             peak_bps=intensity_d.get("peak_bps", 0.0),
+            download_mean_mbps=intensity_d.get("download_mean_mbps"),
+            upload_mean_mbps=intensity_d.get("upload_mean_mbps"),
         ),
         burstiness=CTPBurstiness(
             peak_to_mean_ratio=burst_d.get("peak_to_mean_ratio", 0.0),

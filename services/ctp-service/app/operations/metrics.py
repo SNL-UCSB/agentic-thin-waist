@@ -316,6 +316,10 @@ def compute_all_metrics(
     contributor_ips = contributor_ips or []
 
     intensity = compute_intensity(combined_ts, bin_width_sec)
+    intensity.download_mean_mbps = compute_intensity(
+        download_ts, bin_width_sec
+    ).mean_mbps
+    intensity.upload_mean_mbps = compute_intensity(upload_ts, bin_width_sec).mean_mbps
     burstiness = compute_burstiness(combined_ts)
     correlation = compute_temporal_correlation(combined_ts)
 
