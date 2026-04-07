@@ -18,13 +18,15 @@ operation classes injected via :func:`fastapi.Depends`.
 
 from __future__ import annotations
 
+import io
 import logging
 import platform
 import sys
+import zipfile
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pathlib import Path
 from app.config import Settings, get_settings
 from app.database.postgres import Database
@@ -352,6 +354,73 @@ def merge_ctps(
             f"Merged {merged.structure.contributor_count} leaf IP(s) across "
             f"windows {request.start_index}–{request.end_index}."
         ),
+    )
+
+
+# ---------------------------------------------------------------------------
+# PCAP zip export (transformed CTPs only)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/ctps/{ctp_id}/export", tags=["Operations"])
+def export_ctp_zip(ctp_id: str, db: DbDep) -> StreamingResponse:
+    """Return a ZIP archive containing the download and upload PCAPs for a
+    transformed CTP.
+
+    The archive layout is::
+
+        download/<filename>.pcap
+        upload/<filename>.pcap
+
+    Only CTPs where ``is_transformed = true`` are supported.  The PCAP paths
+    are read directly from the ``download_pcap`` and ``upload_pcap`` columns
+    stored during the transform operation.
+
+    Path Parameters:
+        ctp_id: ID of a transformed CTP.
+
+    Returns:
+        ``application/zip`` stream named ``<ctp_id>.zip``.
+
+    Raises:
+        404: CTP not found, or CTP is not transformed.
+        422: PCAP file(s) missing on disk.
+    """
+    selector = CTPSelector(db)
+    ctp = selector.get_by_id(ctp_id)
+
+    if ctp is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"CTP '{ctp_id}' not found."
+        )
+    if not ctp.is_transformed:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"CTP '{ctp_id}' is not a transformed CTP.",
+        )
+
+    dl_path = Path(ctp.download_pcap) if ctp.download_pcap else None
+    ul_path = Path(ctp.upload_pcap) if ctp.upload_pcap else None
+
+    if not any(p and p.exists() for p in (dl_path, ul_path)):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"No PCAP files found on disk for CTP '{ctp_id}'.",
+        )
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+        if dl_path and dl_path.exists():
+            zf.write(dl_path, arcname=f"download/{dl_path.name}")
+        if ul_path and ul_path.exists():
+            zf.write(ul_path, arcname=f"upload/{ul_path.name}")
+    buf.seek(0)
+
+    safe_name = ctp_id.replace("/", "_")
+    return StreamingResponse(
+        buf,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}.zip"'},
     )
 
 
