@@ -9,7 +9,7 @@ validate incoming JSON and produce typed responses.
 
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -80,6 +80,10 @@ class SelectQuery(BaseModel):
     """
 
     dataset_name: Optional[str] = None
+    is_transformed: Optional[bool] = Field(
+        None,
+        description="Filter by transform status. True = transformed only, False = original only, omit = all.",
+    )
     subnet_prefix_len: Optional[int] = Field(None, ge=1, le=32)
     intensity_range_mbps: Optional[List[float]] = Field(
         None, min_length=2, max_length=2
@@ -95,6 +99,21 @@ class SelectQuery(BaseModel):
     contributor_count_max: Optional[int] = Field(None, ge=0)
     upload_download_ratio_max: Optional[float] = Field(None, ge=0)
     window_index_range: Optional[List[int]] = Field(None, min_length=2, max_length=2)
+    intensity_direction: Literal["download", "upload", "both"] = Field(
+        "both",
+        description=(
+            "Which direction intensity_range_mbps and peak_intensity_max_mbps apply to: "
+            "'download', 'upload', or 'both' (combined, default)."
+        ),
+    )
+    peak_intensity_max_mbps: Optional[float] = Field(
+        None,
+        gt=0,
+        description=(
+            "Hard cap on peak throughput in Mbps for the chosen direction. "
+            "Selecting CTPs where peak <= threshold guarantees burst trimming is a no-op."
+        ),
+    )
 
     @field_validator(
         "intensity_range_mbps", "burstiness_pmr_range", "burstiness_cov_range"
