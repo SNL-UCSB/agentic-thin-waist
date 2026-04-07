@@ -165,7 +165,9 @@ class CTPTransformer:
         for pcap in (download_pcap, upload_pcap):
             if pcap.exists():
                 clipped = pcap.with_suffix(".clipped.pcap")
-                clip_pcap_to_window(str(pcap), str(clipped), window_sec=original.duration_seconds)
+                clip_pcap_to_window(
+                    str(pcap), str(clipped), window_sec=original.duration_seconds
+                )
                 clipped.rename(pcap)
 
         # ---- Reorder packets ----

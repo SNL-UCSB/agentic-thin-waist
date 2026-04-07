@@ -57,8 +57,8 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _PCAP_GLOBAL_HEADER: bytes = struct.pack("<IHHiIII", 0xA1B2C3D4, 2, 4, 0, 0, 65535, 1)
-_REC_HDR = struct.Struct("<IIII")   # ts_sec, ts_usec, incl_len, orig_len
-_IP_HDR  = struct.Struct(">BBHHHBBH4s4s")  # enough to get ip.len (offset 2, H)
+_REC_HDR = struct.Struct("<IIII")  # ts_sec, ts_usec, incl_len, orig_len
+_IP_HDR = struct.Struct(">BBHHHBBH4s4s")  # enough to get ip.len (offset 2, H)
 
 ETHERNET_HDR_LEN = 14
 
@@ -91,7 +91,7 @@ def _ip_len_from_payload(payload: bytes) -> Optional[int]:
     if len(payload) < ETHERNET_HDR_LEN + 20:
         return None
     eth_type = struct.unpack_from(">H", payload, 12)[0]
-    if eth_type != 0x0800:   # not IPv4
+    if eth_type != 0x0800:  # not IPv4
         return None
     ip_len = struct.unpack_from(">H", payload, ETHERNET_HDR_LEN + 2)[0]
     return ip_len
@@ -169,6 +169,7 @@ def build_timeseries(path: Path, bin_ms: int, window_sec: int) -> np.ndarray:
 # DB helpers
 # ---------------------------------------------------------------------------
 
+
 def fetch_transformed_ctps(conn):
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute("""
@@ -193,10 +194,14 @@ def fetch_transformed_ctps(conn):
         return cur.fetchall()
 
 
-def update_ctp_metrics(conn, ctp_id, dl_ts, ul_ts, intensity, burstiness, correlation, structure):
+def update_ctp_metrics(
+    conn, ctp_id, dl_ts, ul_ts, intensity, burstiness, correlation, structure
+):
     intensity_json = {
-        "mean_pps": intensity.mean_pps, "mean_bps": intensity.mean_bps,
-        "mean_mbps": intensity.mean_mbps, "peak_pps": intensity.peak_pps,
+        "mean_pps": intensity.mean_pps,
+        "mean_bps": intensity.mean_bps,
+        "mean_mbps": intensity.mean_mbps,
+        "peak_pps": intensity.peak_pps,
         "peak_bps": intensity.peak_bps,
         "download_mean_mbps": intensity.download_mean_mbps,
         "upload_mean_mbps": intensity.upload_mean_mbps,
@@ -205,11 +210,14 @@ def update_ctp_metrics(conn, ctp_id, dl_ts, ul_ts, intensity, burstiness, correl
         "peak_to_mean_ratio": burstiness.peak_to_mean_ratio,
         "coefficient_of_variation": burstiness.coefficient_of_variation,
         "percentile_95_to_mean": burstiness.percentile_95_to_mean,
-        "on_periods": burstiness.on_periods, "off_periods": burstiness.off_periods,
+        "on_periods": burstiness.on_periods,
+        "off_periods": burstiness.off_periods,
     }
     correlation_json = {
-        "lag_1": correlation.lag_1, "lag_5": correlation.lag_5,
-        "lag_10": correlation.lag_10, "lag_60": correlation.lag_60,
+        "lag_1": correlation.lag_1,
+        "lag_5": correlation.lag_5,
+        "lag_10": correlation.lag_10,
+        "lag_60": correlation.lag_60,
     }
     structure_json = {
         "contributor_count": structure.contributor_count,
@@ -219,7 +227,8 @@ def update_ctp_metrics(conn, ctp_id, dl_ts, ul_ts, intensity, burstiness, correl
         "prefix_diversity": structure.prefix_diversity,
     }
     with conn.cursor() as cur:
-        cur.execute("""
+        cur.execute(
+            """
             UPDATE ctp_nodes SET
                 download_timeseries  = %s,
                 upload_timeseries    = %s,
@@ -229,13 +238,18 @@ def update_ctp_metrics(conn, ctp_id, dl_ts, ul_ts, intensity, burstiness, correl
                 temporal_correlation = %s,
                 structure            = %s
             WHERE ctp_id = %s
-        """, (
-            dl_ts.tolist(), ul_ts.tolist(),
-            structure.contributor_count,
-            json.dumps(intensity_json), json.dumps(burstiness_json),
-            json.dumps(correlation_json), json.dumps(structure_json),
-            ctp_id,
-        ))
+        """,
+            (
+                dl_ts.tolist(),
+                ul_ts.tolist(),
+                structure.contributor_count,
+                json.dumps(intensity_json),
+                json.dumps(burstiness_json),
+                json.dumps(correlation_json),
+                json.dumps(structure_json),
+                ctp_id,
+            ),
+        )
     conn.commit()
 
 
@@ -243,16 +257,21 @@ def update_ctp_metrics(conn, ctp_id, dl_ts, ul_ts, intensity, burstiness, correl
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dry-run", action="store_true",
-                        help="Report durations only; do NOT clip files or update DB.")
-    parser.add_argument("--limit", type=int, default=0,
-                        help="Process at most N CTPs (0 = all).")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Report durations only; do NOT clip files or update DB.",
+    )
+    parser.add_argument(
+        "--limit", type=int, default=0, help="Process at most N CTPs (0 = all)."
+    )
     args = parser.parse_args()
 
     settings = get_settings()
-    bin_ms  = settings.burst_interval_ms
+    bin_ms = settings.burst_interval_ms
     bin_sec = bin_ms / 1000.0
 
     conn = psycopg2.connect(settings.database_url)
@@ -260,16 +279,16 @@ def main():
     log.info("Found %d transformed CTPs.", len(rows))
 
     if args.limit:
-        rows = rows[:args.limit]
+        rows = rows[: args.limit]
 
     clipped = skipped = errors = 0
 
     for i, row in enumerate(rows, 1):
-        ctp_id     = row["ctp_id"]
+        ctp_id = row["ctp_id"]
         window_sec = int(row["duration_seconds"] or 30)
-        dl_path    = Path(row["download_pcap"]) if row["download_pcap"] else None
-        ul_path    = Path(row["upload_pcap"])   if row["upload_pcap"]   else None
-        leaf_ips   = [s.split("/")[0] for s in (row["leaf_subnets"] or [])]
+        dl_path = Path(row["download_pcap"]) if row["download_pcap"] else None
+        ul_path = Path(row["upload_pcap"]) if row["upload_pcap"] else None
+        leaf_ips = [s.split("/")[0] for s in (row["leaf_subnets"] or [])]
 
         try:
             # --- Measure / clip ---
@@ -280,12 +299,24 @@ def main():
                 old_dur = pcap_duration(pcap)
                 if old_dur > window_sec + 0.5:
                     if args.dry_run:
-                        log.info("[%d/%d] NEEDS CLIP  %s  %.1fs → %ds",
-                                 i, len(rows), ctp_id, old_dur, window_sec)
+                        log.info(
+                            "[%d/%d] NEEDS CLIP  %s  %.1fs → %ds",
+                            i,
+                            len(rows),
+                            ctp_id,
+                            old_dur,
+                            window_sec,
+                        )
                     else:
                         _, new_dur = clip_pcap_in_place(pcap, window_sec)
-                        log.info("[%d/%d] CLIPPED  %s  %.1fs → %.1fs",
-                                 i, len(rows), ctp_id, old_dur, new_dur)
+                        log.info(
+                            "[%d/%d] CLIPPED  %s  %.1fs → %.1fs",
+                            i,
+                            len(rows),
+                            ctp_id,
+                            old_dur,
+                            new_dur,
+                        )
                     pcap_clipped = True
 
             if pcap_clipped:
@@ -298,19 +329,43 @@ def main():
 
             # --- Rebuild timeseries + metrics ---
             n_bins = int(window_sec * 1000 // bin_ms)
-            dl_ts = build_timeseries(dl_path, bin_ms, window_sec) if dl_path else np.zeros(n_bins)
-            ul_ts = build_timeseries(ul_path, bin_ms, window_sec) if ul_path else np.zeros(n_bins)
+            dl_ts = (
+                build_timeseries(dl_path, bin_ms, window_sec)
+                if dl_path
+                else np.zeros(n_bins)
+            )
+            ul_ts = (
+                build_timeseries(ul_path, bin_ms, window_sec)
+                if ul_path
+                else np.zeros(n_bins)
+            )
 
             intensity, burstiness, correlation, structure = compute_all_metrics(
-                upload_ts=ul_ts, download_ts=dl_ts,
-                bin_width_sec=bin_sec, contributor_ips=leaf_ips,
+                upload_ts=ul_ts,
+                download_ts=dl_ts,
+                bin_width_sec=bin_sec,
+                contributor_ips=leaf_ips,
             )
-            update_ctp_metrics(conn, ctp_id, dl_ts, ul_ts,
-                               intensity, burstiness, correlation, structure)
+            update_ctp_metrics(
+                conn,
+                ctp_id,
+                dl_ts,
+                ul_ts,
+                intensity,
+                burstiness,
+                correlation,
+                structure,
+            )
 
             if i % 50 == 0:
-                log.info("Progress: %d/%d  clipped=%d  skipped=%d  errors=%d",
-                         i, len(rows), clipped, skipped, errors)
+                log.info(
+                    "Progress: %d/%d  clipped=%d  skipped=%d  errors=%d",
+                    i,
+                    len(rows),
+                    clipped,
+                    skipped,
+                    errors,
+                )
 
         except Exception as exc:
             log.error("[%d/%d] ERROR %s: %s", i, len(rows), ctp_id, exc)
