@@ -14,7 +14,7 @@ HealthStatus = Literal["healthy", "unhealthy"]
 class GenerateWorkflowRequest(BaseModel):
     specification: str = Field(min_length=1)
     timeout: int | None = Field(default=None, ge=1)
-    type: Literal["shell", "browser"] = "shell"
+    type: Literal["shell", "browser", "hybrid"] = "shell"
 
 
 class GenerateWorkflowResponse(BaseModel):

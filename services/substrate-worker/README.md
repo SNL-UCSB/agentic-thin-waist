@@ -31,6 +31,14 @@ Substrate Worker produces:
 - tcpreplay session metrics: replay ID, status, rate achieved
 - Status reports: interface configuration, qdisc state, available tc modules
 
+## Source Layout
+
+- `src/substrate`: the worker service entrypoint, API module, and setup helpers
+- `src/netgent`: reserved package space for NetGent-specific integrations
+- `src/browser`: reserved package space for browser-specific integrations
+
+For local Python workflows, the service now uses `uv` with [`pyproject.toml`](/Users/eugenevuong/Documents/UCSB/agentic-thin-waist/services/substrate-worker/pyproject.toml). Run it with `uv run python -m substrate.main`.
+
 ## Interfaces
 
 | Endpoint | Method | Purpose |

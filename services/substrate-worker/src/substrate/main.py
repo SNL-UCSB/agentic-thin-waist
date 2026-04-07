@@ -1002,7 +1002,7 @@ def fetch_ctp_endpoint(req: CtpFetchRequest) -> CtpFetchResponse:
     On success the endpoint returns the resolved paths so the caller can confirm
     placement before issuing a ``POST /replay``.
     """
-    from ctp_fetcher import fetch_ctp
+    from substrate.ctp_fetcher import fetch_ctp
 
     try:
         result = fetch_ctp(req.ctp_pointer, req.ctp_root)
@@ -1012,3 +1012,9 @@ def fetch_ctp_endpoint(req: CtpFetchRequest) -> CtpFetchResponse:
         raise HTTPException(status_code=502, detail=str(exc))
 
     return CtpFetchResponse(status="ok", **result)
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run("substrate.main:app", host="0.0.0.0", port=8002)

@@ -27,7 +27,7 @@ async def _ainvoke_netgent_agent(
     *,
     specification: str,
     workflow_definition: dict[str, Any],
-    workflow_type: Literal["shell", "browser"],
+    workflow_type: Literal["shell", "browser", "hybrid"],
 ) -> Any:
     netgent_agent = create_netgent_agent()
     return await netgent_agent.ainvoke(
@@ -58,7 +58,7 @@ def _run_netgent_job(job_id: str, *, operation: Literal["generate", "execute"]) 
     session_factory = create_session_factory()
     specification = ""
     workflow_id = None
-    workflow_type: Literal["shell", "browser"] = "shell"
+    workflow_type: Literal["shell", "browser", "hybrid"] = "shell"
     workflow_definition: dict[str, Any] = {}
 
     try:
