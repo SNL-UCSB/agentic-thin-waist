@@ -50,6 +50,7 @@ from app.models.ctp import CrossTrafficProfile
 from app.operations.extract import build_timeseries_from_window
 from app.operations.metrics import compute_all_metrics
 from app.pcap_utils import (
+    clip_pcap_to_window,
     merge_pcaps_by_index,
     pad_pcap_frames,
     _reorder_single_pcap,
@@ -156,6 +157,16 @@ class CTPTransformer:
             output_path=upload_pcap,
             direction="upload",
         )
+
+        # ---- Clip to window duration ----
+        # The per-user window PCAPs can span more than window_sec seconds
+        # (e.g. the full capture).  Clip here so the output PCAP duration
+        # matches the CTP timeseries and measured throughput is consistent.
+        for pcap in (download_pcap, upload_pcap):
+            if pcap.exists():
+                clipped = pcap.with_suffix(".clipped.pcap")
+                clip_pcap_to_window(str(pcap), str(clipped), window_sec=original.duration_seconds)
+                clipped.rename(pcap)
 
         # ---- Reorder packets ----
         for pcap in (download_pcap, upload_pcap):
