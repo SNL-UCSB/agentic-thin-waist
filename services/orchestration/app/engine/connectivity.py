@@ -355,6 +355,70 @@ class ConnectivityManager:
         """Return current :class:`WorkerInfo` for *worker_id*."""
         return self._backend.get_worker_info(worker_id)
 
+    def run_experiment(
+        self,
+        worker_id: str,
+        workflow: dict[str, Any],
+        *,
+        download_mbps: float,
+        upload_mbps: float,
+        latency_ms: float = 0.0,
+        qdisc: str = "pfifo",
+        buffer_packets: int = 1000,
+        latency_location: str | None = None,
+        qdisc_params: dict[str, str] | None = None,
+        cca: str = "cubic",
+        cca_namespace: str | None = None,
+        upstream_iface: str = "veth4",
+        downstream_iface: str = "veth2",
+        runtime: str = "shell",
+    ) -> dict[str, Any]:
+        """Shape the network and run a workflow on an existing worker.
+
+        Args:
+            worker_id:        ID returned by :meth:`create_worker`.
+            workflow:         Workflow definition dict (state machine JSON).
+            download_mbps:    Download capacity in Mbps.
+            upload_mbps:      Upload capacity in Mbps.
+            latency_ms:       One-way latency in ms (default: 0).
+            qdisc:            Queue discipline (default: ``pfifo``).
+            buffer_packets:   Queue depth in packets (default: 1000).
+            latency_location: Where to inject latency — ``upstream``, ``downstream``, ``both``, or ``None``.
+            qdisc_params:     Extra qdisc-specific parameters passed to tc.
+            cca:              TCP congestion control algorithm (default: ``cubic``).
+            cca_namespace:    Namespace for CCA — ``ns1``, ``ns2``, or ``None`` for all.
+            upstream_iface:   Upload interface inside the worker (default: ``veth4``).
+            downstream_iface: Download interface inside the worker (default: ``veth2``).
+            runtime:          Workflow runtime — ``shell`` or ``browser`` (default: ``shell``).
+
+        Returns:
+            The workflow result dict from ``POST /run``.
+        """
+        info = self._backend.get_worker_info(worker_id)
+        payload: dict[str, Any] = {
+            "upstream_iface": upstream_iface,
+            "downstream_iface": downstream_iface,
+            "download_mbps": download_mbps,
+            "upload_mbps": upload_mbps,
+            "latency_ms": latency_ms,
+            "latency_location": latency_location,
+            "qdisc": qdisc,
+            "buffer_packets": buffer_packets,
+            "qdisc_params": qdisc_params,
+            "cca": cca,
+            "cca_namespace": cca_namespace,
+            "workflow": workflow,
+            "runtime": runtime,
+        }
+        with httpx.Client(timeout=300) as client:
+            resp = client.post(f"{info.endpoint}/run", json=payload)
+        if resp.status_code != 200:
+            raise RuntimeError(
+                f"POST /run failed for worker {worker_id} "
+                f"(HTTP {resp.status_code}): {resp.text[:1000]}"
+            )
+        return resp.json()
+
     @property
     def backend_name(self) -> str:
         return self._backend_name
