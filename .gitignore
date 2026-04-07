@@ -220,3 +220,5 @@ __marimo__/
 .langgraph_api
 # Lit survey PDFs (don't commit large binaries)
 docs/lit-survey/pdfs/*.pdf
+
+.codex
