@@ -46,7 +46,7 @@ RUN cd /usr/src/app \
     && node ./node_modules/playwright-core/cli.js install chromium
 
 COPY services/substrate-worker/pyproject.toml ./pyproject.toml
-RUN uv sync --python /usr/bin/python3 --no-dev --no-install-project
+RUN uv sync --python /usr/bin/python3 --no-install-project
 
 COPY services/substrate-worker/ .
 COPY shared/ /shared/
