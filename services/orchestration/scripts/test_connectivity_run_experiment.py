@@ -9,6 +9,7 @@ What it does:
     2. run_experiment() — POST /run with a minimal shell workflow (ping)
     3. destroy_worker() — clean up
 """
+
 import json
 import os
 import sys
@@ -50,12 +51,14 @@ def main() -> None:
     # 1. Create worker
     print("\n--- create_worker() ---")
     try:
-        info = mgr.create_worker({
-            "image": "agentic-thin-waist-substrate-worker",
-            "network": "agentic-thin-waist_agentic-network",
-            "ctp_dir": "/Users/eugenevuong/Documents/UCSB/agentic-thin-waist/ctp",
-            "capture_dir": "/Users/eugenevuong/Documents/UCSB/agentic-thin-waist/captures",
-        })
+        info = mgr.create_worker(
+            {
+                "image": "agentic-thin-waist-substrate-worker",
+                "network": "agentic-thin-waist_agentic-network",
+                "ctp_dir": "/Users/eugenevuong/Documents/UCSB/agentic-thin-waist/ctp",
+                "capture_dir": "/Users/eugenevuong/Documents/UCSB/agentic-thin-waist/captures",
+            }
+        )
         print(f"  worker_id : {info.worker_id}")
         print(f"  endpoint  : {info.endpoint}")
         print(f"  container : {info.container_id[:12] if info.container_id else 'n/a'}")

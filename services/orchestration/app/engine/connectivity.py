@@ -22,6 +22,7 @@ SUBSTRATE_DOCKER_NETWORK   Docker network to attach workers to (default: ``agent
 SUBSTRATE_WORKER_HOST      Host advertised in worker endpoint URLs (default: ``localhost``)
 DOCKER_SOCKET              Path to Docker Unix socket (default: ``/var/run/docker.sock``)
 """
+
 from __future__ import annotations
 
 import logging
@@ -48,9 +49,9 @@ class WorkerInfo:
     """Metadata for a provisioned substrate worker."""
 
     worker_id: str
-    endpoint: str                     # http://host:port
-    backend: str                      # "local_docker" | "aws" | "gcp" | "remote"
-    container_id: str | None = None   # Docker container ID (local_docker only)
+    endpoint: str  # http://host:port
+    backend: str  # "local_docker" | "aws" | "gcp" | "remote"
+    container_id: str | None = None  # Docker container ID (local_docker only)
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -111,13 +112,19 @@ class LocalDockerBackend(ConnectivityBackend):
             ctp_dir (str)        — host path for CTP PCAPs (mounted read-only)
             capture_dir (str)    — host path for capture output
         """
-        image = config.get("image", os.getenv("SUBSTRATE_WORKER_IMAGE", "substrate-worker"))
-        network = config.get("network", os.getenv("SUBSTRATE_DOCKER_NETWORK", "agentic-network"))
+        image = config.get(
+            "image", os.getenv("SUBSTRATE_WORKER_IMAGE", "substrate-worker")
+        )
+        network = config.get(
+            "network", os.getenv("SUBSTRATE_DOCKER_NETWORK", "agentic-network")
+        )
         telemetry_url = config.get(
             "telemetry_url",
             os.getenv("TELEMETRY_SERVICE_URL", "http://telemetry-service:8004"),
         )
-        ctp_dir = config.get("ctp_dir", os.getenv("SUBSTRATE_CTP_DIR", "/mnt/md0/ctp_test"))
+        ctp_dir = config.get(
+            "ctp_dir", os.getenv("SUBSTRATE_CTP_DIR", "/mnt/md0/ctp_test")
+        )
         capture_dir = config.get(
             "capture_dir", os.getenv("SUBSTRATE_CAPTURE_DIR", "/mnt/md0/cap_test")
         )
@@ -208,7 +215,10 @@ class LocalDockerBackend(ConnectivityBackend):
         )
         self._workers[worker_id] = info
         logger.info(
-            "Created worker %s → %s (container %s)", worker_id, endpoint, container_id[:12]
+            "Created worker %s → %s (container %s)",
+            worker_id,
+            endpoint,
+            container_id[:12],
         )
         return info
 
