@@ -963,3 +963,9 @@ def get_congestion(namespace: Optional[str] = None) -> CongestionResponse:
         status="ok",
         applied_commands=[],
     )
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run("substrate.main:app", host="0.0.0.0", port=8002)

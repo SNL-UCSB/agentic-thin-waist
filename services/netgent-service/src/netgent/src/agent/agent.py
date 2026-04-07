@@ -1,13 +1,16 @@
 import asyncio
 import base64
 import json
+import os
+import tempfile
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 from urllib.parse import quote
 
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.graph import END, START, MessagesState
 from langgraph.graph.state import StateGraph
+from playwright.async_api import async_playwright
 
 from netgent.src.agent.subagents.browser.agent import (
     create_agent as create_browser_agent,
@@ -17,14 +20,18 @@ from netgent.src.engine.controller import ProgramController
 from netgent.src.engine.executor import StateExecutor
 from netgent.src.engine.runner import WorkflowRunner
 from netgent.src.registry.actions.network import NETWORK_ACTIONS
+from netgent.src.registry.actions.playwright import PLAYWRIGHT_ACTIONS
 from netgent.src.registry.triggers.base import always_true
+from netgent.src.registry.triggers.playwright import PLAYWRIGHT_TRIGGERS
+from netgent.src.agent.subagents.browser.util import open_browser_session
 
 model = ChatGoogleGenerativeAI(model="gemini-3.1-flash-lite-preview")
+WorkflowType = Literal["browser", "shell", "hybrid"]
 
 
 class NetGentState(MessagesState):
     task: str
-    type: Literal["browser", "shell"] = "browser"
+    type: WorkflowType = "browser"
     workflow: dict = {}
     result: list = []
     config: dict = {}
@@ -96,9 +103,87 @@ def _write_workflow_artifact(
 def route_type(state: NetGentState):
     if state["type"] == "browser":
         return "browser"
-    elif state["type"] == "shell":
+    if state["type"] == "shell":
         return "shell"
+    if state["type"] == "hybrid":
+        return "hybrid"
     return END
+
+
+def _build_shell_runner() -> WorkflowRunner:
+    return WorkflowRunner(
+        controller=ProgramController(triggers=(always_true,)),
+        executor=StateExecutor(actions=NETWORK_ACTIONS),
+        config={},
+    )
+
+
+def _build_hybrid_runner(*, page: Any) -> WorkflowRunner:
+    return WorkflowRunner(
+        controller=ProgramController(
+            triggers=(always_true, *PLAYWRIGHT_TRIGGERS),
+            context={"page": page},
+        ),
+        executor=StateExecutor(
+            actions=(*PLAYWRIGHT_ACTIONS, *NETWORK_ACTIONS),
+            context={"page": page},
+        ),
+        config={},
+    )
+
+
+def _load_har_result(har_path: str) -> dict[str, Any] | None:
+    if not os.path.exists(har_path):
+        return None
+
+    try:
+        with open(har_path, encoding="utf-8") as har_file:
+            return json.load(har_file)
+    except Exception:
+        return None
+    finally:
+        try:
+            os.unlink(har_path)
+        except OSError:
+            pass
+
+
+def _coerce_workflow(response: object) -> dict[str, Any] | None:
+    if not isinstance(response, dict):
+        return None
+
+    workflow = response.get("workflow")
+    if isinstance(workflow, dict):
+        return workflow
+    return None
+
+
+def _coerce_result(response: object) -> Any:
+    if isinstance(response, dict) and "result" in response:
+        return response["result"]
+    return response
+
+
+def _merge_workflows(
+    *,
+    task: str,
+    browser_workflow: dict[str, Any] | None,
+    shell_workflow: dict[str, Any] | None,
+) -> dict[str, Any]:
+    states: list[dict[str, Any]] = []
+    if isinstance(browser_workflow, dict):
+        browser_states = browser_workflow.get("states")
+        if isinstance(browser_states, list):
+            states.extend(browser_states)
+    if isinstance(shell_workflow, dict):
+        shell_states = shell_workflow.get("states")
+        if isinstance(shell_states, list):
+            states.extend(shell_states)
+
+    return {
+        "specification": task,
+        "states": states,
+    }
 
 
 async def browser(state: NetGentState):
@@ -114,11 +199,7 @@ async def browser(state: NetGentState):
 
 def shell(state: NetGentState):
     shell_agent = create_shell_agent()
-    runner = WorkflowRunner(
-        controller=ProgramController(triggers=(always_true,)),
-        executor=StateExecutor(actions=NETWORK_ACTIONS),
-        config={},
-    )
+    runner = _build_shell_runner()
     return shell_agent.invoke(
         {
             "task": state["task"],
@@ -129,15 +210,127 @@ def shell(state: NetGentState):
     )
 
 
+async def hybrid(state: NetGentState):
+    workflow = state.get("workflow")
+    if isinstance(workflow, dict) and workflow:
+        return await _run_hybrid_workflow(
+            task=state["task"],
+            workflow=workflow,
+        )
+
+    browser_agent = create_browser_agent()
+    browser_response = await browser_agent.ainvoke(
+        {
+            "task": state["task"],
+            "messages": state["messages"],
+            "workflow": None,
+        },
+    )
+
+    shell_agent = create_shell_agent()
+    shell_runner = _build_shell_runner()
+    shell_response = await asyncio.to_thread(
+        shell_agent.invoke,
+        {
+            "task": state["task"],
+            "messages": [],
+            "workflow": None,
+        },
+        context={"runner": shell_runner},
+    )
+
+    merged_workflow = _merge_workflows(
+        task=state["task"],
+        browser_workflow=_coerce_workflow(browser_response),
+        shell_workflow=_coerce_workflow(shell_response),
+    )
+    if not merged_workflow["states"]:
+        return {
+            "result": {
+                "success": False,
+                "error": "Hybrid workflow generation did not produce any workflow states",
+            },
+            "workflow": {},
+        }
+
+    return {
+        "result": {
+            "browser": _coerce_result(browser_response),
+            "shell": _coerce_result(shell_response),
+        },
+        "workflow": merged_workflow,
+    }
+
+
+async def _run_hybrid_workflow(
+    *,
+    task: str,
+    workflow: dict[str, Any],
+) -> dict[str, Any]:
+    playwright = await async_playwright().start()
+    har_file = tempfile.NamedTemporaryFile(suffix=".har", delete=False)
+    har_file.close()
+    har_path = har_file.name
+    browser_instance, browser_context, page = await open_browser_session(
+        playwright,
+        record_har_path=har_path,
+    )
+    runner = _build_hybrid_runner(page=page)
+    response: dict[str, Any]
+    try:
+        output = await runner.arun(workflow)
+        response = {
+            "result": {
+                "success": True,
+                "output": output,
+            },
+            "workflow": workflow,
+        }
+    except Exception as exc:
+        response = {
+            "result": {
+                "success": False,
+                "error": str(exc),
+            },
+            "workflow": workflow,
+        }
+    finally:
+        await browser_context.close()
+        await browser_instance.close()
+        await playwright.stop()
+
+    har_result = _load_har_result(har_path)
+    result_payload = response.get("result")
+    if isinstance(result_payload, dict):
+        result_payload = dict(result_payload)
+        result_payload["har"] = har_result
+    else:
+        result_payload = {"data": result_payload, "har": har_result}
+
+    return {
+        "result": result_payload,
+        "workflow": workflow,
+    }
+
+
 def create_agent():
     graph = StateGraph(state_schema=NetGentState)
     graph.add_node("browser", browser)
     graph.add_node("shell", shell)
+    graph.add_node("hybrid", hybrid)
     graph.add_conditional_edges(
-        START, route_type, {"browser": "browser", "shell": "shell", END: END}
+        START,
+        route_type,
+        {
+            "browser": "browser",
+            "shell": "shell",
+            "hybrid": "hybrid",
+            END: END,
+        },
     )
     graph.add_edge("browser", END)
     graph.add_edge("shell", END)
+    graph.add_edge("hybrid", END)
     return graph.compile()
 
 

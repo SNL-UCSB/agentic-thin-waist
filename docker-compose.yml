@@ -148,8 +148,8 @@ services:
       - agentic-network
     volumes:
       - ./services/ctp-service:/app
-      - ${CTP_DIR}:${CTP_DIR}:ro
-      - ${CTP_OUTPUT_DIR}:${CTP_OUTPUT_DIR}
+      - ${CTP_DIR:-./ctp}:/ctp:ro
+      - ${CTP_OUTPUT_DIR:-./output_test}:/output_test
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
       interval: 5s

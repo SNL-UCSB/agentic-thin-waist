@@ -154,6 +154,54 @@ def upload_job_artifacts(
             )
             artifact["type"] = "shell"
             artifacts.append(artifact)
+        elif workflow_type == "hybrid":
+            for index, (path_parts, b64, image_format) in enumerate(
+                _iter_result_screenshots(result),
+                start=1,
+            ):
+                safe_format = image_format.lower().strip(".") or "png"
+                key = f"{job_id}/screenshots/screenshot_{index:03d}.{safe_format}"
+                artifact = _put_object(
+                    s3_client,
+                    bucket_name=bucket_name,
+                    key=key,
+                    body=base64.b64decode(b64),
+                    content_type=f"image/{safe_format}",
+                )
+                artifact["type"] = "screenshot"
+                artifact["source"] = " -> ".join(str(part) for part in path_parts)
+                artifacts.append(artifact)
+
+            har = _find_har(result)
+            if har is not None:
+                artifact = _put_object(
+                    s3_client,
+                    bucket_name=bucket_name,
+                    key=f"{job_id}/har/session.har",
+                    body=json.dumps(har, indent=2, ensure_ascii=False).encode("utf-8"),
+                    content_type="application/json",
+                )
+                artifact["type"] = "har"
+                artifacts.append(artifact)
+
+            hybrid_output = result
+            if isinstance(result, dict) and "result" in result:
+                hybrid_output = result["result"]
+
+            artifact = _put_object(
+                s3_client,
+                bucket_name=bucket_name,
+                key=f"{job_id}/hybrid/output.json",
+                body=json.dumps(
+                    hybrid_output,
+                    indent=2,
+                    ensure_ascii=False,
+                    default=str,
+                ).encode("utf-8"),
+                content_type="application/json",
+            )
+            artifact["type"] = "hybrid"
+            artifacts.append(artifact)
     finally:
         close = getattr(s3_client, "close", None)
         if callable(close):
