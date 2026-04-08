@@ -47,6 +47,7 @@ def app():
             models.Result.transport_state.property.columns[0].type = JSON()
             models.Result.contextual_tree.property.columns[0].type = JSON()
             models.Result.tags.property.columns[0].type = JsonEncodedList()
+            models.Orchestration.payload.property.columns[0].type = JSON()
 
             _db.create_all()
             yield test_app

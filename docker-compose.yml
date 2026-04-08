@@ -328,6 +328,7 @@ services:
       - SUBSTRATE_WORKER_IMAGE=agentic-thin-waist-substrate-worker
       - SUBSTRATE_DOCKER_NETWORK=agentic-thin-waist_agentic-network
       - SUBSTRATE_WORKER_HOST=172.28.0.1
+      - TELEMETRY_SERVICE_URL=http://telemetry-service:8004
     depends_on:
       - experiment-api
       - ctp-service
