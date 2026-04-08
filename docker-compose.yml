@@ -65,7 +65,7 @@ services:
       dockerfile: ./services/experiment-api/Dockerfile
     container_name: experiment-api
     ports:
-      - "18000:8000"
+      - "8000:8000"
     environment:
       - FLASK_ENV=development
       - CTP_SERVICE_URL=http://ctp-service:8001
