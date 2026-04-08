@@ -304,7 +304,7 @@ def get_artifacts_by_id(artifact_id):
 
     response = make_response(file_bytes)
     response.headers["Content-Type"] = "application/octet-stream"
-    response.headers["Content-Disposition"] = (
-        f"attachment; filename={artifact.filename}"
-    )
+    response.headers[
+        "Content-Disposition"
+    ] = f"attachment; filename={artifact.filename}"
     return response, 200

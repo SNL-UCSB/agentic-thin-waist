@@ -65,7 +65,7 @@ services:
       dockerfile: ./services/experiment-api/Dockerfile
     container_name: experiment-api
     ports:
-      - "8000:8000"
+      - "18000:8000"
     environment:
       - FLASK_ENV=development
       - CTP_SERVICE_URL=http://ctp-service:8001
@@ -321,7 +321,13 @@ services:
     environment:
       - FLASK_ENV=development
       - EXPERIMENT_API_URL=http://experiment-api:8000
+      - CTP_SERVICE_URL=${CTP_SERVICE_URL:-http://ctp-service:8001}
+      - CTP_SERVICE_GLOBAL=${CTP_SERVICE_GLOBAL:-http://128.111.5.236:8001}
+      - ORCH_CTP_INTENSITY_DIRECTION=${ORCH_CTP_INTENSITY_DIRECTION:-}
       - CLAUDE_API_KEY=${CLAUDE_API_KEY:-}
+      - SUBSTRATE_WORKER_IMAGE=agentic-thin-waist-substrate-worker
+      - SUBSTRATE_DOCKER_NETWORK=agentic-thin-waist_agentic-network
+      - SUBSTRATE_WORKER_HOST=172.28.0.1
     depends_on:
       - experiment-api
       - ctp-service

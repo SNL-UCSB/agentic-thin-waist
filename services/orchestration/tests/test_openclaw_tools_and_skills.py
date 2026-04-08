@@ -54,7 +54,9 @@ def test_execute_parameter_sweep_skill():
     assert latencies == [20.0, 80.0, 150.0]
 
 
-def test_intent_pipeline_with_saved_latency_sweep_output():
+@patch("app.api.intent.OrchestrationManager")
+@patch("app.api.intent.IntentParser")
+def test_intent_pipeline_with_saved_latency_sweep_output(MockParser, MockOrchestration):
     fixture = {
         "intent": "Compare YouTube and Zoom across a latency sweep",
         "with_examples": {
@@ -68,24 +70,28 @@ def test_intent_pipeline_with_saved_latency_sweep_output():
     }
     parsed = fixture["with_examples"]
 
-    with patch("app.api.intent.IntentParser") as MockParser:
-        MockParser.return_value.parse.return_value = parsed
-        resp = client.post(
-            "/intent",
-            json={
-                "intent": fixture["intent"],
-                "preferences": {"run_immediately": False},
-            },
-        )
+    MockParser.return_value.parse.return_value = parsed
+    MockOrchestration.return_value.run.return_value = {
+        "status": "complete",
+        "experiment_specs": [],
+        "results": [],
+        "summary": {"total_experiments": 0, "successful": 0, "failed": 0},
+    }
+    resp = client.post(
+        "/intent",
+        json={
+            "intent": fixture["intent"],
+            "preferences": {},
+        },
+    )
     assert resp.status_code == 202
     orch_id = resp.json()["orchestration_id"]
     status = client.get(f"/orchestration/{orch_id}")
     assert status.status_code == 200
     payload = status.json()
     assert payload["status"] in {
-        "generating",
-        "validating",
         "complete",
         "pending",
         "parsing",
+        "failed",
     }

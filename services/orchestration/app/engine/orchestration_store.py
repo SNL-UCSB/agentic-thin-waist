@@ -34,13 +34,15 @@ def _sqlite_path() -> Path:
 
 
 def _ensure_sqlite_schema(conn: sqlite3.Connection) -> None:
-    conn.execute("""
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS orchestrations (
             orchestration_id TEXT PRIMARY KEY,
             payload_json TEXT NOT NULL,
             updated_at REAL NOT NULL
         )
-        """)
+        """
+    )
     conn.commit()
 
 

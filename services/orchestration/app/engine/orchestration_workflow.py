@@ -10,6 +10,7 @@ import logging
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from urllib.parse import quote
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -329,6 +330,60 @@ def _build_replay_payload(
     }
 
 
+def _intensity_range_for_spec(spec: dict[str, Any]) -> list[float]:
+    capacity = float(spec.get("capacity_mbps", 0) or 0)
+    ratio = _env_float("ORCH_CTP_INTENSITY_TOLERANCE_RATIO", "0.5")
+    low = max(0.01, capacity * (1 - ratio))
+    high = max(low, capacity * (1 + ratio))
+    return [round(low, 4), round(high, 4)]
+
+
+def _global_ctp_service_url(clients: DownstreamClients) -> str:
+    return os.getenv("CTP_SERVICE_GLOBAL", clients.ctp_service_url).rstrip("/")
+
+
+def _build_replay_data_pointer(clients: DownstreamClients, ctp_id: str) -> str:
+    base = _global_ctp_service_url(clients)
+    replay_dir = quote(
+        os.getenv("ORCH_CTP_REPLAY_DIR", "/home/netreplica/output_test"), safe="/._-"
+    )
+    users_root = quote(
+        os.getenv("ORCH_CTP_USERS_ROOT", "/home/netreplica/output_test/users"),
+        safe="/._-",
+    )
+    return (
+        f"{base}/ctps/{ctp_id}/replay-data"
+        f"?replay_dir={replay_dir}&users_root={users_root}&direction={{direction}}"
+    )
+
+
+def _resolve_ctp_pointer_for_spec(
+    clients: DownstreamClients, spec: dict[str, Any]
+) -> tuple[str | None, dict[str, Any]]:
+    query = {
+        "is_transformed": True,
+        "intensity_range_mbps": _intensity_range_for_spec(spec),
+    }
+    limit = _env_int("ORCH_CTP_SELECT_LIMIT", "10")
+    selection = clients.select_ctps(
+        {"query": query, "limit": limit, "order_by": "intensity"}
+    )
+    ctps = selection.get("ctps") or []
+    if not ctps:
+        return None, {"query": query, "selection": selection, "selected": None}
+    selected = ctps[0]
+    ctp_id = selected.get("ctp_id")
+    if not ctp_id:
+        return None, {"query": query, "selection": selection, "selected": selected}
+    pointer = _build_replay_data_pointer(clients, ctp_id)
+    return pointer, {
+        "query": query,
+        "selection": selection,
+        "selected": selected,
+        "ctp_id": ctp_id,
+    }
+
+
 def _build_telemetry_result_payload(
     spec: dict[str, Any],
     orch_id: str,
@@ -415,15 +470,36 @@ def run_single_iteration(
     )
 
     try:
-        # 1. Resolve CTP PCAP from local corpus
+        # 1. Resolve CTP PCAP pointer from CTP service (fallback to local corpus)
         lifecycle.on_ctp_validation_start()
         recorder.record(
             OrchestrationStage.REQUESTING_CTP_EXPORT, iteration=iteration_index
         )
-        ctp_resolution = resolve_ctp(spec.get("ctp_cluster"))
-        item["ctp_resolution"] = ctp_resolution.to_dict()
-        lifecycle.on_ctp_validation_done(bool(getattr(ctp_resolution, "ready", False)))
-        recorder.record(OrchestrationStage.CTP_PCAP_READY, iteration=iteration_index)
+        ctp_fetch_result: dict[str, Any] | None = None
+        ctp_pointer, ctp_meta = _resolve_ctp_pointer_for_spec(clients, run_spec)
+        item["ctp_pointer"] = ctp_meta
+
+        ctp_resolution = None
+        replay_ctp_file: str | None = None
+
+        if ctp_pointer:
+            ctp_fetch_result = clients.fetch_ctp_substrate({"ctp_pointer": ctp_pointer})
+            replay_ctp_file = ctp_fetch_result.get("name")
+            item["ctp_fetch"] = ctp_fetch_result
+            lifecycle.on_ctp_validation_done(True)
+            recorder.record(
+                OrchestrationStage.CTP_PCAP_READY, iteration=iteration_index
+            )
+        else:
+            ctp_resolution = resolve_ctp(spec.get("ctp_cluster"))
+            item["ctp_resolution"] = ctp_resolution.to_dict()
+            replay_ctp_file = ctp_resolution.replay_ctp_file
+            lifecycle.on_ctp_validation_done(
+                bool(getattr(ctp_resolution, "ready", False))
+            )
+            recorder.record(
+                OrchestrationStage.CTP_PCAP_READY, iteration=iteration_index
+            )
 
         # 2. Register experiment via Experiment API
         experiment_payload = dict(run_spec)
@@ -470,9 +546,7 @@ def run_single_iteration(
         capture_result = clients.capture_substrate(capture_payload)
         item["capture"] = capture_result
 
-        replay_payload = _build_replay_payload(
-            run_spec, ctp_file=ctp_resolution.replay_ctp_file
-        )
+        replay_payload = _build_replay_payload(run_spec, ctp_file=replay_ctp_file)
         try:
             replay_result = clients.replay_substrate(replay_payload)
         except Exception as exc:

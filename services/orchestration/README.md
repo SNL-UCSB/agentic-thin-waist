@@ -255,7 +255,6 @@ Submit a natural language research intent. Claude reasons through the intent, ge
   },
   "preferences": {
     "capture_pcap": true,
-    "run_immediately": true,
     "desired_cc_algorithms": ["cubic", "bbr"]
   }
 }
