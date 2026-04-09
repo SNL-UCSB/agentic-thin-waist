@@ -335,7 +335,6 @@ def create_agent():
 
 
 async def main():
-
     wf = {
         "specification": "1. Watch a YouTube video (https://www.youtube.com/watch?v=RKBi_ouZPP8) for 30 seconds",
         "workflow": {

@@ -64,7 +64,6 @@ def _submit_request(
             "num_trials": 1,
         },
         "preferences": {
-            "run_immediately": True,
             "use_examples": True,
         },
     }

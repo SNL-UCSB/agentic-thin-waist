@@ -1023,8 +1023,9 @@ def get_congestion(namespace: Optional[str] = None) -> CongestionResponse:
 def fetch_ctp_endpoint(req: CtpFetchRequest) -> CtpFetchResponse:
     """Fetch download + upload PCAPs for a CTP pointer into the local CTP directory.
 
-    The worker resolves *ctp_pointer* (URL, absolute path, or plain base name),
-    downloads or copies both PCAP files, and places them under::
+    The worker resolves *ctp_pointer*: HTTP(S) URL (including ``…/ctps/{id}/export``
+    ZIP archives), absolute filesystem path, or plain base name.  It downloads or
+    copies both PCAP files into::
 
         <ctp_root>/download/<name>.pcap
         <ctp_root>/upload/<name>.pcap

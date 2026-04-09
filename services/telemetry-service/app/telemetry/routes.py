@@ -259,6 +259,46 @@ def get_results_as_csv_by_filters():
     return response, 200
 
 
+@routes_bp.route("/orchestrations/<orch_id>", methods=["PUT"])
+def upsert_orchestration(orch_id):
+    data = request.get_json()
+    if not data or not isinstance(data, dict):
+        return jsonify({"error": "JSON payload required"}), 400
+
+    row = models.Orchestration.query.get(orch_id)
+    if row is None:
+        row = models.Orchestration(
+            orchestration_id=orch_id,
+            status=data.get("status", "pending"),
+            payload=data,
+        )
+        db.session.add(row)
+    else:
+        row.status = data.get("status", row.status)
+        row.payload = data
+    db.session.commit()
+
+    return jsonify(row.to_dict()), 200
+
+
+@routes_bp.route("/orchestrations/<orch_id>", methods=["GET"])
+def get_orchestration(orch_id):
+    row = models.Orchestration.query.get(orch_id)
+    if row is None:
+        return jsonify({"error": "Orchestration not found"}), 404
+    return jsonify(row.to_dict()), 200
+
+
+@routes_bp.route("/orchestrations/<orch_id>", methods=["DELETE"])
+def delete_orchestration(orch_id):
+    row = models.Orchestration.query.get(orch_id)
+    if row is None:
+        return jsonify({"error": "Orchestration not found"}), 404
+    db.session.delete(row)
+    db.session.commit()
+    return jsonify({"deleted": orch_id}), 200
+
+
 @routes_bp.route("/artifacts", methods=["POST"])
 def add_artifacts():
     result_id = request.form.get("result_id")
@@ -304,7 +344,7 @@ def get_artifacts_by_id(artifact_id):
 
     response = make_response(file_bytes)
     response.headers["Content-Type"] = "application/octet-stream"
-    response.headers["Content-Disposition"] = (
-        f"attachment; filename={artifact.filename}"
-    )
+    response.headers[
+        "Content-Disposition"
+    ] = f"attachment; filename={artifact.filename}"
     return response, 200

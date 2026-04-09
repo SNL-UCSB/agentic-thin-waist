@@ -56,6 +56,24 @@ class Result(db.Model):
         }
 
 
+class Orchestration(db.Model):
+    __tablename__ = "orchestrations"
+
+    orchestration_id = db.Column(db.String(64), primary_key=True)
+    status = db.Column(db.String(32), nullable=False, default="pending")
+    payload = db.Column(JSONB, nullable=False, default=dict)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(
+        db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    def to_dict(self):
+        data = dict(self.payload or {})
+        data["orchestration_id"] = self.orchestration_id
+        data["status"] = self.status
+        return data
+
+
 class Artifact(db.Model):
     __tablename__ = "artifacts"
 

@@ -149,7 +149,7 @@ class LocalDockerBackend(ConnectivityBackend):
                     f"{_SUBSTRATE_CONTAINER_PORT}/tcp": [{"HostIp": "", "HostPort": ""}]
                 },
                 "Binds": [
-                    f"{ctp_dir}:{ctp_dir}:ro",
+                    f"{ctp_dir}:{ctp_dir}",
                     f"{capture_dir}:{capture_dir}",
                     "/var/run/docker.sock:/var/run/docker.sock",
                 ],
