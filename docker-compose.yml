@@ -13,7 +13,7 @@ services:
       POSTGRES_PASSWORD: ${DB_PASSWORD}
       POSTGRES_DB: ${DB_NAME}
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      - ${POSTGRES_DATA_DIR:-/var/lib/postgresql/data}:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
       interval: 5s
@@ -119,6 +119,7 @@ services:
       - ./services/ctp-service:/app
       - ${CTP_DIR}:${CTP_DIR}:ro
       - ${CTP_OUTPUT_DIR}:${CTP_OUTPUT_DIR}
+      - ${CTP_TRANSFORMED_DIR:-/tmp/ctp-transformed}:${CTP_TRANSFORMED_DIR:-/tmp/ctp-transformed}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
       interval: 5s
@@ -139,8 +140,8 @@ services:
       - TELEMETRY_SERVICE_URL=http://telemetry-service:8004
       - BROWSER_PROXY_HOST=172.16.1.1
       - BROWSER_PROXY_PORT=8888
-      - CAPTURE_DIR=${CAPTURE_DIR}
-      - CTP_DIR=${CTP_DIR}
+      - CAPTURE_DIR=${SUBSTRATE_CAPTURE_DIR}
+      - CTP_DIR=${SUBSTRATE_CTP_DIR}
     depends_on:
       - telemetry-service
     networks:
@@ -149,8 +150,8 @@ services:
       - ./services/substrate-worker:/app
       - /var/run/docker.sock:/var/run/docker.sock
       - substrate-runtime:/var/run/substrate
-      - ${CTP_DIR}:${CTP_DIR}:ro
-      - ${CAPTURE_DIR}:${CAPTURE_DIR}
+      - ${SUBSTRATE_CTP_DIR:-/tmp/substrate-ctp}:${SUBSTRATE_CTP_DIR:-/tmp/substrate-ctp}:ro
+      - ${SUBSTRATE_CAPTURE_DIR:-/tmp/substrate-capture}:${SUBSTRATE_CAPTURE_DIR:-/tmp/substrate-capture}
     # Substrate worker requires privileged mode to use tc (traffic control)
     privileged: true
     cap_add:

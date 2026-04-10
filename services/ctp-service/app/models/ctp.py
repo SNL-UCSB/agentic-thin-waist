@@ -36,6 +36,8 @@ class CTPIntensity:
     mean_bps: float
     peak_pps: float
     peak_bps: float
+    download_mean_mbps: Optional[float] = None
+    upload_mean_mbps: Optional[float] = None
 
     @property
     def mean_mbps(self) -> float:
@@ -196,6 +198,8 @@ class CrossTrafficProfile:
                 "mean_mbps": self.intensity.mean_mbps,
                 "peak_pps": self.intensity.peak_pps,
                 "peak_bps": self.intensity.peak_bps,
+                "download_mean_mbps": self.intensity.download_mean_mbps,
+                "upload_mean_mbps": self.intensity.upload_mean_mbps,
             },
             "burstiness": {
                 "peak_to_mean_ratio": self.burstiness.peak_to_mean_ratio,

@@ -1,7 +1,7 @@
 # Corpus Log
 
 Tracks all papers in the survey corpus with ingestion status and reading depth.
-Last updated: 2026-04-04
+Last updated: 2026-04-06
 
 ## Tier 1: Core Papers (Pass 3 required)
 
@@ -12,13 +12,13 @@ Last updated: 2026-04-04
 | 3 | AI Scientist v2 | Yamada et al. (Sakana AI) | 2025 | arXiv:2504.08066 | PDF ✅ Pass 1 ✅ | 1 |
 | 4 | SkyDiscover/AdaEvolve/EvoX | Liu, Cemri et al. (Berkeley) | 2026 | arXiv:2504.05108 | Pass 1 ✅ (agent) | 1 |
 | 5 | netUnicorn | Beltiukov et al. (UCSB) | 2023 | CCS 2023 | PDF ✅ (own work) | — |
-| 6 | Barbarians at the Gate: AI Upending Systems Research | Cheng, Stoica et al. (Berkeley) | 2025 | arXiv:2510.06189 | pending | — |
-| 7 | AlphaEvolve | Novikov et al. (DeepMind) | 2025 | arXiv:2506.13131 | pending | — |
-| 8 | FunSearch | Romera-Paredes et al. (DeepMind) | 2024 | Nature 2024 | pending | — |
-| 9 | Agentic AI for Scientific Discovery Survey | multiple | 2025 | arXiv:2503.08979 | pending | — |
-| 10 | NIKA: Network Arena for AI Agent Benchmarking | Cornacchia et al. (KAUST) | 2025 | arXiv:2512.16381 | pending | — |
-| 11 | PolicySmith: Man-Made Heuristics Are Dead | Dwivedula et al. | 2025 | arXiv:2510.08803 | pending | — |
-| 12 | Engram: Coherence in Agentic Systems Optimization | Karimi et al. (MIT) | 2026 | arXiv:2603.21321 | pending | — |
+| 6 | Barbarians at the Gate: AI Upending Systems Research | Cheng, Stoica et al. (Berkeley) | 2025 | arXiv:2510.06189 | NLM ✅ | — |
+| 7 | AlphaEvolve | Novikov et al. (DeepMind) | 2025 | arXiv:2506.13131 | NLM ✅ | — |
+| 8 | FunSearch | Romera-Paredes et al. (DeepMind) | 2024 | Nature 2024 | NLM ✅ | — |
+| 9 | Agentic AI for Scientific Discovery Survey | multiple | 2025 | arXiv:2503.08979 | NLM ✅ | — |
+| 10 | NIKA: Network Arena for AI Agent Benchmarking | Cornacchia et al. (KAUST) | 2025 | arXiv:2512.16381 | NLM ✅ | — |
+| 11 | PolicySmith: Man-Made Heuristics Are Dead | Dwivedula et al. | 2025 | arXiv:2510.08803 | NLM ✅ | — |
+| 12 | Engram: Coherence in Agentic Systems Optimization | Karimi et al. (MIT) | 2026 | arXiv:2603.21321 | NLM ✅ | — |
 | 13 | NetForge/NetReplica | Daneshamooz et al. (UCSB) | 2025 | arXiv:2507.13476 | (own work) | — |
 
 ## Tier 2: Pass 2 Recommended
@@ -29,31 +29,31 @@ Last updated: 2026-04-04
 | 15 | POPPER | — | 2025 | arXiv:2502.09858 | PDF ✅ | — |
 | 16 | Agent Laboratory | Schmidgall et al. (JHU) | 2025 | arXiv:2501.04227 | PDF ✅ | — |
 | 17 | AI Scientist v1 | Lu et al. (Sakana AI) | 2024 | arXiv:2408.06292 | PDF ✅ | — |
-| 18 | Evaluating AI Scientist | Beel et al. | 2025 | arXiv:2502.14297 | pending | — |
+| 18 | Evaluating AI Scientist | Beel et al. | 2025 | arXiv:2502.14297 | NLM ✅ | — |
 | 19 | Credibility Crisis in Networking | Willinger, Gupta et al. | 2025 | SIGCOMM CCR | pending | — |
 | 20 | Strategic Data Collection for Model Generalization | Hoffman et al. (ETH) | 2025 | SIGCOMM Posters | pending | — |
-| 21 | NetPress: Dynamic LLM Benchmarks for Networking | — | 2025 | arXiv:2506.03231 | pending | — |
-| 22 | LLM-based Accessible Network Control | Lin et al. (Meta) | 2025 | arXiv:2509.20600 | pending | — |
-| 23 | ReAct: Reasoning + Acting in LLMs | Yao et al. | 2023 | ICLR 2023 | pending | — |
+| 21 | NetPress/NetArena: Dynamic LLM Benchmarks for Networking | — | 2025 | arXiv:2506.03231 | NLM ✅ | — |
+| 22 | LLM-based Accessible Network Control | Lin et al. (Meta) | 2025 | arXiv:2509.20600 | NLM ✅ | — |
+| 23 | ReAct: Reasoning + Acting in LLMs | Yao et al. | 2023 | ICLR 2023 | NLM ✅ | — |
 | 24 | Voyager: Open-Ended Embodied Agent | Wang et al. (NVIDIA) | 2023 | NeurIPS 2023 | pending | — |
 | 25 | Holistic View of AI-Driven Network Incident Mgmt | Hamadanian et al. (MIT) | 2023 | HotNets 2023 | pending | — |
 | 26 | MetaEase: Heuristic Analysis from Source Code | Karimi et al. (MIT) | 2026 | NSDI 2026 | pending | — |
-| 27 | m4: Learned Flow-level Network Simulator | Li et al. (MIT) | 2025 | arXiv:2503.01770 | pending | — |
-| 28 | Gorilla: LLM Connected with Massive APIs | Patil et al. (Berkeley) | 2024 | NeurIPS 2024 | pending | — |
+| 27 | m4: Learned Flow-level Network Simulator | Li et al. (MIT) | 2025 | arXiv:2503.01770 | NLM ✅ | — |
+| 28 | Gorilla: LLM Connected with Massive APIs | Patil et al. (Berkeley) | 2024 | NeurIPS 2024 | NLM ✅ | — |
 | 29 | LLM Network Management Survey | Hong et al. | 2025 | Wiley IJNM | pending | — |
 | 30 | MeshAgent: Reliable Network Mgmt with LLMs | — (Maryland/Microsoft) | 2026 | SIGMETRICS 2026 | pending | — |
 | 31 | BiAn: LLM Failure Localization at Alibaba | — (Alibaba Cloud) | 2025 | SIGCOMM 2025 | pending | — |
-| 32 | NetLLM: Adapting LLMs for Networking | Wu et al. | 2024 | SIGCOMM 2024 | pending | — |
-| 33 | LLM4NetLab: Playground for Network AI Agents | Cornacchia et al. | 2025 | SIGCOMM NGNO | pending | — |
-| 34 | Cognitive Biases in Agentic AI Networks | Chergui et al. | 2025 | arXiv:2510.19973 | pending | — |
-| 35 | From AI for Science to Agentic Science Survey | — | 2025 | arXiv:2508.14111 | pending | — |
+| 32 | NetLLM: Adapting LLMs for Networking | Wu et al. | 2024 | SIGCOMM 2024 | NLM ✅ | — |
+| 33 | LLM4NetLab: Playground for Network AI Agents | Cornacchia et al. | 2025 | SIGCOMM NGNO | NLM ✅ | — |
+| 34 | Cognitive Biases in Agentic AI Networks | Chergui et al. | 2025 | arXiv:2510.19973 | NLM ✅ | — |
+| 35 | From AI for Science to Agentic Science Survey | — | 2025 | arXiv:2508.14111 | NLM ✅ | — |
 | 36 | Deep Research: Survey of Autonomous Research Agents | — | 2025 | arXiv:2508.12752 | pending | — |
 | 37 | Automated Capability Discovery | Lu et al. (Clune) | 2025 | ICLR 2025 | pending | — |
-| 38 | SWE-agent: Agent-Computer Interfaces | Yang et al. (Princeton) | 2024 | NeurIPS 2024 | pending | — |
+| 38 | SWE-agent: Agent-Computer Interfaces | Yang et al. (Princeton) | 2024 | NeurIPS 2024 | NLM ✅ | — |
 | 39 | Kgent: LLM Agent for eBPF | Zheng et al. | 2024 | SIGCOMM eBPF | pending | — |
-| 40 | Agentic OS for Linux Schedulers | Zheng et al. | 2025 | arXiv:2509.01245 | pending | — |
-| 41 | Autonomous Agents for Scientific Discovery | — | 2025 | arXiv:2510.09901 | pending | — |
-| 42 | AI-Researcher: Autonomous Scientific Innovation | — | 2025 | arXiv:2505.18705 | pending | — |
+| 40 | Agentic OS for Linux Schedulers | Zheng et al. | 2025 | arXiv:2509.01245 | NLM ✅ | — |
+| 41 | Autonomous Agents for Scientific Discovery | — | 2025 | arXiv:2510.09901 | NLM ✅ | — |
+| 42 | AI-Researcher: Autonomous Scientific Innovation | — | 2025 | arXiv:2505.18705 | NLM ✅ | — |
 
 ## Tier 2b: LBNL Workshop Systems
 
@@ -95,11 +95,17 @@ Last updated: 2026-04-04
 | 71 | GoEx: Gorilla Execution Engine | 2024 | Berkeley | safe agent execution |
 | 72 | Specifications as Engineering Discipline | 2024 | Berkeley | LLM systems rigor |
 | 73 | Bluesky (BNL) / funcX / Globus Compute / Parsl | various | DOE | federated infra |
+| 74 | On the Hourglass Model | Akhshabi & Dovrolis | 2016 | arXiv:1607.07183 | NLM ✅ | background |
+| 75 | Transforming Science with LLMs Survey | — | 2025 | arXiv:2502.05151 | NLM ✅ | survey |
+| 76 | Towards an AI Co-Scientist | Google DeepMind | 2025 | arXiv:2502.18864 | NLM ✅ | co-scientist |
+| 77 | PROV-AGENT: Unified Provenance for AI Agent Workflows | — | 2025 | arXiv:2508.02866 | NLM ✅ | provenance |
+| 78 | LLM Optimizers via Agent-System Interfaces | — | 2024 | arXiv:2410.15625 | NLM ✅ | agent interfaces |
 
 ## Corpus Statistics
 
-- **Total papers tracked:** 73
+- **Total papers tracked:** 78
+- **In NLM notebook:** 38 good sources (12 wrong arXiv resolutions waste slots; 50 total)
 - **PDFs downloaded:** 8
 - **Pass 1 complete:** 7 (Glia, Confucius, AI Scientist v2, SkyDiscover, Osprey, Academy, Flowcept)
-- **Pass 3 required (remaining):** ~6 (Barbarians at the Gate, AlphaEvolve, FunSearch, NIKA, PolicySmith, Engram, Agentic AI Survey)
-- **Archetype budget:** Examiner (80-150 papers) — currently at 73, on track
+- **Still truly pending (not in NLM):** 13 (#19 Credibility Crisis, #20 Strategic Data Collection, #24 Voyager, #25 Holistic Incident Mgmt, #26 MetaEase, #29 LLM Network Mgmt Survey, #30 MeshAgent, #31 BiAn, #36 Deep Research Survey, #39 Kgent, #46 gpCAM, #47 Colmena, #48 INTERSECT)
+- **Archetype budget:** Examiner (80-150 papers) — currently at 78, on track

@@ -529,6 +529,37 @@ def pad_pcap_frames(input_pcap: str, temp_output: str) -> None:
 # ---------------------------------------------------------------------------
 
 
+def clip_pcap_to_window(pcap_file: str, output_file: str, window_sec: float) -> None:
+    """Write only packets that fall within the first *window_sec* seconds.
+
+    Uses the timestamp of the first IP packet as t=0.  Packets arriving after
+    ``window_sec`` are discarded.  This ensures the output PCAP spans exactly
+    the CTP time window so that throughput computed from the file matches the
+    stored timeseries.
+
+    Args:
+        pcap_file: Path to the input PCAP.
+        output_file: Path for the clipped output PCAP.
+        window_sec: Duration to keep in seconds (e.g. 30).
+    """
+    output_packets = []
+    start_time: float | None = None
+
+    with PcapReader(pcap_file) as reader:
+        for pkt in reader:
+            if not pkt.haslayer(IP):
+                continue
+            t = float(pkt.time)
+            if start_time is None:
+                start_time = t
+            if t - start_time <= window_sec:
+                output_packets.append(pkt)
+            else:
+                break
+
+    wrpcap(output_file, output_packets)
+
+
 def trim_pcap_by_rate(
     pcap_file: str,
     output_file: str,

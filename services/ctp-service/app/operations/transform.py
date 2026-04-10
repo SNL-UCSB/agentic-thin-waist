@@ -37,6 +37,7 @@ Output layout
 from __future__ import annotations
 
 import logging
+import struct
 import subprocess
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -49,6 +50,7 @@ from app.models.ctp import CrossTrafficProfile
 from app.operations.extract import build_timeseries_from_window
 from app.operations.metrics import compute_all_metrics
 from app.pcap_utils import (
+    clip_pcap_to_window,
     merge_pcaps_by_index,
     pad_pcap_frames,
     _reorder_single_pcap,
@@ -57,7 +59,18 @@ from app.pcap_utils import (
 
 logger = logging.getLogger(__name__)
 
-# Threshold for burst trimming: 100 ms interval, 6 Mbps → bytes per interval
+# Valid PCAP global header (little-endian, Ethernet link type).
+# Written to produce an empty-but-valid PCAP when a direction has no traffic.
+_PCAP_GLOBAL_HEADER: bytes = struct.pack(
+    "<IHHiIII",
+    0xA1B2C3D4,  # magic number
+    2,
+    4,  # version major/minor
+    0,  # UTC offset
+    0,  # timestamp accuracy
+    65535,  # snapshot length
+    1,  # link type: Ethernet
+)
 
 
 class CTPTransformer:
@@ -126,12 +139,9 @@ class CTPTransformer:
 
         # ---- Merge per-user window PCAPs ----
         download_pcap = (
-            downlink_dir
-            / f"{safe_id}_{throughput_threshold_mbps:.0f}mbps_download.pcap"
+            downlink_dir / f"{safe_id}_{throughput_threshold_mbps:.0f}mbps.pcap"
         )
-        upload_pcap = (
-            uplink_dir / f"{safe_id}_{throughput_threshold_mbps:.0f}mbps_upload.pcap"
-        )
+        upload_pcap = uplink_dir / f"{safe_id}_{throughput_threshold_mbps:.0f}mbps.pcap"
 
         self._merge_user_pcaps(
             leaf_ips=leaf_ips,
@@ -147,6 +157,18 @@ class CTPTransformer:
             output_path=upload_pcap,
             direction="upload",
         )
+
+        # ---- Clip to window duration ----
+        # The per-user window PCAPs can span more than window_sec seconds
+        # (e.g. the full capture).  Clip here so the output PCAP duration
+        # matches the CTP timeseries and measured throughput is consistent.
+        for pcap in (download_pcap, upload_pcap):
+            if pcap.exists():
+                clipped = pcap.with_suffix(".clipped.pcap")
+                clip_pcap_to_window(
+                    str(pcap), str(clipped), window_sec=original.duration_seconds
+                )
+                clipped.rename(pcap)
 
         # ---- Reorder packets ----
         for pcap in (download_pcap, upload_pcap):
@@ -264,10 +286,12 @@ class CTPTransformer:
 
         if not pcap_files:
             logger.warning(
-                "No %s PCAP files for window %d found; skipping merge.",
+                "No %s PCAP files for window %d found; writing empty PCAP.",
                 direction,
                 window_index,
             )
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_bytes(_PCAP_GLOBAL_HEADER)
             return
 
         cmd = ["joincap", "-w", str(output_path)] + pcap_files

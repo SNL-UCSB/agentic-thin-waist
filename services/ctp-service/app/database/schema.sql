@@ -99,6 +99,13 @@ COMMENT ON COLUMN ctp_nodes.structure IS
 CREATE INDEX IF NOT EXISTS idx_ctp_intensity_mbps
     ON ctp_nodes USING BTREE (((intensity->>'mean_mbps')::FLOAT8));
 
+-- Per-direction mean throughput (populated in capped-copy DBs)
+CREATE INDEX IF NOT EXISTS idx_ctp_download_mean_mbps
+    ON ctp_nodes USING BTREE (((intensity->>'download_mean_mbps')::FLOAT8));
+
+CREATE INDEX IF NOT EXISTS idx_ctp_upload_mean_mbps
+    ON ctp_nodes USING BTREE (((intensity->>'upload_mean_mbps')::FLOAT8));
+
 -- Burstiness PMR
 CREATE INDEX IF NOT EXISTS idx_ctp_burstiness_pmr
     ON ctp_nodes USING BTREE (((burstiness->>'peak_to_mean_ratio')::FLOAT8));
