@@ -85,9 +85,7 @@ def load_orchestration(orch_id: str) -> dict[str, Any] | None:
     try:
         resp.raise_for_status()
     except httpx.HTTPStatusError:
-        logger.warning(
-            "Telemetry returned %d for %s", resp.status_code, orch_id
-        )
+        logger.warning("Telemetry returned %d for %s", resp.status_code, orch_id)
         return None
     return _parse_loaded(resp.json())
 
