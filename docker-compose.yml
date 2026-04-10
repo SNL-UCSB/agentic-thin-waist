@@ -3,7 +3,7 @@ services:
   postgres:
     image: postgres:15
     ports:
-      - 5432:5432
+      - 5433:5432
     networks:
       - agentic-network
     env_file:
