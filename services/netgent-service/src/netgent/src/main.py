@@ -35,7 +35,7 @@ class NetGent:
             }],
             "parameters": ["host", "count"],
         }
-        result = asyncio.run(client.run(workflow, parameters={"host": "8.8.8.8", "count": "3"}))
+        result = asyncio.run(client.execute(workflow, parameters={"host": "8.8.8.8", "count": "3"}))
     """
 
     def __init__(self) -> None:
@@ -66,9 +66,9 @@ class NetGent:
             }
         )
 
-    # ── run ───────────────────────────────────────────────────────────────────
+    # ── execute ────────────────────────────────────────────────────────────────
 
-    async def run(
+    async def execute(
         self,
         workflow: dict[str, Any],
         *,
@@ -127,7 +127,7 @@ if __name__ == "__main__":
     }
 
     result = asyncio.run(
-        client.run(
+        client.execute(
             workflow,
             parameters={"url": "https://example.com", "wait_seconds": "10"},
             type="browser",

@@ -16,30 +16,11 @@ from api.utils import (
 )
 from api.worker import get_queue_app
 from api.worker.constants import WORKFLOW_EXECUTE_QUEUE, WORKFLOW_GENERATE_QUEUE
-from netgent.src.agent.agent import create_agent as create_netgent_agent
+from netgent.src.main import NetGent
 
 logger = logging.getLogger(__name__)
 
 queue_app = get_queue_app()
-
-
-async def _ainvoke_netgent_agent(
-    *,
-    specification: str,
-    workflow_definition: dict[str, Any],
-    workflow_type: Literal["shell", "browser", "hybrid"],
-    parameters: dict[str, str] | None = None,
-) -> Any:
-    netgent_agent = create_netgent_agent()
-    return await netgent_agent.ainvoke(
-        {
-            "task": specification,
-            "messages": [],
-            "workflow": workflow_definition,
-            "type": workflow_type,
-            "parameters": parameters or {},
-        }
-    )
 
 
 def _fail_job(job_id: str, *, error: str | None = None) -> None:
@@ -99,16 +80,17 @@ def _run_netgent_job(job_id: str, *, operation: Literal["generate", "execute"]) 
             update_job_status(session, job_id, "running")
             session.commit()
 
-        result = asyncio.run(
-            _ainvoke_netgent_agent(
-                specification=specification,
-                workflow_definition=(
-                    {} if operation == "generate" else workflow_definition
-                ),
-                workflow_type=workflow_type,
-                parameters=parameters if operation == "execute" else {},
+        client = NetGent()
+        if operation == "generate":
+            result = asyncio.run(client.generate(specification, type=workflow_type))
+        else:
+            result = asyncio.run(
+                client.execute(
+                    workflow_definition,
+                    parameters=parameters,
+                    type=workflow_type,
+                )
             )
-        )
 
         updated_workflow = workflow_definition
         if isinstance(result, dict):
