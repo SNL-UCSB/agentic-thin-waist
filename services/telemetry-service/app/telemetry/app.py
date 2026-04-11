@@ -15,6 +15,3 @@ s3.init_app(app)
 
 app.register_blueprint(routes.routes_bp)
 app.register_blueprint(commands.commands_bp)
-
-with app.app_context():
-    db.create_all()
