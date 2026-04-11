@@ -43,8 +43,24 @@ def test_post_intent_returns_202_with_orchestration_id():
 
 def test_get_orchestration_status_returns_progress():
     """GET /orchestration/{id} returns status and experiments after completion."""
-    with patch("app.api.intent.IntentParser") as MockParser:
+    with (
+        patch("app.api.intent.IntentParser") as MockParser,
+        patch("app.api.intent.OrchestrationManager") as MockOrchestration,
+    ):
         MockParser.return_value.parse.return_value = SAMPLE_PARSED.copy()
+        MockOrchestration.return_value.run.return_value = {
+            "status": "complete",
+            "experiment_specs": [
+                {
+                    "experiment_id": "zoom-25mbps-50ms-cubic-001",
+                    "application": "zoom",
+                    "capacity_mbps": 25.0,
+                    "latency_ms": 50.0,
+                }
+            ],
+            "results": [],
+            "summary": {"total_experiments": 1, "successful": 1, "failed": 0},
+        }
         resp = client.post(
             "/intent",
             json={"intent": "Compare Zoom under 25 Mbps"},
@@ -73,8 +89,24 @@ def test_get_orchestration_status_returns_progress():
 
 def test_get_orchestration_results_after_completion():
     """GET /orchestration/{id}/results returns results after completion."""
-    with patch("app.api.intent.IntentParser") as MockParser:
+    with (
+        patch("app.api.intent.IntentParser") as MockParser,
+        patch("app.api.intent.OrchestrationManager") as MockOrchestration,
+    ):
         MockParser.return_value.parse.return_value = SAMPLE_PARSED.copy()
+        MockOrchestration.return_value.run.return_value = {
+            "status": "complete",
+            "experiment_specs": [
+                {
+                    "experiment_id": "zoom-25mbps-50ms-cubic-001",
+                    "application": "zoom",
+                    "capacity_mbps": 25.0,
+                    "latency_ms": 50.0,
+                }
+            ],
+            "results": [],
+            "summary": {"total_experiments": 1, "successful": 1, "failed": 0},
+        }
         resp = client.post(
             "/intent",
             json={"intent": "Compare Zoom under 25 Mbps"},
