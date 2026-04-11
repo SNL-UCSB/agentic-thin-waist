@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -31,6 +31,7 @@ class HealthResponse(BaseModel):
 class ExecuteWorkflowRequest(BaseModel):
     workflow_id: str
     timeout: int | None = Field(default=None, ge=1)
+    parameters: dict[str, str] = Field(default_factory=dict)
 
 
 class ExecuteWorkflowResponse(BaseModel):
@@ -51,6 +52,7 @@ class AvailableWorkflowItem(BaseModel):
     workflow_id: str
     specification: str
     last_executed_at: datetime | None = None
+    parameters: list[str] = Field(default_factory=list)
 
 
 class AvailableWorkflowsResponse(BaseModel):

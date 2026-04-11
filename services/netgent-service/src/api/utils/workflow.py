@@ -69,6 +69,7 @@ def list_workflow_summaries(session: Session) -> list[dict[str, Any]]:
         sa.select(
             WorkflowSpecification.id.label("workflow_id"),
             WorkflowSpecification.specification,
+            WorkflowSpecification.workflow,
             latest_runs.c.last_executed_at,
         )
         .outerjoin(latest_runs, WorkflowSpecification.id == latest_runs.c.workflow_id)
@@ -84,6 +85,11 @@ def list_workflow_summaries(session: Session) -> list[dict[str, Any]]:
             "workflow_id": str(workflow_id),
             "specification": specification,
             "last_executed_at": last_executed_at,
+            "parameters": [
+                name
+                for name in (workflow or {}).get("parameters") or []
+                if isinstance(name, str)
+            ],
         }
-        for workflow_id, specification, last_executed_at in rows
+        for workflow_id, specification, workflow, last_executed_at in rows
     ]

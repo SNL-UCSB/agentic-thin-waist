@@ -29,6 +29,102 @@ class BrowserState(MessagesState):
     result: dict[str, Any] | None = None
     generate_result: dict[str, Any] | None = None
     steps: NotRequired[int]
+    parameters: NotRequired[dict[str, str]]
+
+
+def _browser_parameter_placeholder(name: str) -> str:
+    return "{{" + name + "}}"
+
+
+def _extract_browser_secret_placeholder(
+    value: Any, parameters: dict[str, str]
+) -> str | None:
+    if not isinstance(value, str):
+        return None
+    prefix = "<secret>"
+    suffix = "</secret>"
+    if not (value.startswith(prefix) and value.endswith(suffix)):
+        return None
+
+    placeholder_name = value[len(prefix) : -len(suffix)].strip()
+    if placeholder_name in parameters:
+        return placeholder_name
+    return None
+
+
+def _infer_browser_parameter_name(
+    *,
+    action_type: str,
+    param_name: str,
+    parameters: dict[str, str],
+) -> str | None:
+    if action_type == "go_to_url" and param_name == "url":
+        candidates = [
+            name
+            for name in parameters
+            if any(token in name.lower() for token in ("url", "link", "href"))
+        ]
+        if len(candidates) == 1:
+            return candidates[0]
+
+    if action_type == "wait" and param_name == "seconds":
+        candidates = [
+            name
+            for name in parameters
+            if any(
+                token in name.lower()
+                for token in ("wait", "time", "seconds", "duration")
+            )
+        ]
+        if len(candidates) == 1:
+            return candidates[0]
+
+    return None
+
+
+def _parameterize_browser_workflow(
+    workflow: dict[str, Any],
+    parameters: dict[str, str],
+) -> dict[str, Any]:
+    value_to_key = {value: key for key, value in parameters.items()}
+
+    for wf_state in workflow.get("states") or []:
+        for action in wf_state.get("actions") or []:
+            action_type = action.get("type")
+            params = action.get("params") or {}
+            if not isinstance(action_type, str) or not isinstance(params, dict):
+                continue
+
+            for param_name, param_value in list(params.items()):
+                replacement_name: str | None = None
+
+                replacement_name = _extract_browser_secret_placeholder(
+                    param_value, parameters
+                )
+
+                if (
+                    replacement_name is None
+                    and isinstance(param_value, str)
+                    and param_value in value_to_key
+                ):
+                    replacement_name = value_to_key[param_value]
+                elif replacement_name is None and isinstance(param_value, (int, float)):
+                    replacement_name = value_to_key.get(str(param_value))
+
+                if replacement_name is None:
+                    replacement_name = _infer_browser_parameter_name(
+                        action_type=action_type,
+                        param_name=param_name,
+                        parameters=parameters,
+                    )
+
+                if replacement_name is not None:
+                    params[param_name] = _browser_parameter_placeholder(
+                        replacement_name
+                    )
+
+    workflow["parameters"] = list(parameters.keys())
+    return workflow
 
 
 def route_run_workflow(state: BrowserState):
@@ -40,19 +136,25 @@ def route_run_workflow(state: BrowserState):
 async def generate_workflow(state: BrowserState) -> dict[str, Any]:
     playwright = await async_playwright().start()
     generate_agent = create_browser_generate_agent()
+    parameters = state.get("parameters") or {}
     try:
         response = await generate_agent.ainvoke(
             {
                 "task": state["task"],
                 "messages": [],
                 "steps": state.get("steps"),
+                "parameters": parameters,
             },
             context={"playwright": playwright},
         )
 
+        workflow = response.get("workflow")
+        if isinstance(workflow, dict) and parameters:
+            workflow = _parameterize_browser_workflow(workflow, parameters)
+
         return {
             "generate_result": response.get("result"),
-            "workflow": response.get("workflow"),
+            "workflow": workflow,
         }
     finally:
         await playwright.stop()
@@ -92,6 +194,7 @@ async def run_workflow(state: BrowserState) -> dict[str, Any]:
         executor=StateExecutor(
             actions=PLAYWRIGHT_ACTIONS,
             context={"page": page},
+            parameters=state.get("parameters"),
         ),
         config={},
     )

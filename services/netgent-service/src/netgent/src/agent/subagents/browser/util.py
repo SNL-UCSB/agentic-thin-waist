@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from typing import Any
 
-from browser_use import AgentHistoryList
+from browser_use import AgentHistoryList, Controller
+from browser_use.agent.views import ActionResult
 from dotenv import load_dotenv
 from playwright.async_api import Playwright
 
@@ -143,6 +145,33 @@ def prune_agenthistorylist(
         pruned_histories.append(history)
 
     return pruned_histories
+
+
+def build_controller(exclude_actions: list[str] | None = None) -> Controller:
+    # Ensure "wait" is NOT in exclude_actions — we overwrite it below.
+    # The Registry checks exclude_actions on every @action call, so including
+    # "wait" would block our custom registration too.
+    excluded = [a for a in (exclude_actions or []) if a != "wait"]
+
+    controller = Controller(exclude_actions=excluded)
+
+    @controller.registry.action(
+        "Wait for x seconds (minimum 1 second actual sleep). "
+        "Use this to pause before the next action when a page needs time to load or animate. "
+        "Reduces wait by 3 seconds to account for LLM overhead, but always sleeps at least 1 second. "
+        "Accepts a sensitive_data placeholder (e.g. x_wait) in place of a literal number."
+    )
+    async def wait(seconds: str = "3") -> ActionResult:
+        try:
+            seconds_int = int(seconds)
+        except (ValueError, TypeError):
+            seconds_int = 3
+        actual_seconds = max(seconds_int - 3, 1)
+        msg = f"Waiting for {actual_seconds + 3} seconds"
+        await asyncio.sleep(actual_seconds)
+        return ActionResult(extracted_content=msg)
+
+    return controller
 
 
 def get_browserless_ws_endpoint() -> str | None:

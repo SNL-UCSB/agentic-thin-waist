@@ -21,8 +21,20 @@ class WorkflowRunner:
     def validate(self, workflow: dict[str, Any]) -> dict[str, Any]:
         return WorkflowSchema.model_validate(workflow).model_dump(mode="json")
 
+    def _check_parameters(self, validated_workflow: dict[str, Any]) -> None:
+        declared: list[str] = validated_workflow.get("parameters") or []
+        if not declared:
+            return
+        supplied = set(self.executor._parameters or {})
+        missing = [name for name in declared if name not in supplied]
+        if missing:
+            raise ValueError(
+                f"Missing required workflow parameters: {', '.join(missing)}"
+            )
+
     def run(self, workflow: dict[str, Any]) -> list[Any]:
         validated_workflow = self.validate(workflow)
+        self._check_parameters(validated_workflow)
         states = validated_workflow["states"]
 
         passed_states = self.controller.check(states)
@@ -33,6 +45,7 @@ class WorkflowRunner:
 
     async def arun(self, workflow: dict[str, Any]) -> list[Any]:
         validated_workflow = self.validate(workflow)
+        self._check_parameters(validated_workflow)
         states = validated_workflow["states"]
 
         passed_states = await self.controller.acheck(states)

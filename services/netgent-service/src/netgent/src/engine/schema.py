@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class WorkflowCheck(BaseModel):
@@ -33,6 +33,14 @@ class WorkflowSchema(BaseModel):
 
     specification: str = Field(..., min_length=1)
     states: list[WorkflowState] = Field(..., min_length=1)
+    parameters: list[str] = Field(default_factory=list)
+
+    @field_validator("parameters", mode="before")
+    @classmethod
+    def validate_parameters(cls, value: Any) -> Any:
+        if isinstance(value, dict):
+            raise ValueError("Workflow 'parameters' must be a list of parameter names")
+        return value
 
     @model_validator(mode="before")
     @classmethod
@@ -56,6 +64,7 @@ class WorkflowSchema(BaseModel):
         return {
             "specification": data.get("specification", ""),
             "states": [state],
+            "parameters": data.get("parameters", []),
         }
 
 

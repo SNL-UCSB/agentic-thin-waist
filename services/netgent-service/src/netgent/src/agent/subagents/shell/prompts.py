@@ -40,4 +40,19 @@ DECIDE_PROMPT = ChatPromptTemplate.from_messages(
 
 TASK_PROMPT = ChatPromptTemplate.from_messages([("human", "{task}")])
 
-__all__ = ["DECIDE_PROMPT", "SYSTEM_MESSAGE", "TASK_PROMPT"]
+
+def build_parameters_prompt(parameters: dict[str, str]) -> str:
+    """Build a prompt section describing available workflow parameters.
+
+    Tells the LLM to use the provided parameter values when calling tools.
+    """
+    if not parameters:
+        return ""
+
+    lines = ["Available workflow parameters (use these values when calling tools):"]
+    for name, description in parameters.items():
+        lines.append(f"  - {name}: {description}")
+    return "\n".join(lines)
+
+
+__all__ = ["DECIDE_PROMPT", "SYSTEM_MESSAGE", "TASK_PROMPT", "build_parameters_prompt"]

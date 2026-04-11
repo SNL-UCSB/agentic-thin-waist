@@ -28,6 +28,7 @@ async def _ainvoke_netgent_agent(
     specification: str,
     workflow_definition: dict[str, Any],
     workflow_type: Literal["shell", "browser", "hybrid"],
+    parameters: dict[str, str] | None = None,
 ) -> Any:
     netgent_agent = create_netgent_agent()
     return await netgent_agent.ainvoke(
@@ -36,6 +37,7 @@ async def _ainvoke_netgent_agent(
             "messages": [],
             "workflow": workflow_definition,
             "type": workflow_type,
+            "parameters": parameters or {},
         }
     )
 
@@ -81,6 +83,10 @@ def _run_netgent_job(job_id: str, *, operation: Literal["generate", "execute"]) 
             specification = workflow.specification
             workflow_type = workflow.type
             workflow_definition = workflow.workflow
+            parameters: dict[str, str] = {
+                str(k): str(v)
+                for k, v in (dict(job.metadata_ or {}).get("parameters") or {}).items()
+            }
 
             if operation == "execute" and not workflow_definition:
                 metadata = dict(job.metadata_ or {})
@@ -100,6 +106,7 @@ def _run_netgent_job(job_id: str, *, operation: Literal["generate", "execute"]) 
                     {} if operation == "generate" else workflow_definition
                 ),
                 workflow_type=workflow_type,
+                parameters=parameters if operation == "execute" else {},
             )
         )
 

@@ -15,6 +15,7 @@ from playwright.async_api import async_playwright
 from netgent.src.agent.subagents.browser.agent import (
     create_agent as create_browser_agent,
 )
+from netgent.src.agent.subagents.browser.util import open_browser_session
 from netgent.src.agent.subagents.shell.agent import create_agent as create_shell_agent
 from netgent.src.engine.controller import ProgramController
 from netgent.src.engine.executor import StateExecutor
@@ -23,7 +24,6 @@ from netgent.src.registry.actions.network import NETWORK_ACTIONS
 from netgent.src.registry.actions.playwright import PLAYWRIGHT_ACTIONS
 from netgent.src.registry.triggers.base import always_true
 from netgent.src.registry.triggers.playwright import PLAYWRIGHT_TRIGGERS
-from netgent.src.agent.subagents.browser.util import open_browser_session
 
 model = ChatGoogleGenerativeAI(model="gemini-3.1-flash-lite-preview")
 WorkflowType = Literal["browser", "shell", "hybrid"]
@@ -35,6 +35,7 @@ class NetGentState(MessagesState):
     workflow: dict = {}
     result: list = []
     config: dict = {}
+    parameters: dict[str, str] = {}
 
 
 def _iter_result_screenshots(value: object, path: tuple[object, ...] = ()):
@@ -110,15 +111,17 @@ def route_type(state: NetGentState):
     return END
 
 
-def _build_shell_runner() -> WorkflowRunner:
+def _build_shell_runner(*, parameters: dict[str, Any] | None = None) -> WorkflowRunner:
     return WorkflowRunner(
         controller=ProgramController(triggers=(always_true,)),
-        executor=StateExecutor(actions=NETWORK_ACTIONS),
+        executor=StateExecutor(actions=NETWORK_ACTIONS, parameters=parameters),
         config={},
     )
 
 
-def _build_hybrid_runner(*, page: Any) -> WorkflowRunner:
+def _build_hybrid_runner(
+    *, page: Any, parameters: dict[str, Any] | None = None
+) -> WorkflowRunner:
     return WorkflowRunner(
         controller=ProgramController(
             triggers=(always_true, *PLAYWRIGHT_TRIGGERS),
@@ -127,6 +130,7 @@ def _build_hybrid_runner(*, page: Any) -> WorkflowRunner:
         executor=StateExecutor(
             actions=(*PLAYWRIGHT_ACTIONS, *NETWORK_ACTIONS),
             context={"page": page},
+            parameters=parameters,
         ),
         config={},
     )
@@ -193,18 +197,20 @@ async def browser(state: NetGentState):
             "task": state["task"],
             "messages": state["messages"],
             "workflow": state.get("workflow", None),
+            "parameters": state.get("parameters", {}),
         },
     )
 
 
 def shell(state: NetGentState):
     shell_agent = create_shell_agent()
-    runner = _build_shell_runner()
+    runner = _build_shell_runner(parameters=state.get("parameters"))
     return shell_agent.invoke(
         {
             "task": state["task"],
             "messages": [],
             "workflow": state.get("workflow", None),
+            "parameters": state.get("parameters", {}),
         },
         context={"runner": runner},
     )
@@ -216,6 +222,7 @@ async def hybrid(state: NetGentState):
         return await _run_hybrid_workflow(
             task=state["task"],
             workflow=workflow,
+            parameters=state.get("parameters"),
         )
 
     browser_agent = create_browser_agent()
@@ -224,17 +231,19 @@ async def hybrid(state: NetGentState):
             "task": state["task"],
             "messages": state["messages"],
             "workflow": None,
+            "parameters": state.get("parameters", {}),
         },
     )
 
     shell_agent = create_shell_agent()
-    shell_runner = _build_shell_runner()
+    shell_runner = _build_shell_runner(parameters=state.get("parameters"))
     shell_response = await asyncio.to_thread(
         shell_agent.invoke,
         {
             "task": state["task"],
             "messages": [],
             "workflow": None,
+            "parameters": state.get("parameters", {}),
         },
         context={"runner": shell_runner},
     )
@@ -266,6 +275,7 @@ async def _run_hybrid_workflow(
     *,
     task: str,
     workflow: dict[str, Any],
+    parameters: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     playwright = await async_playwright().start()
     har_file = tempfile.NamedTemporaryFile(suffix=".har", delete=False)
@@ -275,7 +285,7 @@ async def _run_hybrid_workflow(
         playwright,
         record_har_path=har_path,
     )
-    runner = _build_hybrid_runner(page=page)
+    runner = _build_hybrid_runner(page=page, parameters=parameters)
     response: dict[str, Any]
     try:
         output = await runner.arun(workflow)

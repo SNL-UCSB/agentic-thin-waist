@@ -2,7 +2,7 @@ import asyncio
 import os
 from typing import Any, NotRequired
 
-from browser_use import Agent, AgentHistoryList, Browser, ChatGoogle, Controller
+from browser_use import Agent, AgentHistoryList, Browser, ChatGoogle
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.runtime import Runtime
 from playwright.async_api import Playwright, async_playwright
@@ -16,6 +16,7 @@ from netgent.src.agent.subagents.browser.generate.evolution import (
 )
 from netgent.src.agent.subagents.browser.generate.generate import gen_workflow
 from netgent.src.agent.subagents.browser.util import (
+    build_controller,
     open_browser_session,
     parse_agent_history,
     prune_agenthistorylist,
@@ -47,6 +48,7 @@ class BrowserGenerateState(MessagesState):
     workflow: NotRequired[dict[str, Any] | None]
     result: NotRequired[dict[str, Any] | None]
     evolution: NotRequired[BrowserEvolution]
+    parameters: NotRequired[dict[str, str]]
 
 
 class BrowserGenerateContext(BaseModel):
@@ -54,11 +56,30 @@ class BrowserGenerateContext(BaseModel):
     playwright: Playwright
 
 
+def _build_task_with_parameters(task: str, parameters: dict[str, str]) -> str:
+    if not parameters:
+        return task
+    lines = [
+        task,
+        "",
+        "Available runtime parameter placeholders:",
+    ]
+    for name in parameters:
+        lines.append(
+            f"  - {name}: use <secret>{name}</secret> when an action needs this value"
+        )
+    lines.append(
+        "Do not hardcode literal parameter values into actions when one of these placeholders applies."
+    )
+    return "\n".join(lines)
+
+
 async def execute_task(
     state: BrowserGenerateState, runtime: Runtime[BrowserGenerateContext]
 ) -> dict[str, Any]:
     playwright = runtime.context.playwright
-    task = state["task"]
+    parameters = state.get("parameters") or {}
+    task = _build_task_with_parameters(state["task"], parameters)
     evolution = coerce_evolution(task, state.get("evolution"))
     history_list: list[AgentHistoryList] = []
     steps = max(1, state.get("steps", 1) or 1)
@@ -75,9 +96,10 @@ async def execute_task(
                     browser_context=browser_context,
                     playwright=playwright,
                 ),
-                controller=Controller(exclude_actions=EXCLUDED_BROWSER_USE_ACTIONS),
+                controller=build_controller(EXCLUDED_BROWSER_USE_ACTIONS),
                 llm=browser_model,
                 task=evolutionary_prompt,
+                sensitive_data=parameters or None,
                 headless=BROWSER_USE_HEADLESS,
             )
             history = await browser_agent.run(max_steps=DEFAULT_MAX_STEPS)

@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from netgent.src.agent.subagents.shell.prompts import DECIDE_PROMPT, TASK_PROMPT
+from netgent.src.agent.subagents.shell.prompts import (
+    DECIDE_PROMPT,
+    TASK_PROMPT,
+    build_parameters_prompt,
+)
 from netgent.src.agent.subagents.shell.schema import (
     RunIPerf3Tool,
     RunNDT7Tool,
@@ -50,6 +54,7 @@ class ShellRunAgentState(MessagesState):
     task: str
     workflow: dict[str, Any] | None = None
     result: dict[str, Any] | None = None
+    parameters: dict[str, str] = {}
 
 
 class ShellAgentContext(BaseModel):
@@ -81,7 +86,12 @@ def add_task_message(state: ShellRunAgentState) -> dict[str, list]:
     for message in state["messages"]:
         if isinstance(message, (HumanMessage, AIMessage, ToolMessage)):
             return {}
-    return {"messages": TASK_PROMPT.invoke({"task": state["task"]}).messages}
+    task = state["task"]
+    parameters = state.get("parameters") or {}
+    param_suffix = build_parameters_prompt(parameters)
+    if param_suffix:
+        task = f"{task}\n\n{param_suffix}"
+    return {"messages": TASK_PROMPT.invoke({"task": task}).messages}
 
 
 def route_run_workflow(state: ShellRunAgentState):
@@ -157,15 +167,33 @@ def workflow_conversion(tool_run: dict[str, Any]) -> WorkflowAction:
 
 def generate_workflow(state: ShellRunAgentState) -> dict[str, Any]:
     tool_runs = extract_tool_runs(state["messages"])
+    parameters = state.get("parameters") or {}
+    actions = [workflow_conversion(tool_run) for tool_run in tool_runs]
+
+    # Replace literal parameter values with {{placeholder}} in action params
+    if parameters:
+        value_to_key = {v: k for k, v in parameters.items()}
+        for action in actions:
+            for param_name, param_value in list(action.params.items()):
+                if isinstance(param_value, str) and param_value in value_to_key:
+                    action.params[param_name] = "{{" + value_to_key[param_value] + "}}"
+                elif isinstance(param_value, (int, float)):
+                    str_value = str(param_value)
+                    if str_value in value_to_key:
+                        action.params[param_name] = (
+                            "{{" + value_to_key[str_value] + "}}"
+                        )
+
     workflow = WorkflowSchema(
         specification=state["task"],
         states=[
             WorkflowState(
                 checks=[WorkflowCheck(type="always_true")],
-                actions=[workflow_conversion(tool_run) for tool_run in tool_runs],
+                actions=actions,
                 end_state="Workflow Completed",
             )
         ],
+        parameters=list(parameters.keys()),
     )
     return {
         "workflow": workflow.model_dump(mode="json"),

@@ -274,14 +274,18 @@ async def go_back(ctx: ActionContext | None = None) -> dict[str, Any]:
 
 @action(name="wait")
 @with_progress_screenshot
-async def wait(seconds: int = 3, ctx: ActionContext | None = None) -> dict[str, Any]:
+async def wait(seconds: str = "3", ctx: ActionContext | None = None) -> dict[str, Any]:
     ctx = ctx or ActionContext()
     page = _resolve_page(ctx)
-    actual_seconds = min(max(seconds - 3, 0), 10)
+    try:
+        seconds_int = int(seconds)
+    except (ValueError, TypeError):
+        seconds_int = 3
+    actual_seconds = max(seconds_int - 3, 1)
     await asyncio.sleep(actual_seconds)
     return {
-        "seconds": actual_seconds + 3,
-        "slept_seconds": actual_seconds,
+        "seconds": str(actual_seconds + 3),
+        "slept_seconds": str(actual_seconds),
         "message": f"Waiting for {actual_seconds + 3} seconds",
     }
 

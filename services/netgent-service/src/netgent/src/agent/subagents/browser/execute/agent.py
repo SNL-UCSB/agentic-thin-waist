@@ -3,7 +3,7 @@ import json
 import os
 from typing import Any, NotRequired
 
-from browser_use import Agent, Browser, ChatGoogle, Controller
+from browser_use import Agent, Browser, ChatGoogle
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.runtime import Runtime
 from playwright.async_api import (
@@ -19,7 +19,10 @@ from playwright.async_api import (
 from pydantic import BaseModel, ConfigDict
 
 from netgent.src.agent.subagents.browser.generate.generate import gen_workflow
-from netgent.src.agent.subagents.browser.util import parse_agent_history
+from netgent.src.agent.subagents.browser.util import (
+    build_controller,
+    parse_agent_history,
+)
 from netgent.src.engine.runner import WorkflowRunner
 
 browser_model = ChatGoogle(model="gemini-3.1-flash-lite-preview")
@@ -245,7 +248,7 @@ async def debug_workflow(
             agent_current_page=page,
             human_current_page=page,
         ),
-        controller=Controller(exclude_actions=EXCLUDED_BROWSER_USE_ACTIONS),
+        controller=build_controller(EXCLUDED_BROWSER_USE_ACTIONS),
         llm=browser_model,
         task=debug_task,
         headless=BROWSER_USE_HEADLESS,
