@@ -234,14 +234,14 @@ class RunExperimentRequest(BaseModel):
     # --- Shaping ---
     upstream_iface: str = Field("veth4", description="Upload interface")
     downstream_iface: str = Field("veth2", description="Download interface")
-    download_mbps: float = Field(..., gt=0, description="Download capacity in Mbps")
-    upload_mbps: float = Field(..., gt=0, description="Upload capacity in Mbps")
+    download_mbps: float = Field(100.0, gt=0, description="Download capacity in Mbps")
+    upload_mbps: float = Field(100.0, gt=0, description="Upload capacity in Mbps")
     latency_ms: float = Field(0, ge=0, description="One-way delay in ms")
     latency_location: Optional[Literal["upstream", "downstream", "both"]] = None
     qdisc: str = Field("pfifo", description="Queue discipline")
     buffer_packets: int = Field(1000, ge=1, description="Queue depth in packets")
     qdisc_params: Optional[Dict[str, str]] = None
-    # --- Congestion ---
+    # --- Congestion (optional — skip when already applied via POST /congestion) ---
     cca: str = Field("cubic", description="TCP congestion control algorithm")
     cca_namespace: Optional[str] = Field(
         None, description="Namespace for CCA (ns1, ns2, or null for all)"
@@ -250,6 +250,9 @@ class RunExperimentRequest(BaseModel):
     workflow: Dict = Field(..., description="Workflow definition (state machine JSON)")
     runtime: Literal["shell", "browser"] = Field(
         "shell", description="Workflow runtime"
+    )
+    parameters: Optional[Dict[str, str]] = Field(
+        None, description="Workflow parameter substitutions (key=value)"
     )
 
 
@@ -1050,7 +1053,8 @@ def run_experiment(req: RunExperimentRequest) -> RunExperimentResponse:
     """Apply shaping + congestion, then execute a workflow in a single call.
 
     Equivalent to calling ``POST /shape``, ``POST /congestion``, and running
-    the netgent workflow runner in sequence.
+    the netgent workflow runner in sequence.  When ``download_mbps`` or
+    ``upload_mbps`` are not provided they default to 100 Mbps.
     """
     global CURRENT_BOTTLENECK_STATE, CURRENT_INTERFACES
 
@@ -1096,20 +1100,23 @@ def run_experiment(req: RunExperimentRequest) -> RunExperimentResponse:
     set_congestion(CongestionRequest(algorithm=req.cca, namespace=req.cca_namespace))
 
     # 3. Run workflow
-    import asyncio
-
-    from clients.netgent import NetGent
+    from clients.netgent.src.main import NetGent
 
     try:
         client = NetGent()
-        result = asyncio.run(client.execute(req.workflow, type=req.runtime))
+        result = client.run_workflow(
+            req.workflow,
+            type=req.runtime,
+            parameters=req.parameters or {},
+        )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Workflow failed: {exc}")
 
+    run_result = result.get("result", result) if isinstance(result, dict) else result
     return RunExperimentResponse(
         status="ok",
         runtime=req.runtime,
-        result=result if isinstance(result, list) else [result],
+        result=run_result if isinstance(run_result, list) else [run_result],
     )
 
 
