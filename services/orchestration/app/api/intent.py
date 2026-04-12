@@ -5,7 +5,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException
 
 from app.engine.executor import DownstreamClients
 from app.engine.orchestration_store import load_orchestration, save_orchestration
-from app.engine.orchestration_workflow import run_orchestration
+from app.engine.orchestration_manager import OrchestrationManager
 from app.models.schemas import (
     ResearchIntent,
     OrchestrationResponse,
@@ -13,7 +13,6 @@ from app.models.schemas import (
     OrchestrationStatus,
 )
 from app.engine.intent_parser import IntentParser
-from app.engine.experiment_generator import ExperimentGenerator
 from app.engine.claude_client import ClaudeClient
 from app.engine.tools import load_tools
 from app.engine.skills import load_skills, SkillExecutor
@@ -126,26 +125,37 @@ async def submit_intent(request: ResearchIntent, background_tasks: BackgroundTas
 
 
 def process_intent(orch_id: str, request: ResearchIntent) -> None:
-    """Background task: parse → generate → preflight → dispatch → aggregate.
-
-    When ``preferences.run_immediately`` is set, the full orchestration
-    workflow runs (preflight checks, per-iteration dispatch, telemetry
-    persistence, aggregation).  Otherwise only parsing and generation are
-    performed and the experiments are returned as planned-only.
-    """
+    """Background task: parse intent → OrchestrationManager (dispatch + aggregate)."""
     orch = load_orchestration(orch_id)
     if orch is None:
+        print(f"[INTENT {orch_id}] ERROR: orchestration record not found in store")
         return
     try:
-        execute_now = bool(request.preferences.get("run_immediately", False))
         use_examples = bool(request.preferences.get("use_examples", True))
 
         # 1. Parse intent
+        print(f"\n{'#'*60}")
+        print(f"[INTENT {orch_id}] Step 1/2: Parsing intent via Claude …")
+        print(f"[INTENT {orch_id}]   intent: {request.intent!r}")
+        print(f"[INTENT {orch_id}]   use_examples={use_examples}")
+        print(f"{'#'*60}")
         orch["status"] = OrchestrationStatus.parsing
         save_orchestration(orch)
         claude = ClaudeClient()
         parser = IntentParser(claude)
         parsed = parser.parse(request.intent, use_examples=use_examples)
+        experiments_in_parsed = parsed.get("experiments", [])
+        print(
+            f"[INTENT {orch_id}] Intent parsed → "
+            f"{len(experiments_in_parsed)} experiment(s) in parsed output"
+        )
+        if experiments_in_parsed:
+            for i, e in enumerate(experiments_in_parsed):
+                print(
+                    f"[INTENT {orch_id}]   parsed[{i}] app={e.get('application')}  "
+                    f"capacity={e.get('capacity_mbps')} Mbps  "
+                    f"latency={e.get('latency_ms')} ms  cc={e.get('cc_algorithm')}"
+                )
         orch["reasoning_steps"].append(
             {
                 "step": 1,
@@ -157,49 +167,37 @@ def process_intent(orch_id: str, request: ResearchIntent) -> None:
         )
         save_orchestration(orch)
 
-        if execute_now:
-            # Delegate to orchestration workflow runner (preflight + iterations + aggregation).
-            result = run_orchestration(
-                orch_id,
-                request.intent,
-                parsed,
-                clients=DownstreamClients(),
-            )
-            # Workflow runner persists final state itself; reload to avoid
-            # overwriting lifecycle_stages / preflight written by it.
-            orch = load_orchestration(orch_id) or orch
-            orch["reasoning_steps"].append(
-                {
-                    "step": 2,
-                    "action": "run_orchestration_workflow",
-                    "input": {"intent": request.intent},
-                    "output": result.get("summary", {}),
-                    "reasoning": "Full orchestration workflow via run_orchestration.",
-                }
-            )
-            save_orchestration(orch)
-        else:
-            # Generate experiment specs only (no dispatch).
-            orch["status"] = OrchestrationStatus.generating
-            save_orchestration(orch)
-            generator = ExperimentGenerator()
-            experiments = generator.generate(parsed)
-            experiment_payloads = [e.model_dump() for e in experiments]
-            orch["experiments"] = experiment_payloads
-            orch["results"] = [
-                {
-                    "status": "planned_only",
-                    "message": "Set preferences.run_immediately=true to dispatch to downstream services.",
-                    "planned_experiments": len(experiment_payloads),
-                }
-            ]
-            orch["status"] = OrchestrationStatus.complete
-            orch.pop("error", None)
-            save_orchestration(orch)
+        # 2. Connectivity-centric dispatch (generate specs, workers, CTP, run).
+        max_parallel = int(request.preferences.get("max_parallel_workers", 1))
+        print(f"\n{'#'*60}")
+        print(f"[INTENT {orch_id}] Step 2/2: Running OrchestrationManager …")
+        print(f"[INTENT {orch_id}]   max_parallel_workers={max_parallel}")
+        print(f"{'#'*60}")
+        mgr = OrchestrationManager(max_parallel_workers=max_parallel)
+        result = mgr.run(orch_id, request.intent, parsed)
+        final_status = result.get("status", OrchestrationStatus.failed)
+        orch["status"] = final_status
+        orch["experiments"] = result.get("experiment_specs", [])
+        orch["results"] = result.get("results", [])
+        orch["reasoning_steps"].append(
+            {
+                "step": 2,
+                "action": "run_orchestration_manager",
+                "input": {"intent": request.intent},
+                "output": result.get("summary", {}),
+                "reasoning": "Connectivity-centric dispatch via OrchestrationManager.",
+            }
+        )
+        save_orchestration(orch)
+        print(
+            f"\n[INTENT {orch_id}] DONE — final status={final_status}  "
+            f"summary={result.get('summary', {})}"
+        )
 
     except Exception as e:
         orch["status"] = OrchestrationStatus.failed
         orch["error"] = str(e)
+        print(f"[INTENT {orch_id}] EXCEPTION: {e}")
         try:
             save_orchestration(orch)
         except Exception:
@@ -244,6 +242,7 @@ async def get_status(orch_id: str):
     return {
         "orchestration_id": orch["orchestration_id"],
         "status": orch["status"],
+        "error": orch.get("error"),
         "generated_experiments": orch.get("experiments", []),
         "lifecycle_stages": orch.get("lifecycle_stages", []),
         "detailed_progress": _build_detailed_progress(orch),

@@ -10,4 +10,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY services/orchestration/ .
 COPY shared/ shared/
 
+# /app/app is added so that `netgent.src.*` absolute imports resolve correctly
+ENV PYTHONPATH="/app/app:${PYTHONPATH:-}"
+
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8005"]

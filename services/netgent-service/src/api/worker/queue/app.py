@@ -16,28 +16,11 @@ from api.utils import (
 )
 from api.worker import get_queue_app
 from api.worker.constants import WORKFLOW_EXECUTE_QUEUE, WORKFLOW_GENERATE_QUEUE
-from netgent.src.agent.agent import create_agent as create_netgent_agent
+from clients.netgent import NetGent
 
 logger = logging.getLogger(__name__)
 
 queue_app = get_queue_app()
-
-
-async def _ainvoke_netgent_agent(
-    *,
-    specification: str,
-    workflow_definition: dict[str, Any],
-    workflow_type: Literal["shell", "browser"],
-) -> Any:
-    netgent_agent = create_netgent_agent()
-    return await netgent_agent.ainvoke(
-        {
-            "task": specification,
-            "messages": [],
-            "workflow": workflow_definition,
-            "type": workflow_type,
-        }
-    )
 
 
 def _fail_job(job_id: str, *, error: str | None = None) -> None:
@@ -58,7 +41,7 @@ def _run_netgent_job(job_id: str, *, operation: Literal["generate", "execute"]) 
     session_factory = create_session_factory()
     specification = ""
     workflow_id = None
-    workflow_type: Literal["shell", "browser"] = "shell"
+    workflow_type: Literal["shell", "browser", "hybrid"] = "shell"
     workflow_definition: dict[str, Any] = {}
 
     try:
@@ -81,6 +64,10 @@ def _run_netgent_job(job_id: str, *, operation: Literal["generate", "execute"]) 
             specification = workflow.specification
             workflow_type = workflow.type
             workflow_definition = workflow.workflow
+            parameters: dict[str, str] = {
+                str(k): str(v)
+                for k, v in (dict(job.metadata_ or {}).get("parameters") or {}).items()
+            }
 
             if operation == "execute" and not workflow_definition:
                 metadata = dict(job.metadata_ or {})
@@ -93,21 +80,25 @@ def _run_netgent_job(job_id: str, *, operation: Literal["generate", "execute"]) 
             update_job_status(session, job_id, "running")
             session.commit()
 
-        result = asyncio.run(
-            _ainvoke_netgent_agent(
-                specification=specification,
-                workflow_definition=(
-                    {} if operation == "generate" else workflow_definition
-                ),
-                workflow_type=workflow_type,
+        client = NetGent()
+        if operation == "generate":
+            agent_state = asyncio.run(
+                client.generate(specification, type=workflow_type)
             )
-        )
-
-        updated_workflow = workflow_definition
-        if isinstance(result, dict):
-            candidate_workflow = result.get("workflow")
-            if isinstance(candidate_workflow, dict):
-                updated_workflow = candidate_workflow
+            generated_workflow = (
+                agent_state.get("workflow") if isinstance(agent_state, dict) else None
+            )
+            updated_workflow = generated_workflow or workflow_definition
+            artifact_payload = updated_workflow
+        else:
+            execution_result = client.run_workflow(
+                workflow_definition,
+                type=workflow_type,
+                parameters=parameters,
+                record_har=workflow_type in ("browser", "hybrid"),
+            )
+            updated_workflow = workflow_definition
+            artifact_payload = execution_result
 
         if workflow_id is not None and updated_workflow:
             with session_factory() as session:
@@ -121,7 +112,7 @@ def _run_netgent_job(job_id: str, *, operation: Literal["generate", "execute"]) 
         artifacts = upload_job_artifacts(
             job_id=job_id,
             workflow_type=workflow_type,
-            result=result,
+            result=artifact_payload,
         )
 
     except Exception as exc:

@@ -1,1 +1,0 @@
-"""NetGent package root."""

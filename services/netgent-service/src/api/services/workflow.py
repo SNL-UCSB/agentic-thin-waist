@@ -129,6 +129,7 @@ class WorkflowService:
                     metadata_={
                         "timeout": request.timeout,
                         "operation": "execute",
+                        "parameters": request.parameters,
                     },
                 ),
             )

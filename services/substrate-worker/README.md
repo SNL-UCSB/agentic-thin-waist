@@ -31,6 +31,14 @@ Substrate Worker produces:
 - tcpreplay session metrics: replay ID, status, rate achieved
 - Status reports: interface configuration, qdisc state, available tc modules
 
+## Source Layout
+
+- `src/substrate`: the worker service entrypoint, API module, and setup helpers
+- `src/netgent`: reserved package space for NetGent-specific integrations
+- `src/browser`: reserved package space for browser-specific integrations
+
+For local Python workflows, the service now uses `uv` with [`pyproject.toml`](/Users/eugenevuong/Documents/UCSB/agentic-thin-waist/services/substrate-worker/pyproject.toml). Run it with `uv run python -m substrate.main`.
+
 ## Interfaces
 
 | Endpoint | Method | Purpose |
@@ -42,6 +50,7 @@ Substrate Worker produces:
 | `/replay` | POST | Start CTP traffic replay via tcpreplay |
 | `/replay/{replay_id}` | GET | Poll replay session status |
 | `/replay/{replay_id}` | DELETE | Stop active replay session |
+| `/ctp/fetch` | POST | Fetch download + upload PCAPs from a URL or local path into `CTP_DIR` |
 | `/state` | GET | Get current bottleneck configuration and verification |
 | `/health` | GET | Health check: privileges, tc availability, qdisc support |
 
@@ -146,7 +155,7 @@ The service configures a two-namespace topology at startup:
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `CAPTURE_DIR` | `/home/netreplica/config/captures` | Output directory for PCAP files |
-| `CTP_DIR` | `/home/netreplica/config/ctp` | Directory containing CTP PCAP files for replay |
+| `CTP_DIR` | `/home/netreplica/config/ctp` | Root CTP directory; `download/` and `upload/` subdirs are expected (or created by `/ctp/fetch`) |
 
 **Security Notes**:
 - Run as a privileged Docker container with `CAP_NET_ADMIN` and `CAP_SYS_ADMIN`
@@ -371,6 +380,57 @@ Start bidirectional CTP background traffic replay. Two `tcpreplay-edit` processe
 
 **Error Codes**: 400 Bad Request, 404 Not Found, 422 Validation Error, 500 Internal Server Error
 
+---
+
+### 10. Fetch CTP PCAPs (POST /ctp/fetch)
+
+Fetch the download and upload PCAP files for a CTP pointer and place them in the expected directory structure under `CTP_DIR`:
+
+```
+CTP_DIR/
+  download/<name>.pcap
+  upload/<name>.pcap
+```
+
+Both directories are created if they do not exist. After a successful fetch, the resolved `ctp_file` base name can be passed directly to `POST /replay`.
+
+**Request**:
+```json
+{
+  "ctp_pointer": "http://ctp-service:8001/ctps/abc123",
+  "ctp_root": null
+}
+```
+
+`ctp_pointer` formats:
+
+| Format | Example | Behavior |
+|--------|---------|----------|
+| URL | `http://ctp-service:8001/ctps/abc123` | Fetches `?direction=download` and `?direction=upload` via HTTP streaming |
+| Absolute path | `/mnt/md0/ctp/download/cluster0_tree1.pcap` | Copies both files; upload path derived by replacing `/download/` with `/upload/` |
+| Plain name | `cluster0_tree1_profile1` | Verifies both files are already present in `CTP_DIR` (no fetch) |
+
+`ctp_root`: override the worker's `CTP_DIR` for this request (optional, defaults to `CTP_DIR` env var).
+
+**Response** (200 OK):
+```json
+{
+  "status": "ok",
+  "name": "abc123",
+  "download_path": "/mnt/md0/ctp_test/download/abc123.pcap",
+  "upload_path": "/mnt/md0/ctp_test/upload/abc123.pcap",
+  "fetched": true
+}
+```
+
+`fetched` is `false` when files were already present (plain-name pointer or idempotent re-fetch of same-size files).
+
+**Error Codes**: 404 when a local source file is missing; 502 when an HTTP fetch fails.
+
+**Implementation**: `app/ctp_fetcher.py` — `fetch_ctp(ctp_pointer, ctp_root)`.
+
+---
+
 ## Data Models
 
 ### ShapeRequest
@@ -413,6 +473,21 @@ duration_seconds: Optional[int]
 ctp_file: str                 # Base name; resolves to CTP_DIR/download/<name>.pcap and CTP_DIR/upload/<name>.pcap
 pnat: str                     # Required: "src_net:dst_ip[,...]" passed to tcpreplay-edit --pnat
 duration_seconds: Optional[int]
+```
+
+### CtpFetchRequest
+```python
+ctp_pointer: str              # URL, absolute path, or plain base name identifying the CTP
+ctp_root: Optional[str]       # Override CTP_DIR for this request; defaults to CTP_DIR env var
+```
+
+### CtpFetchResponse
+```python
+status: str                   # "ok"
+name: str                     # Resolved base name (no .pcap suffix)
+download_path: str            # Absolute path: <ctp_root>/download/<name>.pcap
+upload_path: str              # Absolute path: <ctp_root>/upload/<name>.pcap
+fetched: bool                 # True if files were downloaded/copied; False if already present
 ```
 
 ## Implementation Notes

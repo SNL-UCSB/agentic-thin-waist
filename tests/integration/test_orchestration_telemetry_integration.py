@@ -11,11 +11,52 @@ import pytest
 import requests
 
 from app.engine.executor import DownstreamClients
-from app.engine.orchestration_workflow import _build_telemetry_result_payload
 
 TELEMETRY_SERVICE_URL = os.getenv(
     "TELEMETRY_SERVICE_URL", "http://telemetry-service:8004"
 ).rstrip("/")
+
+
+def _build_telemetry_result_payload(
+    *,
+    spec: dict[str, Any],
+    orch_id: str,
+    shape_result: dict[str, Any],
+    capture_status: dict[str, Any],
+    netgent_result: dict[str, Any],
+    dynamic_state: dict[str, Any],
+) -> dict[str, Any]:
+    """Mirror the payload shape produced by the old orchestration workflow for POST /results."""
+    bs_cfg = (shape_result or {}).get("bottleneck_state") or {}
+    bs_meas = (dynamic_state or {}).get("bottleneck_state") or {}
+    net_status = (netgent_result or {}).get("status")
+    overall_status = "success" if net_status == "completed" else "failure"
+    return {
+        "experiment_id": spec["experiment_id"],
+        "trial_number": int(spec.get("num_trials", 1) or 1),
+        "status": overall_status,
+        "bottleneck_state": {
+            "configured_capacity": bs_cfg.get("configured_capacity"),
+            "configured_latency": bs_cfg.get("configured_latency"),
+            "aqm_policy": bs_cfg.get("aqm_policy"),
+            "measured_throughput": bs_meas.get("download_mbps"),
+            "measured_rtt": bs_meas.get("latency_ms"),
+        },
+        "pcap_path": (capture_status or {}).get("pcap_path", ""),
+        "qoe_metrics": netgent_result,
+        "transport_state": {},
+        "contextual_tree": {
+            "orchestration_id": orch_id,
+            "c_static": {
+                "capacity_mbps": spec.get("capacity_mbps"),
+                "latency_ms": spec.get("latency_ms"),
+                "aqm_policy": spec.get("aqm_policy", "fq_codel"),
+                "ctp_cluster": spec.get("ctp_cluster"),
+            },
+            "c_app": {"application": spec.get("application")},
+            "c_trans": {},
+        },
+    }
 
 
 def _wait_for_health(url: str, timeout_seconds: float = 60.0) -> None:

@@ -152,6 +152,90 @@ For intent "Generate traffic for YouTube at 100ms base latency and 6 Mbps":
 
 The critical insight is that Claude reasonably handles **specification**: translating natural language intent into structured experiment specs. This mirrors how a researcher writes a hypothesis and experimental plan before running it. Claude identifies bottleneck regimes to explore, determines relevant parameter sweeps, and generates the JSON specifications. The downstream Experiment API (D2/D4) and Telemetry Service (D3) handle **execution and persistence**.
 
+## Connectivity Abstraction Layer
+
+`app/engine/connectivity.py` — `ConnectivityManager`
+
+The orchestration service provisions substrate workers through a pluggable backend interface. All worker lifecycle operations go through this single entry point; the rest of the orchestration code only sees `WorkerInfo(worker_id, endpoint)`.
+
+### Backends
+
+| Backend | `CONNECTIVITY_BACKEND` value | Status |
+|---------|------------------------------|--------|
+| Local Docker | `local_docker` (default) | Fully implemented |
+| AWS ECS/Fargate | `aws` | Stub — raises `NotImplementedError` |
+| GCP Cloud Run | `gcp` | Stub — raises `NotImplementedError` |
+| Remote server | `remote` | Stub — raises `NotImplementedError` |
+
+### Interface
+
+```python
+from app.engine.connectivity import ConnectivityManager
+
+mgr = ConnectivityManager()                    # reads CONNECTIVITY_BACKEND env var
+
+info = mgr.create_worker({})                   # → WorkerInfo
+# info.worker_id  → "worker-a1b2c3d4"
+# info.endpoint   → "http://localhost:49213"
+
+mgr.get_worker_info(info.worker_id)            # → WorkerInfo
+mgr.destroy_worker(info.worker_id)             # stop + remove
+```
+
+`create_worker(config)` accepts optional backend-specific overrides:
+
+| Key | Default (local_docker) |
+|-----|------------------------|
+| `image` | `SUBSTRATE_WORKER_IMAGE` env var or `substrate-worker` |
+| `network` | `SUBSTRATE_DOCKER_NETWORK` env var or `agentic-network` |
+| `telemetry_url` | `TELEMETRY_SERVICE_URL` env var |
+| `ctp_dir` | `SUBSTRATE_CTP_DIR` env var or `/mnt/md0/ctp_test` |
+| `capture_dir` | `SUBSTRATE_CAPTURE_DIR` env var or `/mnt/md0/cap_test` |
+
+### Local Docker backend
+
+Uses the Docker HTTP API directly over `/var/run/docker.sock` (via `httpx` — already in requirements, no Docker CLI or SDK needed). Each container is:
+- Created with `--privileged`, `NET_ADMIN`, `SYS_ADMIN`
+- Port `8002` mapped to an auto-assigned host port (`PortBindings: {"8002/tcp": [{"HostPort": ""}]}`)
+- Inspected post-start to retrieve the actual host port
+- Labeled with `substrate_worker_id=<worker_id>` for traceability
+
+**Prerequisite**: `/var/run/docker.sock` must be mounted in the orchestration container (already added to `docker-compose.yml`).
+
+### Parallel substrate workers
+
+`run_orchestration` accepts two optional kwargs:
+
+```python
+from app.engine.connectivity import ConnectivityManager
+from app.engine.orchestration_workflow import run_orchestration
+
+mgr = ConnectivityManager()
+
+# Sequential (default) — one ephemeral worker per iteration
+result = run_orchestration(orch_id, intent, parsed_intent,
+    connectivity_manager=mgr)
+
+# Parallel — N iterations run concurrently, each on its own worker
+result = run_orchestration(orch_id, intent, parsed_intent,
+    connectivity_manager=mgr,
+    max_parallel_workers=4)
+```
+
+When `max_parallel_workers > 1`, a `ThreadPoolExecutor` dispatches all iterations concurrently. Each thread creates its own worker, runs `run_single_iteration`, and destroys the worker on completion. Without a `connectivity_manager`, `run_orchestration` behaves exactly as before (single static `SUBSTRATE_WORKER_URL`).
+
+### Environment variables
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `CONNECTIVITY_BACKEND` | `local_docker` | Backend to use (`local_docker`, `aws`, `gcp`, `remote`) |
+| `SUBSTRATE_WORKER_IMAGE` | `substrate-worker` | Docker image for spawned workers |
+| `SUBSTRATE_DOCKER_NETWORK` | `agentic-network` | Docker network to attach workers to |
+| `SUBSTRATE_WORKER_HOST` | `localhost` | Host used in worker endpoint URLs |
+| `DOCKER_SOCKET` | `/var/run/docker.sock` | Path to Docker socket |
+| `SUBSTRATE_CTP_DIR` | `/mnt/md0/ctp_test` | CTP PCAP host path (mounted read-only in workers) |
+| `SUBSTRATE_CAPTURE_DIR` | `/mnt/md0/cap_test` | Capture output host path |
+
 ## API Specification
 
 ### 1. Submit Research Intent
@@ -171,7 +255,6 @@ Submit a natural language research intent. Claude reasons through the intent, ge
   },
   "preferences": {
     "capture_pcap": true,
-    "run_immediately": true,
     "desired_cc_algorithms": ["cubic", "bbr"]
   }
 }
@@ -726,7 +809,9 @@ services/orchestration/
 │   │   ├── claude_client.py    # Anthropic API integration
 │   │   ├── intent_parser.py    # Intent → structured form
 │   │   ├── experiment_generator.py  # Structured → experiments
-│   │   └── executor.py         # Run experiments
+│   │   ├── executor.py         # Run experiments
+│   │   ├── connectivity.py     # Worker provisioning (local Docker / AWS / GCP / remote)
+│   │   └── orchestration_workflow.py  # Full workflow: preflight → iterations → aggregation
 │   ├── prompts/
 │   │   ├── __init__.py
 │   │   ├── system.md           # Claude system prompt

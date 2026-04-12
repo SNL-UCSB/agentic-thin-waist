@@ -162,6 +162,9 @@ class SubstrateApis:
     def replay_substrate(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._http.post("/replay", payload)
 
+    def fetch_ctp(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._http.post("/ctp/fetch", payload)
+
     def get_health(self) -> dict[str, Any]:
         return self._http.get("/health")
 
@@ -303,6 +306,9 @@ class DownstreamClients:
 
     def replay_substrate(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self.substrate_apis.replay_substrate(payload)
+
+    def fetch_ctp_substrate(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self.substrate_apis.fetch_ctp(payload)
 
     def list_ctps(self, limit: int = 50) -> dict[str, Any]:
         return self.ctp_apis.list_ctps(limit=limit)

@@ -1,0 +1,23 @@
+{
+  "specification": "test ndt workflow",
+  "states": [
+    {
+      "checks": [
+        {
+          "type": "always_true",
+          "params": {}
+        }
+      ],
+      "actions": [
+        {
+          "type": "ndt",
+          "params": {
+            "download": "{{download}}",
+            "upload": "{{upload}}"
+          }
+        }
+      ]
+    }
+  ],
+  "parameters": ["download", "upload"]
+}

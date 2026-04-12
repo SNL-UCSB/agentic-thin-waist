@@ -1,11 +1,27 @@
-FROM golang:1.25-bookworm AS ndt-builder
+FROM --platform=$BUILDPLATFORM golang:1.24-bookworm AS ndt-builder
 
-RUN go install github.com/m-lab/ndt7-client-go/cmd/ndt7-client@latest
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+
+ENV GOARCH=amd64
+ENV GOOS=linux
+ENV CGO_ENABLED=0
+
+RUN git clone https://github.com/m-lab/ndt7-client-go.git \
+    && cd ndt7-client-go \
+    && git checkout v0.9.1 \
+    && go build -v -o ./ndt7-client ./cmd/ndt7-client \
+    && test -x ./ndt7-client \
+    && install -m 0755 ./ndt7-client /usr/local/bin/ndt7-client
 
 FROM python:3.12-slim-trixie
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
-COPY --from=ndt-builder /go/bin/ndt7-client /usr/local/bin/ndt-client
+COPY --from=ndt-builder /usr/local/bin/ndt7-client /usr/local/bin/ndt-client
 
 WORKDIR /app
 
@@ -29,7 +45,7 @@ COPY services/netgent-service/src/ src/
 COPY shared/ /shared/
 
 ENV PATH="/opt/netgent-venv/bin:$PATH"
-ENV PYTHONPATH="/app/src:/shared:$PYTHONPATH"
+ENV PYTHONPATH="/app/src:/shared:${PYTHONPATH:-}"
 
 EXPOSE 8003
 

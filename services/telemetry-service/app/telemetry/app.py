@@ -1,4 +1,5 @@
 from app.telemetry import db, s3, commands, routes
+from app.telemetry import models as _telemetry_models  # noqa: F401 — register tables
 from config import Config
 
 from flask import Flask

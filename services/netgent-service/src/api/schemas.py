@@ -14,7 +14,7 @@ HealthStatus = Literal["healthy", "unhealthy"]
 class GenerateWorkflowRequest(BaseModel):
     specification: str = Field(min_length=1)
     timeout: int | None = Field(default=None, ge=1)
-    type: Literal["shell", "browser"] = "shell"
+    type: Literal["shell", "browser", "hybrid"] = "shell"
 
 
 class GenerateWorkflowResponse(BaseModel):
@@ -31,6 +31,7 @@ class HealthResponse(BaseModel):
 class ExecuteWorkflowRequest(BaseModel):
     workflow_id: str
     timeout: int | None = Field(default=None, ge=1)
+    parameters: dict[str, str] = Field(default_factory=dict)
 
 
 class ExecuteWorkflowResponse(BaseModel):
@@ -51,6 +52,7 @@ class AvailableWorkflowItem(BaseModel):
     workflow_id: str
     specification: str
     last_executed_at: datetime | None = None
+    parameters: list[str] = Field(default_factory=list)
 
 
 class AvailableWorkflowsResponse(BaseModel):

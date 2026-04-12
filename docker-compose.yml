@@ -3,7 +3,7 @@ services:
   postgres:
     image: postgres:15
     ports:
-      - 5432:5432
+      - 5433:5432
     networks:
       - agentic-network
     env_file:
@@ -57,37 +57,6 @@ services:
         mc mb --ignore-existing local/$${NETGENT_S3_BUCKET_NAME:-netgent}
       "
 
-  browserless-substrate-worker:
-    build:
-      context: .
-      dockerfile: ./services/browserless-substrate-worker/Dockerfile
-    container_name: browserless-substrate-worker
-    restart: unless-stopped
-    environment:
-      CONCURRENT: ${MAX_CONCURRENT_SESSIONS:-5}
-      QUEUED: ${QUEUE_LENGTH:-10}
-      PROXY: ${BROWSERLESS_PROXY:-}
-      TIMEOUT: ${BROWSERLESS_TIMEOUT_MS:-300000}
-      HOST: 0.0.0.0
-      PORT: 3000
-      SUBSTRATE_BROWSER_NAMESPACE: ${NETGENT_NAMESPACE:-ns1}
-    depends_on:
-      substrate-worker:
-        condition: service_healthy
-    network_mode: "service:substrate-worker"
-    pid: "service:substrate-worker"
-    privileged: true
-    cap_add:
-      - NET_ADMIN
-      - SYS_ADMIN
-    volumes:
-      - substrate-runtime:/var/run/substrate:ro
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/pressure || exit 1"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-      start_period: 10s
 
   # D1: Experiment API - Orchestration Layer
   experiment-api:
@@ -179,6 +148,7 @@ services:
       - agentic-network
     volumes:
       - ./services/substrate-worker:/app
+      - ./shared:/shared
       - /var/run/docker.sock:/var/run/docker.sock
       - substrate-runtime:/var/run/substrate
       - ${SUBSTRATE_CTP_DIR:-/tmp/substrate-ctp}:${SUBSTRATE_CTP_DIR:-/tmp/substrate-ctp}:ro
@@ -229,18 +199,17 @@ services:
       - S3_CONNECTION_TIMEOUT_SECONDS=${S3_CONNECTION_TIMEOUT_SECONDS}
       - NETGENT_QUEUE_CONCURRENCY=${NETGENT_QUEUE_CONCURRENCY:-1}
     depends_on:
-      browserless-substrate-worker:
-        condition: service_healthy
       postgres:
         condition: service_healthy
       substrate-worker:
-        condition: service_started
+        condition: service_healthy
       telemetry-service:
         condition: service_started
     networks:
       - agentic-network
     volumes:
       - ./services/netgent-service:/app
+      - ./shared:/shared
     pid: "service:substrate-worker"
     privileged: true
     cap_add:
@@ -296,6 +265,7 @@ services:
       - agentic-network
     volumes:
       - ./services/netgent-service:/app
+      - ./shared:/shared
     pid: "service:substrate-worker"
     privileged: true
     cap_add:
@@ -355,7 +325,14 @@ services:
     environment:
       - FLASK_ENV=development
       - EXPERIMENT_API_URL=http://experiment-api:8000
+      - CTP_SERVICE_URL=${CTP_SERVICE_URL:-http://ctp-service:8001}
+      - CTP_SERVICE_GLOBAL=${CTP_SERVICE_GLOBAL:-http://128.111.5.236:8001}
+      - ORCH_CTP_INTENSITY_DIRECTION=${ORCH_CTP_INTENSITY_DIRECTION:-}
       - CLAUDE_API_KEY=${CLAUDE_API_KEY:-}
+      - SUBSTRATE_WORKER_IMAGE=agentic-thin-waist-substrate-worker
+      - SUBSTRATE_DOCKER_NETWORK=agentic-thin-waist_agentic-network
+      - SUBSTRATE_WORKER_HOST=172.28.0.1
+      - TELEMETRY_SERVICE_URL=http://telemetry-service:8004
     depends_on:
       - experiment-api
       - ctp-service
@@ -366,6 +343,8 @@ services:
       - agentic-network
     volumes:
       - ./services/orchestration:/app
+      - ./shared:/shared
+      - /var/run/docker.sock:/var/run/docker.sock
     healthcheck:
       test:
         [
