@@ -1,8 +1,8 @@
-from netgent.src.engine.controller import ProgramController
-from netgent.src.engine.executor import StateExecutor
-from netgent.src.engine.runner import WorkflowRunner
-from netgent.src.registry.actions.network import NETWORK_ACTIONS
-from netgent.src.registry.triggers.base_action import always_true
+from clients.netgent.src.engine.controller import ProgramController
+from clients.netgent.src.engine.executor import StateExecutor
+from clients.netgent.src.engine.runner import WorkflowRunner
+from clients.netgent.src.registry.actions.network import NETWORK_ACTIONS
+from clients.netgent.src.registry.triggers.base_action import always_true
 
 
 def build_shell_runner() -> WorkflowRunner:

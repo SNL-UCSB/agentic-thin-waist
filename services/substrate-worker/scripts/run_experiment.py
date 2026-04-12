@@ -1,7 +1,6 @@
 import argparse
 import json
 import os
-import subprocess
 import sys
 import urllib.error
 import urllib.request
@@ -9,7 +8,7 @@ import urllib.request
 SUBSTRATE_API_URL = os.environ.get("SUBSTRATE_API_URL", "http://localhost:8002")
 
 
-def apply_shaping(download_mbps, upload_mbps, latency_ms, qdisc):
+def apply_shaping(download_mbps, upload_mbps, latency_ms, qdisc, latency_location):
     print(
         f"[*] Applying shaping: {download_mbps}Mbps down, {upload_mbps}Mbps up, {latency_ms}ms latency, {qdisc} qdisc..."
     )
@@ -22,6 +21,8 @@ def apply_shaping(download_mbps, upload_mbps, latency_ms, qdisc):
         "qdisc": qdisc,
         "buffer_packets": 1000,
     }
+    if latency_ms > 0 and latency_location:
+        payload["latency_location"] = latency_location
 
     req = urllib.request.Request(
         f"{SUBSTRATE_API_URL}/shape",
@@ -65,41 +66,28 @@ def apply_congestion(algorithm):
         sys.exit(1)
 
 
-def run_workflow(workflow_path, runtime):
+def run_workflow(workflow_path, runtime, parameters):
     print(f"[*] Running {runtime} workflow: {workflow_path}...")
-    env = os.environ.copy()
 
-    # Resolve the workflow path relative to where the script is executed
     resolved_path = os.path.abspath(workflow_path)
     if not os.path.exists(resolved_path):
         print(f"[-] Error: Workflow file not found at {resolved_path}")
         sys.exit(1)
 
-    env["NETGENT_WORKFLOW_PATH"] = resolved_path
-    env["NETGENT_WORKFLOW_TYPE"] = runtime
+    with open(resolved_path) as f:
+        workflow = json.load(f)
 
-    # Ensure uv runs the module correctly regardless of where the script is executed
-    cmd = ["uv", "run", "--no-sync", "python", "-m", "netgent.src.main"]
+    # Execute inside the ns1 network namespace
+    os.environ["NETGENT_USE_LOCAL"] = "false"
+    os.environ["NETGENT_NAMESPACE"] = "ns1"
 
-    process = subprocess.Popen(
-        cmd,
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        cwd="/usr/src/app" if os.path.exists("/usr/src/app") else "/app",
-    )
+    from clients.netgent.src.main import NetGent
 
-    stdout, stderr = process.communicate()
-
-    if process.returncode != 0:
-        print(f"[-] Workflow execution failed with exit code {process.returncode}")
-        print("STDERR:")
-        print(stderr)
-        sys.exit(process.returncode)
+    client = NetGent()
+    result = client.run_workflow(workflow, parameters=parameters, type=runtime)
 
     print("\n[+] Workflow Output:")
-    print(stdout)
+    print(json.dumps(result, indent=2, default=str))
 
 
 def main():
@@ -136,12 +124,33 @@ def main():
         default="cubic",
         help="TCP Congestion Control Algorithm (e.g., cubic, bbr, reno)",
     )
+    parser.add_argument(
+        "--latency-location",
+        type=str,
+        choices=["upstream", "downstream", "both"],
+        default="both",
+        help="Where to inject latency: upstream (ns2), downstream (ns1), or both",
+    )
+    parser.add_argument(
+        "--param",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="Workflow parameter as key=value (repeatable)",
+    )
 
     args = parser.parse_args()
 
-    apply_shaping(args.download, args.upload, args.latency, args.qdisc)
+    parameters = {}
+    for param_str in args.param:
+        if "=" not in param_str:
+            parser.error(f"Invalid parameter format: {param_str}. Expected key=value")
+        key, value = param_str.split("=", 1)
+        parameters[key.strip()] = value.strip()
+
+    apply_shaping(args.download, args.upload, args.latency, args.qdisc, args.latency_location)
     apply_congestion(args.cca)
-    run_workflow(args.workflow, args.runtime)
+    run_workflow(args.workflow, args.runtime, parameters)
 
 
 if __name__ == "__main__":

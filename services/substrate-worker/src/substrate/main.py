@@ -1096,10 +1096,15 @@ def run_experiment(req: RunExperimentRequest) -> RunExperimentResponse:
     set_congestion(CongestionRequest(algorithm=req.cca, namespace=req.cca_namespace))
 
     # 3. Run workflow
-    from netgent.src.main import run_workflow
+    import asyncio
+
+    from clients.netgent import NetGent
 
     try:
-        result = run_workflow(req.workflow, runtime=req.runtime)
+        client = NetGent()
+        result = asyncio.run(
+            client.execute(req.workflow, type=req.runtime)
+        )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Workflow failed: {exc}")
 

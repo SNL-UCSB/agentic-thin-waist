@@ -12,11 +12,12 @@
         {
           "type": "ndt",
           "params": {
-            "download": true,
-            "upload": true
+            "download": "{{download}}",
+            "upload": "{{upload}}"
           }
         }
       ]
     }
-  ]
+  ],
+  "parameters": ["download", "upload"]
 }

@@ -1,5 +1,5 @@
 {
-  "specification": "test shell workflow",
+  "specification": "test iperf workflow",
   "states": [
     {
       "checks": [
@@ -10,14 +10,15 @@
       ],
       "actions": [
         {
-          "type": "ping",
+          "type": "iperf",
           "params": {
             "host": "{{host}}",
-            "count": "{{count}}"
+            "port": "{{port}}",
+            "duration_seconds": "{{duration}}"
           }
         }
       ]
     }
   ],
-  "parameters": ["host", "count"]
+  "parameters": ["host", "port", "duration"]
 }

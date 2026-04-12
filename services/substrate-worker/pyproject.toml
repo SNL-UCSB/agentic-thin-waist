@@ -26,4 +26,4 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/substrate", "src/netgent", "src/browser"]
+packages = ["src/substrate", "src/browser"]

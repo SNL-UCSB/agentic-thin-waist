@@ -12,10 +12,11 @@
         {
           "type": "go_to_url",
           "params": {
-            "url": "https://example.com"
+            "url": "{{url}}"
           }
         }
       ]
     }
-  ]
+  ],
+  "parameters": ["url"]
 }
