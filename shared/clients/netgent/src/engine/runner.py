@@ -19,7 +19,25 @@ class WorkflowRunner:
         self.config = dict(config or {})
 
     def validate(self, workflow: dict[str, Any]) -> dict[str, Any]:
-        return WorkflowSchema.model_validate(workflow).model_dump(mode="json")
+        validated = WorkflowSchema.model_validate(workflow).model_dump(mode="json")
+
+        for state in validated["states"]:
+            for action in state.get("actions", []):
+                action_type = action["type"]
+                try:
+                    definition = self.executor.registry.definition(action_type)
+                except Exception as exc:
+                    raise ValueError(
+                        f"Invalid action '{action_type}': {exc}"
+                    ) from exc
+                try:
+                    definition.public_signature.bind(**action.get("params", {}))
+                except TypeError as exc:
+                    raise ValueError(
+                        f"Invalid action '{action_type}': {exc}"
+                    ) from exc
+
+        return validated
 
     def _check_parameters(self, validated_workflow: dict[str, Any]) -> None:
         declared: list[str] = validated_workflow.get("parameters") or []
