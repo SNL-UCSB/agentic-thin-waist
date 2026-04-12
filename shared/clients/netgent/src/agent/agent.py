@@ -16,7 +16,9 @@ from clients.netgent.src.agent.subagents.browser.agent import (
     create_agent as create_browser_agent,
 )
 from clients.netgent.src.agent.subagents.browser.util import open_browser_session
-from clients.netgent.src.agent.subagents.shell.agent import create_agent as create_shell_agent
+from clients.netgent.src.agent.subagents.shell.agent import (
+    create_agent as create_shell_agent,
+)
 from clients.netgent.src.engine.controller import ProgramController
 from clients.netgent.src.engine.executor import StateExecutor
 from clients.netgent.src.engine.runner import WorkflowRunner

@@ -15,6 +15,7 @@ WORKFLOWS_DIR = Path(__file__).resolve().parents[1]
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_url_response(body: dict, code: int = 200):
     """Create a mock urllib response context manager."""
     encoded = json.dumps(body).encode("utf-8")
@@ -29,6 +30,7 @@ def _make_url_response(body: dict, code: int = 200):
 # ---------------------------------------------------------------------------
 # Tests for apply_shaping
 # ---------------------------------------------------------------------------
+
 
 class TestApplyShaping:
     def test_sends_correct_payload(self):
@@ -74,6 +76,7 @@ class TestApplyShaping:
 # Tests for apply_congestion
 # ---------------------------------------------------------------------------
 
+
 class TestApplyCongestion:
     def test_sends_correct_payload(self):
         import run_experiment
@@ -102,6 +105,7 @@ class TestApplyCongestion:
 # Tests for run_workflow
 # ---------------------------------------------------------------------------
 
+
 class TestRunWorkflow:
     def _write_workflow(self, tmp_path, workflow: dict) -> str:
         path = tmp_path / "workflow.json"
@@ -123,7 +127,10 @@ class TestRunWorkflow:
                 {
                     "checks": [{"type": "always_true", "params": {}}],
                     "actions": [
-                        {"type": "ping", "params": {"host": "{{host}}", "count": "{{count}}"}}
+                        {
+                            "type": "ping",
+                            "params": {"host": "{{host}}", "count": "{{count}}"},
+                        }
                     ],
                     "end_state": "done",
                 }
@@ -138,9 +145,7 @@ class TestRunWorkflow:
         def mock_run(self_client, wf, *, parameters=None, type=None):
             return mock_result
 
-        with mock.patch(
-            "clients.netgent.src.main.NetGent.run_workflow", mock_run
-        ):
+        with mock.patch("clients.netgent.src.main.NetGent.run_workflow", mock_run):
             run_experiment.run_workflow(workflow_path, "shell", parameters)
 
         assert os.environ.get("NETGENT_USE_LOCAL") == "false"
@@ -170,10 +175,10 @@ class TestRunWorkflow:
             captured_kwargs["parameters"] = parameters
             return []
 
-        with mock.patch(
-            "clients.netgent.src.main.NetGent.run_workflow", mock_run
-        ):
-            run_experiment.run_workflow(workflow_path, "browser", {"url": "https://test.com"})
+        with mock.patch("clients.netgent.src.main.NetGent.run_workflow", mock_run):
+            run_experiment.run_workflow(
+                workflow_path, "browser", {"url": "https://test.com"}
+            )
 
         assert captured_kwargs["type"] == "browser"
         assert captured_kwargs["parameters"] == {"url": "https://test.com"}
@@ -190,9 +195,7 @@ class TestRunWorkflow:
             captured_kwargs["parameters"] = parameters
             return []
 
-        with mock.patch(
-            "clients.netgent.src.main.NetGent.run_workflow", mock_run
-        ):
+        with mock.patch("clients.netgent.src.main.NetGent.run_workflow", mock_run):
             run_experiment.run_workflow(workflow_path, "shell", {})
 
         assert captured_kwargs["parameters"] == {}
@@ -201,6 +204,7 @@ class TestRunWorkflow:
 # ---------------------------------------------------------------------------
 # Tests for CLI argument parsing
 # ---------------------------------------------------------------------------
+
 
 class TestMainCLI:
     def test_param_flag_parsed_correctly(self):
@@ -218,12 +222,18 @@ class TestMainCLI:
                 "sys.argv",
                 [
                     "run_experiment.py",
-                    "--workflow", "/tmp/test.json",
-                    "--runtime", "shell",
-                    "--param", "host=8.8.8.8",
-                    "--param", "count=5",
-                    "--download", "50",
-                    "--cca", "bbr",
+                    "--workflow",
+                    "/tmp/test.json",
+                    "--runtime",
+                    "shell",
+                    "--param",
+                    "host=8.8.8.8",
+                    "--param",
+                    "count=5",
+                    "--download",
+                    "50",
+                    "--cca",
+                    "bbr",
                 ],
             ),
         ):
@@ -258,6 +268,7 @@ class TestMainCLI:
 # Tests against actual workflow JSON files
 # ---------------------------------------------------------------------------
 
+
 class TestWorkflowFiles:
     """Verify each test workflow file loads, has parameters declared, and
     that run_workflow passes the correct workflow + parameters to NetGent."""
@@ -275,9 +286,7 @@ class TestWorkflowFiles:
             captured["type"] = type
             return [{"success": True, "output": []}]
 
-        with mock.patch(
-            "clients.netgent.src.main.NetGent.run_workflow", mock_run
-        ):
+        with mock.patch("clients.netgent.src.main.NetGent.run_workflow", mock_run):
             run_experiment.run_workflow(workflow_path, "shell", params)
 
         wf = captured["workflow"]
@@ -300,9 +309,7 @@ class TestWorkflowFiles:
             captured["type"] = type
             return [{"success": True, "output": []}]
 
-        with mock.patch(
-            "clients.netgent.src.main.NetGent.run_workflow", mock_run
-        ):
+        with mock.patch("clients.netgent.src.main.NetGent.run_workflow", mock_run):
             run_experiment.run_workflow(workflow_path, "shell", params)
 
         wf = captured["workflow"]
@@ -324,16 +331,17 @@ class TestWorkflowFiles:
             captured["type"] = type
             return [{"success": True, "output": []}]
 
-        with mock.patch(
-            "clients.netgent.src.main.NetGent.run_workflow", mock_run
-        ):
+        with mock.patch("clients.netgent.src.main.NetGent.run_workflow", mock_run):
             run_experiment.run_workflow(workflow_path, "shell", params)
 
         wf = captured["workflow"]
         assert wf["parameters"] == ["host", "port", "duration"]
         assert wf["states"][0]["actions"][0]["params"]["host"] == "{{host}}"
         assert wf["states"][0]["actions"][0]["params"]["port"] == "{{port}}"
-        assert wf["states"][0]["actions"][0]["params"]["duration_seconds"] == "{{duration}}"
+        assert (
+            wf["states"][0]["actions"][0]["params"]["duration_seconds"]
+            == "{{duration}}"
+        )
         assert captured["parameters"] == {
             "host": "10.0.0.1",
             "port": "5201",
@@ -354,9 +362,7 @@ class TestWorkflowFiles:
             captured["type"] = type
             return [{"success": True, "output": []}]
 
-        with mock.patch(
-            "clients.netgent.src.main.NetGent.run_workflow", mock_run
-        ):
+        with mock.patch("clients.netgent.src.main.NetGent.run_workflow", mock_run):
             run_experiment.run_workflow(workflow_path, "browser", params)
 
         wf = captured["workflow"]
@@ -384,24 +390,28 @@ class TestWorkflowFiles:
         responses = [mock_shaping_resp, mock_congestion_resp]
 
         with (
-            mock.patch(
-                "urllib.request.urlopen", side_effect=responses
-            ),
-            mock.patch(
-                "clients.netgent.src.main.NetGent.run_workflow", mock_run
-            ),
+            mock.patch("urllib.request.urlopen", side_effect=responses),
+            mock.patch("clients.netgent.src.main.NetGent.run_workflow", mock_run),
             mock.patch(
                 "sys.argv",
                 [
                     "run_experiment.py",
-                    "--workflow", workflow_path,
-                    "--runtime", "shell",
-                    "--download", "50",
-                    "--upload", "10",
-                    "--latency", "20",
-                    "--cca", "bbr",
-                    "--param", "host=8.8.8.8",
-                    "--param", "count=3",
+                    "--workflow",
+                    workflow_path,
+                    "--runtime",
+                    "shell",
+                    "--download",
+                    "50",
+                    "--upload",
+                    "10",
+                    "--latency",
+                    "20",
+                    "--cca",
+                    "bbr",
+                    "--param",
+                    "host=8.8.8.8",
+                    "--param",
+                    "count=3",
                 ],
             ),
         ):

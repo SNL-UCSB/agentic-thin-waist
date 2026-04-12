@@ -148,7 +148,9 @@ def main():
         key, value = param_str.split("=", 1)
         parameters[key.strip()] = value.strip()
 
-    apply_shaping(args.download, args.upload, args.latency, args.qdisc, args.latency_location)
+    apply_shaping(
+        args.download, args.upload, args.latency, args.qdisc, args.latency_location
+    )
     apply_congestion(args.cca)
     run_workflow(args.workflow, args.runtime, parameters)
 

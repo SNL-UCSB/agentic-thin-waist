@@ -1102,9 +1102,7 @@ def run_experiment(req: RunExperimentRequest) -> RunExperimentResponse:
 
     try:
         client = NetGent()
-        result = asyncio.run(
-            client.execute(req.workflow, type=req.runtime)
-        )
+        result = asyncio.run(client.execute(req.workflow, type=req.runtime))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Workflow failed: {exc}")
 
