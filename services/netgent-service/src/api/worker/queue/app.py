@@ -16,7 +16,7 @@ from api.utils import (
 )
 from api.worker import get_queue_app
 from api.worker.constants import WORKFLOW_EXECUTE_QUEUE, WORKFLOW_GENERATE_QUEUE
-from netgent.src.main import NetGent
+from clients.netgent import NetGent
 
 logger = logging.getLogger(__name__)
 
@@ -82,21 +82,23 @@ def _run_netgent_job(job_id: str, *, operation: Literal["generate", "execute"]) 
 
         client = NetGent()
         if operation == "generate":
-            result = asyncio.run(client.generate(specification, type=workflow_type))
-        else:
-            result = asyncio.run(
-                client.execute(
-                    workflow_definition,
-                    parameters=parameters,
-                    type=workflow_type,
-                )
+            agent_state = asyncio.run(
+                client.generate(specification, type=workflow_type)
             )
-
-        updated_workflow = workflow_definition
-        if isinstance(result, dict):
-            candidate_workflow = result.get("workflow")
-            if isinstance(candidate_workflow, dict):
-                updated_workflow = candidate_workflow
+            generated_workflow = (
+                agent_state.get("workflow") if isinstance(agent_state, dict) else None
+            )
+            updated_workflow = generated_workflow or workflow_definition
+            artifact_payload = updated_workflow
+        else:
+            execution_result = client.run_workflow(
+                workflow_definition,
+                type=workflow_type,
+                parameters=parameters,
+                record_har=workflow_type in ("browser", "hybrid"),
+            )
+            updated_workflow = workflow_definition
+            artifact_payload = execution_result
 
         if workflow_id is not None and updated_workflow:
             with session_factory() as session:
@@ -110,7 +112,7 @@ def _run_netgent_job(job_id: str, *, operation: Literal["generate", "execute"]) 
         artifacts = upload_job_artifacts(
             job_id=job_id,
             workflow_type=workflow_type,
-            result=result,
+            result=artifact_payload,
         )
 
     except Exception as exc:
