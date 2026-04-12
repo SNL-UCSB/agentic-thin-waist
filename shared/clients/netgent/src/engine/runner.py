@@ -27,15 +27,11 @@ class WorkflowRunner:
                 try:
                     definition = self.executor.registry.definition(action_type)
                 except Exception as exc:
-                    raise ValueError(
-                        f"Invalid action '{action_type}': {exc}"
-                    ) from exc
+                    raise ValueError(f"Invalid action '{action_type}': {exc}") from exc
                 try:
                     definition.public_signature.bind(**action.get("params", {}))
                 except TypeError as exc:
-                    raise ValueError(
-                        f"Invalid action '{action_type}': {exc}"
-                    ) from exc
+                    raise ValueError(f"Invalid action '{action_type}': {exc}") from exc
 
         return validated
 
