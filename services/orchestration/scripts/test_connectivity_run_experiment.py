@@ -15,6 +15,8 @@ import os
 import sys
 import time
 
+import httpx
+
 # Allow running from repo root or services/orchestration/
 sys.path.insert(0, "/app")
 
@@ -23,6 +25,21 @@ sys.path.insert(0, "/app")
 os.environ.setdefault("SUBSTRATE_WORKER_HOST", "host.docker.internal")
 
 from app.engine.connectivity import ConnectivityManager
+
+
+def _wait_for_health(endpoint: str, timeout: int = 90, interval: int = 3) -> bool:
+    """Poll the worker /health endpoint until it responds OK or timeout."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            resp = httpx.get(f"{endpoint}/health", timeout=5)
+            if resp.status_code == 200:
+                return True
+        except Exception:
+            pass
+        time.sleep(interval)
+    return False
+
 
 # ---------------------------------------------------------------------------
 # Minimal workflow: a single shell ping action
@@ -66,9 +83,11 @@ def main() -> None:
         print(f"  FAILED: {exc}")
         sys.exit(1)
 
-    # Give the container a moment to start
-    print("  Waiting 3s for container to be ready...")
-    time.sleep(3)
+    print("  Waiting for worker health check...")
+    if _wait_for_health(info.endpoint):
+        print("  Worker is healthy!")
+    else:
+        print("  WARNING: Worker health check timed out, trying anyway...")
 
     # 2. Run experiment + push to telemetry
     print("\n--- run_experiment() -> POST /run + POST /results ---")
@@ -84,7 +103,12 @@ def main() -> None:
             application="ping",
             telemetry_url="http://telemetry-service:8004",
         )
-        print("  run_result status :", result["run_result"].get("status"))
+        print("  shaping           :", result["shaping"].get("status"))
+        print("  congestion        :", result["congestion"].get("current_algorithm"))
+        print(
+            "  workflow status   :",
+            result["workflow_result"].get("status"),
+        )
         print(
             "  telemetry response:",
             json.dumps(result["telemetry"], indent=2, default=str),

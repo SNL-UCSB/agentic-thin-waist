@@ -192,19 +192,35 @@ class LocalDockerBackend(ConnectivityBackend):
             inspect_resp.raise_for_status()
             inspect = inspect_resp.json()
 
-        port_bindings = (
-            inspect.get("NetworkSettings", {})
-            .get("Ports", {})
-            .get(f"{_SUBSTRATE_CONTAINER_PORT}/tcp")
-        )
-        if not port_bindings:
-            raise RuntimeError(
-                f"Could not read host port for container {container_id[:12]}. "
-                "Ensure the container started correctly."
+        # Prefer the container's IP on the Docker network for container-to-
+        # container communication.  Fall back to host-mapped port.
+        container_ip: str | None = None
+        networks_info = inspect.get("NetworkSettings", {}).get("Networks", {})
+        if network and network in networks_info:
+            container_ip = networks_info[network].get("IPAddress")
+        if not container_ip:
+            for net_info in networks_info.values():
+                ip = net_info.get("IPAddress")
+                if ip:
+                    container_ip = ip
+                    break
+
+        if container_ip:
+            endpoint = f"http://{container_ip}:{_SUBSTRATE_CONTAINER_PORT}"
+        else:
+            port_bindings = (
+                inspect.get("NetworkSettings", {})
+                .get("Ports", {})
+                .get(f"{_SUBSTRATE_CONTAINER_PORT}/tcp")
             )
-        host_port = port_bindings[0]["HostPort"]
-        host = os.getenv("SUBSTRATE_WORKER_HOST", "localhost")
-        endpoint = f"http://{host}:{host_port}"
+            if not port_bindings:
+                raise RuntimeError(
+                    f"Could not read host port for container {container_id[:12]}. "
+                    "Ensure the container started correctly."
+                )
+            host_port = port_bindings[0]["HostPort"]
+            host = os.getenv("SUBSTRATE_WORKER_HOST", "localhost")
+            endpoint = f"http://{host}:{host_port}"
 
         info = WorkerInfo(
             worker_id=worker_id,
@@ -365,6 +381,110 @@ class ConnectivityManager:
         """Return current :class:`WorkerInfo` for *worker_id*."""
         return self._backend.get_worker_info(worker_id)
 
+    def apply_shaping(
+        self,
+        worker_id: str,
+        *,
+        download_mbps: float,
+        upload_mbps: float,
+        latency_ms: float = 0.0,
+        qdisc: str = "pfifo",
+        buffer_packets: int = 1000,
+        latency_location: str = "both",
+        upstream_iface: str = "veth4",
+        downstream_iface: str = "veth2",
+    ) -> dict[str, Any]:
+        """Apply traffic shaping on the worker via ``POST /shape``.
+
+        Only includes ``latency_location`` when *latency_ms* > 0, matching
+        the behaviour of ``run_experiment.py``.
+        """
+        info = self._backend.get_worker_info(worker_id)
+        payload: dict[str, Any] = {
+            "upstream_iface": upstream_iface,
+            "downstream_iface": downstream_iface,
+            "download_mbps": download_mbps,
+            "upload_mbps": upload_mbps,
+            "latency_ms": latency_ms,
+            "qdisc": qdisc,
+            "buffer_packets": buffer_packets,
+        }
+        if latency_ms > 0 and latency_location:
+            payload["latency_location"] = latency_location
+
+        with httpx.Client(timeout=120) as client:
+            resp = client.post(f"{info.endpoint}/shape", json=payload)
+        if resp.status_code != 200:
+            raise RuntimeError(
+                f"POST /shape failed for worker {worker_id} "
+                f"(HTTP {resp.status_code}): {resp.text[:1000]}"
+            )
+        result = resp.json()
+        logger.info(
+            "Shaping applied on worker %s: %sMbps down, %sMbps up, %sms latency",
+            worker_id,
+            download_mbps,
+            upload_mbps,
+            latency_ms,
+        )
+        return result
+
+    def apply_congestion(
+        self,
+        worker_id: str,
+        *,
+        algorithm: str = "cubic",
+        namespace: str = "ns1",
+    ) -> dict[str, Any]:
+        """Set the TCP congestion control algorithm via ``POST /congestion``."""
+        info = self._backend.get_worker_info(worker_id)
+        payload = {"algorithm": algorithm, "namespace": namespace}
+
+        with httpx.Client(timeout=30) as client:
+            resp = client.post(f"{info.endpoint}/congestion", json=payload)
+        if resp.status_code != 200:
+            raise RuntimeError(
+                f"POST /congestion failed for worker {worker_id} "
+                f"(HTTP {resp.status_code}): {resp.text[:1000]}"
+            )
+        result = resp.json()
+        logger.info(
+            "Congestion control set on worker %s: %s",
+            worker_id,
+            result.get("current_algorithm", algorithm),
+        )
+        return result
+
+    def run_workflow(
+        self,
+        worker_id: str,
+        workflow: dict[str, Any],
+        *,
+        runtime: str = "shell",
+        parameters: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        """Execute a workflow on the worker via ``POST /run``.
+
+        Assumes shaping and congestion have already been applied via
+        :meth:`apply_shaping` and :meth:`apply_congestion`.
+        """
+        info = self._backend.get_worker_info(worker_id)
+        payload: dict[str, Any] = {
+            "workflow": workflow,
+            "runtime": runtime,
+        }
+        if parameters:
+            payload["parameters"] = parameters
+
+        with httpx.Client(timeout=300) as client:
+            resp = client.post(f"{info.endpoint}/run", json=payload)
+        if resp.status_code != 200:
+            raise RuntimeError(
+                f"POST /run failed for worker {worker_id} "
+                f"(HTTP {resp.status_code}): {resp.text[:1000]}"
+            )
+        return resp.json()
+
     def run_experiment(
         self,
         worker_id: str,
@@ -375,18 +495,21 @@ class ConnectivityManager:
         latency_ms: float = 0.0,
         qdisc: str = "pfifo",
         buffer_packets: int = 1000,
-        latency_location: str | None = None,
-        qdisc_params: dict[str, str] | None = None,
+        latency_location: str = "both",
         cca: str = "cubic",
-        cca_namespace: str | None = None,
+        cca_namespace: str = "ns1",
         upstream_iface: str = "veth4",
         downstream_iface: str = "veth2",
         runtime: str = "shell",
+        parameters: dict[str, str] | None = None,
         experiment_id: str | None = None,
         application: str | None = None,
         telemetry_url: str | None = None,
     ) -> dict[str, Any]:
-        """Shape the network and run a workflow on an existing worker.
+        """Shape the network, set congestion control, and run a workflow.
+
+        Mirrors the three-step flow of ``run_experiment.py``:
+        ``POST /shape`` → ``POST /congestion`` → ``POST /run``.
 
         Args:
             worker_id:        ID returned by :meth:`create_worker`.
@@ -396,47 +519,49 @@ class ConnectivityManager:
             latency_ms:       One-way latency in ms (default: 0).
             qdisc:            Queue discipline (default: ``pfifo``).
             buffer_packets:   Queue depth in packets (default: 1000).
-            latency_location: Where to inject latency — ``upstream``, ``downstream``, ``both``, or ``None``.
-            qdisc_params:     Extra qdisc-specific parameters passed to tc.
+            latency_location: Where to inject latency — ``upstream``,
+                              ``downstream``, or ``both`` (default).
+                              Ignored when *latency_ms* is 0.
             cca:              TCP congestion control algorithm (default: ``cubic``).
-            cca_namespace:    Namespace for CCA — ``ns1``, ``ns2``, or ``None`` for all.
+            cca_namespace:    Namespace for CCA (default: ``ns1``).
             upstream_iface:   Upload interface inside the worker (default: ``veth4``).
             downstream_iface: Download interface inside the worker (default: ``veth2``).
             runtime:          Workflow runtime — ``shell`` or ``browser`` (default: ``shell``).
+            parameters:       Workflow parameter substitutions (``key=value``).
             experiment_id:    Identifier stored in telemetry (auto-generated if omitted).
             application:      Application name stored in telemetry contextual tree.
-            telemetry_url:    Base URL of the Telemetry Service. Reads
+            telemetry_url:    Base URL of the Telemetry Service.  Reads
                               ``TELEMETRY_SERVICE_URL`` env var when omitted; set to
                               an empty string to skip telemetry entirely.
 
         Returns:
-            Dict with ``run_result`` (from ``POST /run``) and ``telemetry``
-            (from ``POST /results``, or ``None`` when telemetry is skipped).
+            Dict with ``shaping``, ``congestion``, ``workflow_result``, and
+            ``telemetry`` keys.
         """
-        info = self._backend.get_worker_info(worker_id)
-        payload: dict[str, Any] = {
-            "upstream_iface": upstream_iface,
-            "downstream_iface": downstream_iface,
-            "download_mbps": download_mbps,
-            "upload_mbps": upload_mbps,
-            "latency_ms": latency_ms,
-            "latency_location": latency_location,
-            "qdisc": qdisc,
-            "buffer_packets": buffer_packets,
-            "qdisc_params": qdisc_params,
-            "cca": cca,
-            "cca_namespace": cca_namespace,
-            "workflow": workflow,
-            "runtime": runtime,
-        }
-        with httpx.Client(timeout=300) as client:
-            resp = client.post(f"{info.endpoint}/run", json=payload)
-        if resp.status_code != 200:
-            raise RuntimeError(
-                f"POST /run failed for worker {worker_id} "
-                f"(HTTP {resp.status_code}): {resp.text[:1000]}"
-            )
-        run_result = resp.json()
+        shaping_result = self.apply_shaping(
+            worker_id,
+            download_mbps=download_mbps,
+            upload_mbps=upload_mbps,
+            latency_ms=latency_ms,
+            qdisc=qdisc,
+            buffer_packets=buffer_packets,
+            latency_location=latency_location,
+            upstream_iface=upstream_iface,
+            downstream_iface=downstream_iface,
+        )
+
+        congestion_result = self.apply_congestion(
+            worker_id,
+            algorithm=cca,
+            namespace=cca_namespace,
+        )
+
+        workflow_result = self.run_workflow(
+            worker_id,
+            workflow,
+            runtime=runtime,
+            parameters=parameters,
+        )
 
         # --- Telemetry persistence ---
         resolved_telemetry_url = (
@@ -450,7 +575,9 @@ class ConnectivityManager:
             exp_id = experiment_id or f"connectivity-{uuid.uuid4().hex[:12]}"
             telemetry_payload = {
                 "experiment_id": exp_id,
-                "status": "success" if run_result.get("status") == "ok" else "failure",
+                "status": (
+                    "success" if workflow_result.get("status") == "ok" else "failure"
+                ),
                 "trial_number": 1,
                 "bottleneck_state": {
                     "configured_capacity": download_mbps,
@@ -472,7 +599,7 @@ class ConnectivityManager:
                         "runtime": runtime,
                     },
                 },
-                "qoe_metrics": run_result,
+                "qoe_metrics": workflow_result,
                 "transport_state": {},
                 "pcap_path": "",
             }
@@ -493,7 +620,12 @@ class ConnectivityManager:
                     "Telemetry POST failed for experiment %s: %s", exp_id, exc
                 )
 
-        return {"run_result": run_result, "telemetry": telemetry_save}
+        return {
+            "shaping": shaping_result,
+            "congestion": congestion_result,
+            "workflow_result": workflow_result,
+            "telemetry": telemetry_save,
+        }
 
     @property
     def backend_name(self) -> str:
