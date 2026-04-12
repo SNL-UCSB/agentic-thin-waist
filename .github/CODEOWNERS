@@ -1,14 +1,2 @@
 # Global code owners — automatically added as reviewers on every PR
 
-* @maybe-hello-world  # Default owner if nothing else matches
-
-# Service-specific owners based on the most recent commit in each directory
-/services/browserless-substrate-worker  @EugeneVuong
-/services/ctp-service                   @jaber-the-great
-/services/experiment-api                @haarikamanda
-/services/netforge-setup                @jaber-the-great
-/services/netgent-service               @EugeneVuong
-/services/orchestration                 @haarikamanda
-/services/substrate-worker              @jaber-the-great
-/services/telemetry-service             @Manni-MinM
-
