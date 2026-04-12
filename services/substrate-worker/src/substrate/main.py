@@ -231,15 +231,11 @@ class CtpFetchResponse(BaseModel):
 
 
 class RunExperimentRequest(BaseModel):
-    # --- Shaping (optional — skip when already applied via POST /shape) ---
+    # --- Shaping ---
     upstream_iface: str = Field("veth4", description="Upload interface")
     downstream_iface: str = Field("veth2", description="Download interface")
-    download_mbps: Optional[float] = Field(
-        None, gt=0, description="Download capacity in Mbps"
-    )
-    upload_mbps: Optional[float] = Field(
-        None, gt=0, description="Upload capacity in Mbps"
-    )
+    download_mbps: float = Field(100.0, gt=0, description="Download capacity in Mbps")
+    upload_mbps: float = Field(100.0, gt=0, description="Upload capacity in Mbps")
     latency_ms: float = Field(0, ge=0, description="One-way delay in ms")
     latency_location: Optional[Literal["upstream", "downstream", "both"]] = None
     qdisc: str = Field("pfifo", description="Queue discipline")
@@ -1054,58 +1050,54 @@ def fetch_ctp_endpoint(req: CtpFetchRequest) -> CtpFetchResponse:
 
 @app.post("/run", response_model=RunExperimentResponse)
 def run_experiment(req: RunExperimentRequest) -> RunExperimentResponse:
-    """Optionally apply shaping + congestion, then execute a workflow.
+    """Apply shaping + congestion, then execute a workflow in a single call.
 
-    When ``download_mbps`` and ``upload_mbps`` are provided, shaping and
-    congestion control are applied first (equivalent to calling
-    ``POST /shape`` then ``POST /congestion``).  When omitted, the endpoint
-    assumes shaping was already configured and only runs the workflow.
+    Equivalent to calling ``POST /shape``, ``POST /congestion``, and running
+    the netgent workflow runner in sequence.  When ``download_mbps`` or
+    ``upload_mbps`` are not provided they default to 100 Mbps.
     """
     global CURRENT_BOTTLENECK_STATE, CURRENT_INTERFACES
 
-    # 1. Apply shaping (only when bandwidth values are provided)
-    if req.download_mbps is not None and req.upload_mbps is not None:
-        _validate_qdisc_request(req.qdisc, req.buffer_packets, req.qdisc_params)
-        state = BottleneckState(
+    # 1. Apply shaping
+    _validate_qdisc_request(req.qdisc, req.buffer_packets, req.qdisc_params)
+    state = BottleneckState(
+        download_mbps=req.download_mbps,
+        upload_mbps=req.upload_mbps,
+        latency_ms=req.latency_ms,
+        latency_location=req.latency_location,
+        qdisc=req.qdisc,
+        verified=False,
+        buffer_packets=req.buffer_packets,
+        qdisc_params=req.qdisc_params,
+    )
+    CURRENT_BOTTLENECK_STATE = state
+    CURRENT_INTERFACES = {
+        "downstream_iface": req.downstream_iface,
+        "upstream_iface": req.upstream_iface,
+    }
+    try:
+        apply_shaping(
+            downstream_iface=req.downstream_iface,
+            upstream_iface=req.upstream_iface,
             download_mbps=req.download_mbps,
             upload_mbps=req.upload_mbps,
             latency_ms=req.latency_ms,
-            latency_location=req.latency_location,
             qdisc=req.qdisc,
-            verified=False,
             buffer_packets=req.buffer_packets,
             qdisc_params=req.qdisc_params,
+            latency_location=req.latency_location,
         )
-        CURRENT_BOTTLENECK_STATE = state
-        CURRENT_INTERFACES = {
-            "downstream_iface": req.downstream_iface,
-            "upstream_iface": req.upstream_iface,
-        }
-        try:
-            apply_shaping(
-                downstream_iface=req.downstream_iface,
-                upstream_iface=req.upstream_iface,
-                download_mbps=req.download_mbps,
-                upload_mbps=req.upload_mbps,
-                latency_ms=req.latency_ms,
-                qdisc=req.qdisc,
-                buffer_packets=req.buffer_packets,
-                qdisc_params=req.qdisc_params,
-                latency_location=req.latency_location,
-            )
-        except subprocess.CalledProcessError as exc:
-            CURRENT_BOTTLENECK_STATE = None
-            CURRENT_INTERFACES = None
-            raise HTTPException(status_code=500, detail=f"tc command failed: {exc}")
-        except Exception as exc:
-            CURRENT_BOTTLENECK_STATE = None
-            CURRENT_INTERFACES = None
-            raise HTTPException(status_code=500, detail=str(exc))
+    except subprocess.CalledProcessError as exc:
+        CURRENT_BOTTLENECK_STATE = None
+        CURRENT_INTERFACES = None
+        raise HTTPException(status_code=500, detail=f"tc command failed: {exc}")
+    except Exception as exc:
+        CURRENT_BOTTLENECK_STATE = None
+        CURRENT_INTERFACES = None
+        raise HTTPException(status_code=500, detail=str(exc))
 
-        # 2. Apply congestion control
-        set_congestion(
-            CongestionRequest(algorithm=req.cca, namespace=req.cca_namespace)
-        )
+    # 2. Apply congestion control
+    set_congestion(CongestionRequest(algorithm=req.cca, namespace=req.cca_namespace))
 
     # 3. Run workflow
     from clients.netgent.src.main import NetGent
