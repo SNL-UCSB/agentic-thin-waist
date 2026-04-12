@@ -17,6 +17,12 @@ depends_on = None
 
 
 def upgrade():
+    from sqlalchemy import inspect as sa_inspect
+
+    bind = op.get_bind()
+    if "orchestrations" in sa_inspect(bind).get_table_names():
+        return
+
     op.create_table(
         "orchestrations",
         sa.Column("orchestration_id", sa.String(length=64), nullable=False),
