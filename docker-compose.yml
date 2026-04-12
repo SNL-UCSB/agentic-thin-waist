@@ -148,6 +148,7 @@ services:
       - agentic-network
     volumes:
       - ./services/substrate-worker:/app
+      - ./shared:/shared
       - /var/run/docker.sock:/var/run/docker.sock
       - substrate-runtime:/var/run/substrate
       - ${SUBSTRATE_CTP_DIR:-/tmp/substrate-ctp}:${SUBSTRATE_CTP_DIR:-/tmp/substrate-ctp}:ro
@@ -208,6 +209,7 @@ services:
       - agentic-network
     volumes:
       - ./services/netgent-service:/app
+      - ./shared:/shared
     pid: "service:substrate-worker"
     privileged: true
     cap_add:
@@ -263,6 +265,7 @@ services:
       - agentic-network
     volumes:
       - ./services/netgent-service:/app
+      - ./shared:/shared
     pid: "service:substrate-worker"
     privileged: true
     cap_add:
@@ -340,6 +343,7 @@ services:
       - agentic-network
     volumes:
       - ./services/orchestration:/app
+      - ./shared:/shared
       - /var/run/docker.sock:/var/run/docker.sock
     healthcheck:
       test:
