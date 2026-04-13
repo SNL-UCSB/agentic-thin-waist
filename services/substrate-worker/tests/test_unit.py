@@ -137,6 +137,9 @@ class TestHealthEndpoint:
             "tshark_available": True,
             "tcpreplay_available": True,
             "qdisc_support": True,
+            "ctp_dir": "/tmp/ctp",
+            "capture_dir": "/tmp/captures",
+            "path_config_valid": True,
             "interfaces": ["veth0", "veth2"],
         },
     )
@@ -161,6 +164,9 @@ class TestHealthEndpoint:
             "tshark_available": True,
             "tcpreplay_available": True,
             "qdisc_support": True,
+            "ctp_dir": "/tmp/ctp",
+            "capture_dir": "/tmp/captures",
+            "path_config_valid": True,
             "interfaces": [],
         },
     )
@@ -180,6 +186,9 @@ class TestHealthEndpoint:
             "tshark_available": False,
             "tcpreplay_available": False,
             "qdisc_support": False,
+            "ctp_dir": "/tmp/ctp",
+            "capture_dir": "/tmp/captures",
+            "path_config_valid": True,
             "interfaces": [],
         },
     )
@@ -202,6 +211,9 @@ class TestHealthEndpoint:
             "tshark_available": True,
             "tcpreplay_available": True,
             "qdisc_support": True,
+            "ctp_dir": "/tmp/ctp",
+            "capture_dir": "/tmp/captures",
+            "path_config_valid": True,
             "interfaces": ["veth0", "veth2", "veth4"],
         },
     )

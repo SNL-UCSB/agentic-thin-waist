@@ -32,6 +32,11 @@ ORCH_CAPTURE_TIMEOUT_SECONDS     How long to wait for capture to finish (default
 ORCH_POLL_INTERVAL_SECONDS       Polling interval for capture status (default: 2)
 SUBSTRATE_REPLAY_PNAT            PNAT rewrite rule for tcpreplay-edit --pnat
                                  (default: 169.231.0.0/16:172.16.1.1,128.111.0.0/16:172.16.1.1)
+ORCH_PCAP_DOWNLOAD_TIMEOUT_SECONDS   Seconds for GET /capture/.../pcap -> POST /artifacts bridge (default: 600).
+                                 Finished PCAPs are streamed to telemetry when
+                                 TELEMETRY_SERVICE_URL is set and POST /results returns result_id.
+CAPTURE_DOWNLOAD_TOKEN           Optional; if set on worker, orchestrator must send same value
+                                 in X-Capture-Download-Token for PCAP download.
 """
 
 from __future__ import annotations
@@ -48,6 +53,7 @@ from urllib.parse import quote
 from app.engine.connectivity import ConnectivityManager, WorkerInfo
 from app.engine.executor import DownstreamClients
 from app.engine.experiment_generator import ExperimentGenerator
+from app.engine.telemetry_capture_pull import stream_capture_pcap_to_telemetry
 
 logger = logging.getLogger(__name__)
 
@@ -461,15 +467,57 @@ def _run_experiment_on_worker(
         f"pcap_path={capture_status.get('pcap_path', 'N/A')}"
     )
 
-    # Determine overall experiment status from workflow thread outcome.
+    if telemetry_url.strip():
+        run_tr = thread_results.get("run")
+        telemetry_result_id: str | None = None
+        if isinstance(run_tr, dict):
+            tel = run_tr.get("telemetry")
+            if isinstance(tel, dict) and tel.get("result_id"):
+                telemetry_result_id = str(tel["result_id"])
+        if (
+            telemetry_result_id
+            and capture_id
+            and capture_status.get("status") == "finished"
+        ):
+            pcap_fn = os.path.basename(capture_status.get("pcap_path") or "") or (
+                f"{exp_id}.pcap"
+            )
+            try:
+                pull_out = stream_capture_pcap_to_telemetry(
+                    worker_base_url=worker.endpoint,
+                    capture_id=capture_id,
+                    telemetry_base_url=telemetry_url.strip().rstrip("/"),
+                    result_id=telemetry_result_id,
+                    pcap_filename=pcap_fn,
+                )
+                result["telemetry_pcap_artifact"] = pull_out
+                if pull_out.get("status") == "stored":
+                    print(
+                        f"[TELEMETRY] PCAP artifact stored for result_id={telemetry_result_id}"
+                    )
+                else:
+                    print(
+                        f"[TELEMETRY] PCAP artifact upload failed: {pull_out.get('detail', pull_out)}"
+                    )
+            except Exception as exc:
+                logger.warning("PCAP pull to telemetry failed: %s", exc, exc_info=True)
+                result["telemetry_pcap_artifact"] = {
+                    "status": "error",
+                    "detail": str(exc),
+                }
+                print(f"[TELEMETRY] PCAP pull exception: {exc}")
+        elif not telemetry_result_id:
+            logger.info(
+                "Skipping PCAP pull to telemetry: no telemetry result_id (telemetry disabled or POST /results failed)"
+            )
+
+    # Keep experiment success criteria aligned with previous behavior:
+    # workflow completion determines success/failure, while replay/capture/telemetry
+    # issues are retained as warnings in the result payload.
     if "run" in thread_results:
         result["run"] = thread_results["run"]
         result["status"] = "success"
-        logger.info(
-            "Worker %s: experiment %s succeeded",
-            worker.worker_id,
-            exp_id,
-        )
+        logger.info("Worker %s: experiment %s succeeded", worker.worker_id, exp_id)
         print(f"[STEP 3/4] Experiment {exp_id} → SUCCESS")
     else:
         err = thread_errors.get("run", "workflow thread did not complete")
@@ -477,12 +525,28 @@ def _run_experiment_on_worker(
         result["status"] = "failed"
         result["error"] = err
         logger.error(
-            "Worker %s: experiment %s failed: %s",
-            worker.worker_id,
-            exp_id,
-            err,
+            "Worker %s: experiment %s failed: %s", worker.worker_id, exp_id, err
         )
         print(f"[STEP 3/4] Experiment {exp_id} → FAILED: {err}")
+
+    warnings: list[str] = []
+    replay_issue = (result.get("replay") or {}).get("error")
+    if replay_issue:
+        warnings.append(f"replay_issue: {replay_issue}")
+    if capture_status.get("status") != "finished":
+        warnings.append(
+            f"capture_issue: status={capture_status.get('status', 'unknown')}"
+        )
+    telemetry_r = (result.get("run") or {}).get("telemetry")
+    if isinstance(telemetry_r, dict) and telemetry_r.get("error"):
+        warnings.append(f"telemetry_issue: {telemetry_r.get('error')}")
+    artifact_r = result.get("telemetry_pcap_artifact") or {}
+    if artifact_r and artifact_r.get("status") != "stored":
+        warnings.append(
+            f"pcap_artifact_issue: {artifact_r.get('detail', artifact_r.get('status'))}"
+        )
+    if warnings:
+        result["warnings"] = warnings
 
     return result
 

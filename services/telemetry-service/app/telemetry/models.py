@@ -11,7 +11,7 @@ class Result(db.Model):
     result_id = db.Column(db.String(64), primary_key=True)
     experiment_id = db.Column(db.String(64), nullable=False)
     trial_number = db.Column(db.Integer, nullable=False)
-    application = db.Column(db.String(32))
+    application = db.Column(db.String(256))
     status = db.Column(db.String(32))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
