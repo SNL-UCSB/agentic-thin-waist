@@ -1,17 +1,8 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import requests
-from clients.netgent.src.agent.subagents.shell.agent import (
-    create_agent as create_shell_netgent_agent,
-)
-from clients.netgent.src.engine.controller import ProgramController
-from clients.netgent.src.engine.executor import StateExecutor
-from clients.netgent.src.engine.runner import WorkflowRunner
-from clients.netgent.src.main import NetGent
-from clients.netgent.src.registry.actions.network import NETWORK_ACTIONS
-from clients.netgent.src.registry.triggers.base_action import always_true
 from langchain_core.messages import HumanMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import MessagesState
@@ -19,6 +10,9 @@ from langgraph.runtime import Runtime
 from pydantic import BaseModel, ConfigDict
 
 from app.agent.utils import get_model
+
+if TYPE_CHECKING:
+    from clients.netgent.src.main import NetGent
 
 
 class ShellWorkflowGenerationState(MessagesState):
@@ -112,6 +106,15 @@ def generate(
     state: ShellWorkflowGenerationState, runtime: Runtime[ShellWorkflowContext]
 ) -> dict[str, Any]:
     """Generate a shell workflow from the intent using the NetGent shell subagent."""
+    from clients.netgent.src.agent.subagents.shell.agent import (
+        create_agent as create_shell_netgent_agent,
+    )
+    from clients.netgent.src.engine.controller import ProgramController
+    from clients.netgent.src.engine.executor import StateExecutor
+    from clients.netgent.src.engine.runner import WorkflowRunner
+    from clients.netgent.src.registry.actions.network import NETWORK_ACTIONS
+    from clients.netgent.src.registry.triggers.base_action import always_true
+
     intent = state["intent"]
     runner = WorkflowRunner(
         controller=ProgramController(triggers=(always_true,)),

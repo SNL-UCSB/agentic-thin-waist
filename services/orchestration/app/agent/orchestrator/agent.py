@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from clients.netgent.src.main import NetGent
 from dotenv import load_dotenv
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.graph import END, START, StateGraph
@@ -161,6 +160,8 @@ def shell_workflow(state: OrchestratorState) -> dict[str, Any]:
         return {"workflow": existing}
 
     print(f"[AGENT {orchestration_id}] Routing → shell workflow agent")
+    from clients.netgent.src.main import NetGent
+
     agent = create_shell_agent()
     result = agent.invoke(
         {
@@ -189,6 +190,8 @@ def browser_workflow(state: OrchestratorState) -> dict[str, Any]:
         return {"workflow": existing}
 
     print(f"[AGENT {orchestration_id}] Routing → browser workflow agent")
+    from clients.netgent.src.main import NetGent
+
     agent = create_browser_agent()
     result = agent.invoke(
         {

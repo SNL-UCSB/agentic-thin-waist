@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import requests
-from clients.netgent.src.main import NetGent
 from langchain_core.messages import HumanMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import MessagesState
@@ -11,6 +10,9 @@ from langgraph.runtime import Runtime
 from pydantic import BaseModel, ConfigDict
 
 from app.agent.utils import get_model
+
+if TYPE_CHECKING:
+    from clients.netgent.src.main import NetGent
 
 
 class BrowserWorkflowGenerationState(MessagesState):
