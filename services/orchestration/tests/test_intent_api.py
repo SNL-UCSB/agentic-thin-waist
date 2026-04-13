@@ -22,5 +22,3 @@ def test_get_results_404_when_unknown():
     """GET /orchestration/{id}/results returns 404 for unknown id."""
     resp = client.get("/orchestration/orch-nonexistent/results")
     assert resp.status_code == 404
-
-
