@@ -148,50 +148,6 @@ def _ctp_pointer_for_worker(ctp: dict[str, Any]) -> str | None:
     return global_ctp_export_pointer(str(ctp_id))
 
 
-# ---------------------------------------------------------------------------
-# Workflow definitions per application
-# ---------------------------------------------------------------------------
-
-_APP_WORKFLOWS: dict[str, dict[str, Any]] = {
-    "ping": {
-        "specification": "ping",
-        "states": [
-            {
-                "checks": [],
-                "actions": [
-                    {"type": "ping", "params": {"host": "8.8.8.8", "count": 5}}
-                ],
-                "end_state": "done",
-            }
-        ],
-    },
-    "iperf3": {
-        "specification": "iperf3",
-        "states": [
-            {
-                "checks": [],
-                "actions": [
-                    {
-                        "type": "iperf",
-                        "params": {"host": "8.8.8.8", "duration_seconds": 10},
-                    }
-                ],
-                "end_state": "done",
-            }
-        ],
-    },
-    "speedtest": {
-        "specification": "speedtest",
-        "states": [
-            {
-                "checks": [],
-                "actions": [{"type": "speedtest", "params": {}}],
-                "end_state": "done",
-            }
-        ],
-    },
-}
-
 _DEFAULT_WORKFLOW: dict[str, Any] = {
     "specification": "default",
     "states": [
@@ -202,10 +158,6 @@ _DEFAULT_WORKFLOW: dict[str, Any] = {
         }
     ],
 }
-
-
-def _workflow_for(application: str) -> dict[str, Any]:
-    return _APP_WORKFLOWS.get(application.lower(), _DEFAULT_WORKFLOW)
 
 
 # ---------------------------------------------------------------------------
@@ -320,8 +272,7 @@ def _run_experiment_on_worker(
     print(f"\n{'─'*60}")
     print(f"[EXPERIMENT] Starting experiment={exp_id}")
     print(
-        f"[EXPERIMENT]   application={spec.get('application')}  "
-        f"capacity={spec.get('capacity_mbps')} Mbps  "
+        f"[EXPERIMENT]   capacity={spec.get('capacity_mbps')} Mbps  "
         f"latency={spec.get('latency_ms')} ms  "
         f"cc={spec.get('cc_algorithm')}"
     )
@@ -380,8 +331,11 @@ def _run_experiment_on_worker(
 
     # Step 3: Fire capture, CTP replay, and application workflow simultaneously
     #         at the next whole-minute boundary for tight temporal alignment.
-    app = spec.get("application", "")
-    workflow = _workflow_for(app)
+    workflow = spec.get("workflow") or _DEFAULT_WORKFLOW
+    raw_params = spec.get("workflow_parameters")
+    workflow_parameters = (
+        {k: str(v) for k, v in raw_params.items()} if raw_params else None
+    )
     telemetry_url = os.getenv("TELEMETRY_SERVICE_URL", "http://telemetry-service:8004")
     capture_payload = _build_capture_payload(exp_id, spec)
     replay_payload = (
@@ -397,7 +351,7 @@ def _run_experiment_on_worker(
     print(
         f"[STEP 3/4]   workflow={workflow.get('specification')}  "
         f"download={capacity} Mbps  upload={spec.get('upload_mbps') or capacity} Mbps  "
-        f"latency={spec.get('latency_ms', 0)} ms  qdisc={spec.get('aqm_policy', 'fq_codel')}"
+        f"latency={spec.get('latency_ms', 0)} ms  qdisc={spec.get('aqm_policy', 'pfifo')}"
     )
     print(
         f"[STEP 3/4]   capture iface={capture_payload['interface']}  "
@@ -448,15 +402,14 @@ def _run_experiment_on_worker(
                 upload_mbps=float(spec.get("upload_mbps") or capacity),
                 latency_ms=float(spec.get("latency_ms", 0)),
                 latency_location=spec.get("latency_location"),
-                qdisc=spec.get("aqm_policy", "fq_codel"),
+                qdisc=spec.get("aqm_policy", "pfifo"),
                 buffer_packets=int(spec.get("buffer_packets", 1000)),
-                qdisc_params=spec.get(
-                    "qdisc_params", {"target": "5ms", "interval": "100ms"}
-                ),
+                qdisc_params=spec.get("qdisc_params"),
                 cca=spec.get("cc_algorithm", "cubic"),
-                runtime=spec.get("runtime", "shell"),
+                runtime=spec.get("runtime") or spec.get("application_type", "shell"),
+                parameters=workflow_parameters,
                 experiment_id=exp_id,
-                application=app,
+                application=workflow.get("specification", ""),
                 telemetry_url=telemetry_url,
             )
             thread_results["run"] = r
@@ -568,6 +521,8 @@ class OrchestrationManager:
         orch_id: str,
         intent: str,
         parsed_intent: dict[str, Any],
+        workflow: dict[str, Any] | None = None,
+        workflow_parameters: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Full pipeline: generate specs → dispatch → aggregate results.
 
@@ -575,6 +530,8 @@ class OrchestrationManager:
             orch_id: Unique ID for this orchestration run.
             intent: Original natural language intent (kept for provenance).
             parsed_intent: Structured output from IntentParser.
+            workflow: NetGent workflow dict (state-machine JSON) to execute
+                      on each experiment. Falls back to a default ping workflow.
 
         Returns:
             Dict with orchestration_id, status, experiment_specs, results, summary.
@@ -584,6 +541,12 @@ class OrchestrationManager:
         print(f"[ORCH] Generating experiment specs from parsed intent …")
         experiments = ExperimentGenerator().generate(parsed_intent)
         experiment_specs = [e.model_dump() for e in experiments]
+
+        if workflow:
+            for spec in experiment_specs:
+                spec["workflow"] = workflow
+                if workflow_parameters:
+                    spec["workflow_parameters"] = workflow_parameters
 
         logger.info(
             "OrchestrationManager: %d experiment(s) for orch_id=%s via backend=%s",
@@ -598,7 +561,6 @@ class OrchestrationManager:
         for i, s in enumerate(experiment_specs):
             print(
                 f"[ORCH]   spec[{i}] id={s.get('experiment_id')}  "
-                f"app={s.get('application')}  "
                 f"capacity={s.get('capacity_mbps')} Mbps  "
                 f"latency={s.get('latency_ms')} ms"
             )
