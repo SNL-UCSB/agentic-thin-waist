@@ -172,7 +172,8 @@ def build_timeseries(path: Path, bin_ms: int, window_sec: int) -> np.ndarray:
 
 def fetch_transformed_ctps(conn):
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-        cur.execute("""
+        cur.execute(
+            """
             SELECT
                 n.ctp_id,
                 n.duration_seconds,
@@ -190,7 +191,8 @@ def fetch_transformed_ctps(conn):
             FROM ctp_nodes n
             WHERE n.is_transformed = true
             ORDER BY n.ctp_id
-        """)
+        """
+        )
         return cur.fetchall()
 
 
