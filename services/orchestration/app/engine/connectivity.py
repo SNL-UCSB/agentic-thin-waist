@@ -301,6 +301,52 @@ class GCPBackend(ConnectivityBackend):
         raise NotImplementedError("GCP backend is not implemented.")
 
 
+class StaticWorkerBackend(ConnectivityBackend):
+    """Reuses the existing substrate-worker container from Docker Compose.
+
+    Instead of spinning up ephemeral containers, all experiments run against
+    the already-running ``substrate-worker`` service.  ``destroy_worker`` is a
+    no-op so the Compose service stays alive between experiments.
+
+    Environment variables:
+        SUBSTRATE_WORKER_URL  — endpoint of the static worker
+                                (default: ``http://substrate-worker:8002``)
+    """
+
+    def __init__(self) -> None:
+        self._workers: dict[str, WorkerInfo] = {}
+        self._endpoint = os.getenv(
+            "SUBSTRATE_WORKER_URL", "http://substrate-worker:8002"
+        )
+
+    def create_worker(self, config: dict[str, Any]) -> WorkerInfo:
+        endpoint = config.get("endpoint", self._endpoint)
+        worker_id = f"worker-static-{uuid.uuid4().hex[:8]}"
+        info = WorkerInfo(
+            worker_id=worker_id,
+            endpoint=endpoint,
+            backend="static",
+            container_id=None,
+            metadata={"reuse": True},
+        )
+        self._workers[worker_id] = info
+        logger.info(
+            "Static worker %s → %s (reusing existing container)", worker_id, endpoint
+        )
+        return info
+
+    def destroy_worker(self, worker_id: str) -> None:
+        info = self._workers.pop(worker_id, None)
+        if info:
+            logger.info("Static worker %s released (container kept alive)", worker_id)
+
+    def get_worker_info(self, worker_id: str) -> WorkerInfo:
+        info = self._workers.get(worker_id)
+        if info is None:
+            raise KeyError(f"Unknown worker_id: {worker_id!r}")
+        return info
+
+
 class RemoteServerBackend(ConnectivityBackend):
     """Remote server substrate worker (pre-existing endpoint) — not yet implemented.
 
@@ -327,6 +373,7 @@ class RemoteServerBackend(ConnectivityBackend):
 
 _BACKENDS: dict[str, type[ConnectivityBackend]] = {
     "local_docker": LocalDockerBackend,
+    "static": StaticWorkerBackend,
     "aws": AWSBackend,
     "gcp": GCPBackend,
     "remote": RemoteServerBackend,
@@ -390,6 +437,7 @@ class ConnectivityManager:
         latency_ms: float = 0.0,
         qdisc: str = "pfifo",
         buffer_packets: int = 1000,
+        qdisc_params: dict[str, str] | None = None,
         latency_location: str = "both",
         upstream_iface: str = "veth4",
         downstream_iface: str = "veth2",
@@ -409,6 +457,8 @@ class ConnectivityManager:
             "qdisc": qdisc,
             "buffer_packets": buffer_packets,
         }
+        if qdisc_params:
+            payload["qdisc_params"] = qdisc_params
         if latency_ms > 0 and latency_location:
             payload["latency_location"] = latency_location
 
@@ -495,6 +545,7 @@ class ConnectivityManager:
         latency_ms: float = 0.0,
         qdisc: str = "pfifo",
         buffer_packets: int = 1000,
+        qdisc_params: dict[str, str] | None = None,
         latency_location: str = "both",
         cca: str = "cubic",
         cca_namespace: str = "ns1",
@@ -545,6 +596,7 @@ class ConnectivityManager:
             latency_ms=latency_ms,
             qdisc=qdisc,
             buffer_packets=buffer_packets,
+            qdisc_params=qdisc_params,
             latency_location=latency_location,
             upstream_iface=upstream_iface,
             downstream_iface=downstream_iface,

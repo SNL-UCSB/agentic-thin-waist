@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
-
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -49,49 +47,7 @@ def test_execute_parameter_sweep_skill():
     assert resp.status_code == 200
     out = resp.json()
     exps = out["generated_experiments"]
-    assert len(exps) == 6
+    # generator produces product(capacities, latencies, cc_algorithms) = 1×3×1 = 3
+    assert len(exps) == 3
     latencies = sorted({e["latency_ms"] for e in exps})
     assert latencies == [20.0, 80.0, 150.0]
-
-
-@patch("app.api.intent.OrchestrationManager")
-@patch("app.api.intent.IntentParser")
-def test_intent_pipeline_with_saved_latency_sweep_output(MockParser, MockOrchestration):
-    fixture = {
-        "intent": "Compare YouTube and Zoom across a latency sweep",
-        "with_examples": {
-            "applications": ["youtube", "zoom"],
-            "capacities": [25],
-            "latencies": [20, 80, 150],
-            "cc_algorithms": ["cubic"],
-            "num_trials": 1,
-            "reasoning": "Use a mixed app latency sweep from few-shot style output.",
-        },
-    }
-    parsed = fixture["with_examples"]
-
-    MockParser.return_value.parse.return_value = parsed
-    MockOrchestration.return_value.run.return_value = {
-        "status": "complete",
-        "experiment_specs": [],
-        "results": [],
-        "summary": {"total_experiments": 0, "successful": 0, "failed": 0},
-    }
-    resp = client.post(
-        "/intent",
-        json={
-            "intent": fixture["intent"],
-            "preferences": {},
-        },
-    )
-    assert resp.status_code == 202
-    orch_id = resp.json()["orchestration_id"]
-    status = client.get(f"/orchestration/{orch_id}")
-    assert status.status_code == 200
-    payload = status.json()
-    assert payload["status"] in {
-        "complete",
-        "pending",
-        "parsing",
-        "failed",
-    }

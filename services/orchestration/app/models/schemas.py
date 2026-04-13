@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -22,14 +22,14 @@ class ResearchIntent(BaseModel):
 
 class GeneratedExperiment(BaseModel):
     experiment_id: str
+    application_type: Literal["shell", "browser"] = "shell"
     capacity_mbps: float
     latency_ms: float
     loss_rate: float = 0.0
-    application: str
     duration_seconds: int = 60
     num_trials: int = 1
     cc_algorithm: str = "cubic"
-    aqm_policy: str = "fq_codel"
+    aqm_policy: str = "pfifo"
     ctp_cluster: Optional[str] = None
     reasoning: str = ""
 

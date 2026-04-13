@@ -461,11 +461,9 @@ class ToolRouter:
             ),
             "latency_ms": float(experiment_spec["latency_ms"]),
             "latency_location": experiment_spec.get("latency_location", "both"),
-            "qdisc": experiment_spec.get("aqm_policy", "fq_codel"),
+            "qdisc": experiment_spec.get("aqm_policy", "pfifo"),
             "buffer_packets": int(experiment_spec.get("buffer_packets", 1000)),
-            "qdisc_params": experiment_spec.get(
-                "qdisc_params", {"target": "5ms", "interval": "100ms"}
-            ),
+            "qdisc_params": experiment_spec.get("qdisc_params"),
         }
 
         experiment_result = self.clients.run_experiment(experiment_spec)

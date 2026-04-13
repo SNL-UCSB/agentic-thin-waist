@@ -1,19 +1,22 @@
-"""Intent + OpenClaw endpoints and orchestration execution pipeline (Steps 8-10)."""
+"""Intent + OpenClaw endpoints and orchestration execution pipeline (Steps 8-10).
+
+The ``process_intent`` background task delegates to the LangGraph-based
+OrchestratorAgent which runs:
+
+    parse_intent → generate_experiments → execute_experiments → respond
+"""
 
 import uuid
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 
-from app.engine.executor import DownstreamClients
 from app.engine.orchestration_store import load_orchestration, save_orchestration
-from app.engine.orchestration_manager import OrchestrationManager
+from app.agent.orchestrator import OrchestratorAgent
 from app.models.schemas import (
     ResearchIntent,
     OrchestrationResponse,
     OrchestrationProgress,
     OrchestrationStatus,
 )
-from app.engine.intent_parser import IntentParser
-from app.engine.claude_client import ClaudeClient
 from app.engine.tools import load_tools
 from app.engine.skills import load_skills, SkillExecutor
 
@@ -125,73 +128,57 @@ async def submit_intent(request: ResearchIntent, background_tasks: BackgroundTas
 
 
 def process_intent(orch_id: str, request: ResearchIntent) -> None:
-    """Background task: parse intent → OrchestrationManager (dispatch + aggregate)."""
+    """Background task: run the full pipeline via the LangGraph OrchestratorAgent.
+
+    The agent graph handles parsing, experiment generation, execution, and
+    orchestration-store persistence internally.
+    """
     orch = load_orchestration(orch_id)
     if orch is None:
         print(f"[INTENT {orch_id}] ERROR: orchestration record not found in store")
         return
+
     try:
         use_examples = bool(request.preferences.get("use_examples", True))
+        max_parallel = int(request.preferences.get("max_parallel_workers", 1))
 
-        # 1. Parse intent
         print(f"\n{'#'*60}")
-        print(f"[INTENT {orch_id}] Step 1/2: Parsing intent via Claude …")
+        print(f"[INTENT {orch_id}] Running LangGraph OrchestratorAgent …")
         print(f"[INTENT {orch_id}]   intent: {request.intent!r}")
         print(f"[INTENT {orch_id}]   use_examples={use_examples}")
-        print(f"{'#'*60}")
-        orch["status"] = OrchestrationStatus.parsing
-        save_orchestration(orch)
-        claude = ClaudeClient()
-        parser = IntentParser(claude)
-        parsed = parser.parse(request.intent, use_examples=use_examples)
-        experiments_in_parsed = parsed.get("experiments", [])
-        print(
-            f"[INTENT {orch_id}] Intent parsed → "
-            f"{len(experiments_in_parsed)} experiment(s) in parsed output"
-        )
-        if experiments_in_parsed:
-            for i, e in enumerate(experiments_in_parsed):
-                print(
-                    f"[INTENT {orch_id}]   parsed[{i}] app={e.get('application')}  "
-                    f"capacity={e.get('capacity_mbps')} Mbps  "
-                    f"latency={e.get('latency_ms')} ms  cc={e.get('cc_algorithm')}"
-                )
-        orch["reasoning_steps"].append(
-            {
-                "step": 1,
-                "action": "parse_intent",
-                "input": {"intent": request.intent},
-                "output": parsed,
-                "reasoning": parsed.get("reasoning", ""),
-            }
-        )
-        save_orchestration(orch)
-
-        # 2. Connectivity-centric dispatch (generate specs, workers, CTP, run).
-        max_parallel = int(request.preferences.get("max_parallel_workers", 1))
-        print(f"\n{'#'*60}")
-        print(f"[INTENT {orch_id}] Step 2/2: Running OrchestrationManager …")
         print(f"[INTENT {orch_id}]   max_parallel_workers={max_parallel}")
         print(f"{'#'*60}")
-        mgr = OrchestrationManager(max_parallel_workers=max_parallel)
-        result = mgr.run(orch_id, request.intent, parsed)
-        final_status = result.get("status", OrchestrationStatus.failed)
-        orch["status"] = final_status
-        orch["experiments"] = result.get("experiment_specs", [])
-        orch["results"] = result.get("results", [])
-        orch["reasoning_steps"].append(
-            {
-                "step": 2,
-                "action": "run_orchestration_manager",
-                "input": {"intent": request.intent},
-                "output": result.get("summary", {}),
-                "reasoning": "Connectivity-centric dispatch via OrchestrationManager.",
-            }
+
+        workflow = request.context.get("workflow") or {}
+
+        agent = OrchestratorAgent()
+        result = agent.run(
+            orch_id,
+            request.intent,
+            workflow,
+            use_examples=use_examples,
+            max_parallel_workers=max_parallel,
         )
+
+        orch_result = result.get("orchestration_result") or {}
+        final_status = orch_result.get("status", "failed")
+        if final_status == "complete":
+            final_status = OrchestrationStatus.complete
+        else:
+            final_status = OrchestrationStatus.failed
+
+        orch["status"] = final_status
+        orch["experiments"] = result.get("experiments", [])
+        orch["results"] = orch_result.get("results", [])
+        orch["reasoning_steps"] = result.get("reasoning_steps", [])
+        if orch_result.get("error"):
+            orch["error"] = orch_result["error"]
         save_orchestration(orch)
+
+        summary = orch_result.get("summary", {})
         print(
             f"\n[INTENT {orch_id}] DONE — final status={final_status}  "
-            f"summary={result.get('summary', {})}"
+            f"summary={summary}"
         )
 
     except Exception as e:

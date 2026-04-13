@@ -36,13 +36,13 @@ def test_generated_experiment_defaults_and_types():
         experiment_id="exp-1",
         capacity_mbps=10.0,
         latency_ms=50.0,
-        application="youtube",
     )
+    assert exp.application_type == "shell"
     assert exp.loss_rate == 0.0
     assert exp.duration_seconds == 60
     assert exp.num_trials == 1
     assert exp.cc_algorithm == "cubic"
-    assert exp.aqm_policy == "fq_codel"
+    assert exp.aqm_policy == "pfifo"
     assert exp.ctp_cluster is None
     assert exp.reasoning == ""
 
@@ -53,7 +53,6 @@ def test_generated_experiment_rejects_invalid_types():
             experiment_id="exp-1",
             capacity_mbps="not-a-float",  # type: ignore[arg-type]
             latency_ms=50.0,
-            application="youtube",
         )
     except ValidationError as exc:
         assert "capacity_mbps" in str(exc)

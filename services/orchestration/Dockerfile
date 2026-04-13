@@ -11,6 +11,6 @@ COPY services/orchestration/ .
 COPY shared/ shared/
 
 # /app/app is added so that `netgent.src.*` absolute imports resolve correctly
-ENV PYTHONPATH="/app/app:${PYTHONPATH:-}"
+ENV PYTHONPATH="/app/app:/app/shared:${PYTHONPATH:-}"
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8005"]
