@@ -511,53 +511,40 @@ def _run_experiment_on_worker(
                 "Skipping PCAP pull to telemetry: no telemetry result_id (telemetry disabled or POST /results failed)"
             )
 
-    run_ok = "run" in thread_results
-    replay_ok = "replay" in thread_results and "error" not in result.get("replay", {})
-    capture_ok = capture_status.get("status") == "finished"
-
-    telemetry_ok = True
-    telemetry_r = None
+    # Keep experiment success criteria aligned with previous behavior:
+    # workflow completion determines success/failure, while replay/capture/telemetry
+    # issues are retained as warnings in the result payload.
     if "run" in thread_results:
         result["run"] = thread_results["run"]
-        run_tel = thread_results["run"].get("telemetry")
-        if isinstance(run_tel, dict):
-            telemetry_r = run_tel
-            telemetry_ok = bool(run_tel.get("result_id")) and not run_tel.get("error")
-
-    artifact_ok = True
-    if "telemetry_pcap_artifact" in result:
-        artifact_r = result.get("telemetry_pcap_artifact") or {}
-        artifact_ok = artifact_r.get("status") == "stored"
-    elif telemetry_r and telemetry_r.get("result_id"):
-        # If telemetry result exists, we expect to attempt artifact upload.
-        artifact_ok = False
-
-    failure_reasons: list[str] = []
-    if not run_ok:
-        failure_reasons.append(thread_errors.get("run", "workflow thread did not complete"))
-    if not replay_ok:
-        failure_reasons.append(
-            (result.get("replay") or {}).get("error", "replay did not start successfully")
-        )
-    if not capture_ok:
-        failure_reasons.append(
-            f"capture status is {capture_status.get('status', 'unknown')}"
-        )
-    if not telemetry_ok:
-        failure_reasons.append("telemetry result was not persisted")
-    if not artifact_ok:
-        failure_reasons.append("pcap artifact was not stored in telemetry")
-
-    if failure_reasons:
-        err = "; ".join(str(r) for r in failure_reasons if r)
+        result["status"] = "success"
+        logger.info("Worker %s: experiment %s succeeded", worker.worker_id, exp_id)
+        print(f"[STEP 3/4] Experiment {exp_id} → SUCCESS")
+    else:
+        err = thread_errors.get("run", "workflow thread did not complete")
+        result["run"] = {"error": err}
         result["status"] = "failed"
         result["error"] = err
         logger.error("Worker %s: experiment %s failed: %s", worker.worker_id, exp_id, err)
         print(f"[STEP 3/4] Experiment {exp_id} → FAILED: {err}")
-    else:
-        result["status"] = "success"
-        logger.info("Worker %s: experiment %s succeeded", worker.worker_id, exp_id)
-        print(f"[STEP 3/4] Experiment {exp_id} → SUCCESS")
+
+    warnings: list[str] = []
+    replay_issue = (result.get("replay") or {}).get("error")
+    if replay_issue:
+        warnings.append(f"replay_issue: {replay_issue}")
+    if capture_status.get("status") != "finished":
+        warnings.append(
+            f"capture_issue: status={capture_status.get('status', 'unknown')}"
+        )
+    telemetry_r = (result.get("run") or {}).get("telemetry")
+    if isinstance(telemetry_r, dict) and telemetry_r.get("error"):
+        warnings.append(f"telemetry_issue: {telemetry_r.get('error')}")
+    artifact_r = result.get("telemetry_pcap_artifact") or {}
+    if artifact_r and artifact_r.get("status") != "stored":
+        warnings.append(
+            f"pcap_artifact_issue: {artifact_r.get('detail', artifact_r.get('status'))}"
+        )
+    if warnings:
+        result["warnings"] = warnings
 
     return result
 
