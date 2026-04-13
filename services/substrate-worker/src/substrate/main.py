@@ -3,10 +3,11 @@ import subprocess
 import time
 import uuid
 from datetime import datetime
-from typing import Dict, List, Literal, Optional
+from typing import Annotated, Dict, List, Literal, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Header
 from pydantic import BaseModel, Field
+from starlette.responses import FileResponse
 
 # =========================
 # Global variables
@@ -34,7 +35,10 @@ def startup_check():
     tcpreplay = _cmd_available("tcpreplay")
     qdisc = _check_qdisc_support() if tc else False
     interfaces = _get_interfaces()
-    healthy = all([root, tc, tshark, tcpreplay, qdisc])
+    ctp_dir = (CTP_DIR or "").strip()
+    capture_dir = (CAPTURE_DIR or "").strip()
+    path_config_valid = bool(ctp_dir and capture_dir)
+    healthy = all([root, tc, tshark, tcpreplay, qdisc, path_config_valid])
 
     HEALTH_CACHE = {
         "status": "ok" if healthy else "degraded",
@@ -43,6 +47,9 @@ def startup_check():
         "tshark_available": tshark,
         "tcpreplay_available": tcpreplay,
         "qdisc_support": qdisc,
+        "ctp_dir": ctp_dir or "(unset)",
+        "capture_dir": capture_dir or "(unset)",
+        "path_config_valid": path_config_valid,
         "interfaces": interfaces,
     }
 
@@ -146,6 +153,9 @@ class HealthResponse(BaseModel):
     tshark_available: bool
     tcpreplay_available: bool
     qdisc_support: bool
+    ctp_dir: str
+    capture_dir: str
+    path_config_valid: bool
     interfaces: List[str]
     timestamp: str
 
@@ -682,6 +692,14 @@ def shape(cfg: ShapeRequest) -> ShapeResponse:
 
 @app.post("/capture", response_model=CaptureResponse)
 def start_capture(cfg: CaptureRequest) -> CaptureResponse:
+    if not (CAPTURE_DIR or "").strip():
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "CAPTURE_DIR is empty. Set CAPTURE_DIR (or SUBSTRATE_CAPTURE_DIR in compose) "
+                "to a writable directory path."
+            ),
+        )
     os.makedirs(CAPTURE_DIR, exist_ok=True)
     safe_name = os.path.basename(cfg.filename).strip()
     if not safe_name:
@@ -781,6 +799,52 @@ def get_capture(capture_id: str) -> CaptureStatusResponse:
     )
 
 
+def _require_capture_download_token(
+    x_capture_download_token: Optional[str],
+) -> None:
+    expected = (os.environ.get("CAPTURE_DOWNLOAD_TOKEN") or "").strip()
+    if not expected:
+        return
+    if not x_capture_download_token or x_capture_download_token.strip() != expected:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or missing X-Capture-Download-Token header",
+        )
+
+
+@app.get("/capture/{capture_id}/pcap")
+def download_capture_pcap(
+    capture_id: str,
+    x_capture_download_token: Annotated[
+        Optional[str], Header(alias="X-Capture-Download-Token")
+    ] = None,
+):
+    """Download the PCAP for a finished capture (for orchestrator pull to telemetry)."""
+    _require_capture_download_token(x_capture_download_token)
+    session = ACTIVE_CAPTURES.get(capture_id)
+    if session is None:
+        raise HTTPException(
+            status_code=404, detail=f"Capture session not found: {capture_id}"
+        )
+    proc: subprocess.Popen = session["process"]
+    if proc.poll() is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Capture still running; PCAP not finalized",
+        )
+    pcap_path = session["pcap_path"]
+    if not os.path.isfile(pcap_path):
+        raise HTTPException(
+            status_code=404,
+            detail=f"PCAP file not found at {pcap_path}",
+        )
+    return FileResponse(
+        pcap_path,
+        media_type="application/vnd.tcpdump.pcap",
+        filename=os.path.basename(pcap_path),
+    )
+
+
 @app.delete("/capture/{capture_id}")
 def delete_capture(capture_id: str):
     session = ACTIVE_CAPTURES.get(capture_id)
@@ -825,6 +889,14 @@ def health() -> HealthResponse:
 
 @app.post("/replay", response_model=ReplayResponse)
 def start_replay(cfg: ReplayRequest) -> ReplayResponse:
+    if not (CTP_DIR or "").strip():
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "CTP_DIR is empty. Set CTP_DIR (or SUBSTRATE_CTP_DIR in compose) "
+                "to a directory containing download/upload CTP files."
+            ),
+        )
     download_path = f"{CTP_DIR}/download/{cfg.ctp_file}.pcap"
     upload_path = f"{CTP_DIR}/upload/{cfg.ctp_file}.pcap"
 
@@ -832,7 +904,9 @@ def start_replay(cfg: ReplayRequest) -> ReplayResponse:
     if missing:
         raise HTTPException(
             status_code=400,
-            detail=f"CTP file(s) not found: {', '.join(missing)}",
+            detail=(
+                f"CTP file(s) not found under CTP_DIR={CTP_DIR}: {', '.join(missing)}"
+            ),
         )
 
     def _build_cmd(ns: str, iface: str, pcap_path: str) -> str:
@@ -1044,6 +1118,14 @@ def fetch_ctp_endpoint(req: CtpFetchRequest) -> CtpFetchResponse:
         raise HTTPException(status_code=404, detail=str(exc))
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
+    except OSError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                f"Failed writing CTP files under CTP_DIR={CTP_DIR}: {exc}. "
+                "Ensure the CTP directory is writable by substrate-worker."
+            ),
+        )
 
     return CtpFetchResponse(status="ok", **result)
 

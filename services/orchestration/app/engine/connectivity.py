@@ -625,6 +625,11 @@ class ConnectivityManager:
         telemetry_save: dict[str, Any] | None = None
         if resolved_telemetry_url:
             exp_id = experiment_id or f"connectivity-{uuid.uuid4().hex[:12]}"
+            # Keep `application` compact for telemetry indexing; verbose workflow
+            # text is preserved in contextual_tree.
+            app_label = (application or runtime or "unknown").strip()
+            if len(app_label) > 256:
+                app_label = app_label[:256]
             telemetry_payload = {
                 "experiment_id": exp_id,
                 "status": (
@@ -651,6 +656,7 @@ class ConnectivityManager:
                         "runtime": runtime,
                     },
                 },
+                "application": app_label,
                 "qoe_metrics": workflow_result,
                 "transport_state": {},
                 "pcap_path": "",
@@ -660,7 +666,14 @@ class ConnectivityManager:
                     tel_resp = client.post(
                         f"{resolved_telemetry_url}/results", json=telemetry_payload
                     )
-                telemetry_save = tel_resp.json()
+                if tel_resp.status_code >= 400:
+                    telemetry_save = {
+                        "error": f"HTTP {tel_resp.status_code}",
+                        "body": (tel_resp.text or "")[:2000],
+                        "stored": False,
+                    }
+                else:
+                    telemetry_save = tel_resp.json()
                 logger.info(
                     "Telemetry saved for experiment %s (HTTP %s)",
                     exp_id,
