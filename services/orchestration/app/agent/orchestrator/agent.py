@@ -160,49 +160,25 @@ def shell_workflow(state: OrchestratorState) -> dict[str, Any]:
         return {"workflow": existing}
 
     print(f"[AGENT {orchestration_id}] Routing → shell workflow agent")
-    try:
-        from clients.netgent.src.main import NetGent
+    from clients.netgent.src.main import NetGent
 
-        agent = create_shell_agent()
-        result = agent.invoke(
-            {
-                "intent": state["intent"],
-                "workflow": {},
-                "chosen_workflow": None,
-                "parameters": None,
-                "reasoning": "",
-                "messages": [],
-            },
-            context=ShellWorkflowContext(netgent=NetGent()),
-        )
-        return {
-            "workflow": result.get("workflow") or {},
-            "workflow_parameters": result.get("parameters"),
-            "workflow_reasoning": result.get("reasoning"),
-        }
-    except Exception as exc:
-        # Keep orchestration operable when optional NetGent/GCP credentials are missing.
-        print(
-            f"[AGENT {orchestration_id}] shell workflow agent unavailable, "
-            f"falling back to built-in ping workflow: {exc}"
-        )
-        fallback = {
-            "specification": "default",
-            "states": [
-                {
-                    "checks": [],
-                    "actions": [
-                        {"type": "ping", "params": {"host": "8.8.8.8", "count": 3}}
-                    ],
-                    "end_state": "done",
-                }
-            ],
-        }
-        return {
-            "workflow": fallback,
-            "workflow_parameters": None,
-            "workflow_reasoning": f"fallback_workflow_used: {exc}",
-        }
+    agent = create_shell_agent()
+    result = agent.invoke(
+        {
+            "intent": state["intent"],
+            "workflow": {},
+            "chosen_workflow": None,
+            "parameters": None,
+            "reasoning": "",
+            "messages": [],
+        },
+        context=ShellWorkflowContext(netgent=NetGent()),
+    )
+    return {
+        "workflow": result.get("workflow") or {},
+        "workflow_parameters": result.get("parameters"),
+        "workflow_reasoning": result.get("reasoning"),
+    }
 
 
 def browser_workflow(state: OrchestratorState) -> dict[str, Any]:
