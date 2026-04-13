@@ -421,8 +421,7 @@ async def input_text(
         pass
 
     try:
-        await locator.evaluate(
-            """
+        await locator.evaluate("""
             (el) => {
                 if ('value' in el) {
                     el.value = '';
@@ -431,8 +430,7 @@ async def input_text(
                     el.textContent = '';
                 }
             }
-            """
-        )
+            """)
         await locator.click(timeout=timeout_ms)
         await page.keyboard.type(text)
         return {
@@ -458,8 +456,7 @@ async def input_text(
         pass
 
     try:
-        await locator.evaluate(
-            """
+        await locator.evaluate("""
             (el) => {
                 if ('value' in el) {
                     el.value = '';
@@ -468,8 +465,7 @@ async def input_text(
                     el.textContent = '';
                 }
             }
-            """
-        )
+            """)
         await locator.type(text, delay=5, timeout=5_000)
         return {
             "selector": selector,

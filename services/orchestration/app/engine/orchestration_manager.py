@@ -524,9 +524,7 @@ def _run_experiment_on_worker(
         result["run"] = {"error": err}
         result["status"] = "failed"
         result["error"] = err
-        logger.error(
-            "Worker %s: experiment %s failed: %s", worker.worker_id, exp_id, err
-        )
+        logger.error("Worker %s: experiment %s failed: %s", worker.worker_id, exp_id, err)
         print(f"[STEP 3/4] Experiment {exp_id} → FAILED: {err}")
 
     warnings: list[str] = []
