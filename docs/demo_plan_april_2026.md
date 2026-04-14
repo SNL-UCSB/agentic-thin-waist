@@ -104,56 +104,57 @@ This is the data that enables:
 
 ## Example 04: Capacity Sweep
 
-**Intent:** `"Measure YouTube streaming quality at 2, 5, 10, and 25 Mbps with 50ms latency"`
+**Intent:** `"Run NDT speed test at 2, 5, 10, and 25 Mbps with 50ms latency"`
 
-**What it demonstrates:** One intent generates a parameter sweep across capacities. YouTube's adaptive bitrate algorithm responds differently at each capacity level. The platform handles the combinatorics; the researcher thinks about the question.
+**What it demonstrates:** One intent generates a parameter sweep across capacities. The platform handles the combinatorics; the researcher thinks about the question.
 
-**Workflow type:** Browser (YouTube)
+**Workflow type:** Shell (NDT)
 
-**Why YouTube for the sweep (not iperf3):** iperf3 at different capacities is boring — it just reports the cap. YouTube is interesting because its ABR algorithm makes different decisions at different capacities: lower resolutions at 2 Mbps, 720p at 5 Mbps, 1080p at 10 Mbps, etc. This shows the platform generating data about real application adaptation to network conditions — the core scientific use case.
+**Why NDT for the sweep:** NDT is the default measurement tool. At each capacity, NDT's throughput estimation algorithm interacts differently with the bottleneck — at 2 Mbps the link is heavily congested by cross-traffic, at 25 Mbps there's headroom. The sweep reveals how NDT's reported throughput tracks (or diverges from) the configured capacity under realistic dynamic pressure.
 
 **What to validate:**
 - Four experiments generated (2, 5, 10, 25 Mbps)
 - Each gets a CTP matched to its capacity band
-- YouTube throughput in PCAP scales with capacity (but not linearly — ABR is step-wise)
-- Telemetry results show a progression: as capacity increases, measured throughput and video quality metrics improve
+- NDT-reported throughput scales with capacity but is consistently below it (cross-traffic effect)
+- Telemetry results show a progression: as capacity increases, measured throughput increases
 - The static/dynamic decomposition is visible: capacity varies (static), CTP intensity matches (dynamic), latency is constant
 
 ---
 
 ## Example 05: Fidelity Validation
 
-**Intent:** `"Run YouTube at 10 Mbps with 50ms latency, 5 trials"`
+**Intent:** `"Run iperf3 at 10 Mbps with 50ms latency, 5 trials"`
 
 **What it demonstrates:** Same experiment, same conditions, five times. Results are consistent. This is what makes the platform a scientific instrument.
 
-**Workflow type:** Browser (YouTube)
+**Workflow type:** Shell (iperf3)
 
-**Why YouTube for fidelity (not iperf3):** Proving reproducibility with iperf3 is trivial — it's a deterministic tool. Proving reproducibility with YouTube is meaningful — it's a real application making adaptive decisions based on network feedback. If five YouTube runs under identical bottleneck conditions produce similar throughput time series, that demonstrates the platform provides controlled, reproducible conditions even for complex, non-deterministic applications.
+**Why iperf3 for fidelity (not NDT or YouTube):** Fidelity validation requires a predictable application — you need to isolate platform variance from application variance. iperf3 is deterministic: same parameters, same TCP behavior, no adaptive algorithms. If five iperf3 runs produce tight throughput time series under the same bottleneck + CTP, that proves the *platform* is reproducible. NDT and YouTube add their own non-determinism (server selection, ABR adaptation), which muddies the signal when you're trying to validate the infrastructure.
 
 **What to validate:**
 - Five trials complete independently
 - Throughput time series extracted from each PCAP (100ms bins)
 - Wasserstein distance between all pairs of trials < established threshold
 - Visual: overlay of 5 time series shows tight spread with bounded stochastic variation
-- "Same intent, same spec, same bottleneck — consistent results even for adaptive applications"
+- "Same intent, same spec, same bottleneck — tight reproducibility because the application is deterministic and the platform is controlled"
 
 ---
 
 ## Example 06: Cross-Substrate Portability (stretch)
 
-**Intent:** Same as Example 02 (YouTube at 10 Mbps)
+**Intent:** Same as Example 02 (NDT at 10 Mbps)
 
 **What it demonstrates:** The same experiment specification produces consistent results on local Docker and AWS. The spec is the thin waist; the substrate is interchangeable.
+
+**Workflow type:** Shell (NDT)
 
 **Two runs:**
 - `./run_local.sh` — `CONNECTIVITY_BACKEND=local_docker`
 - `./run_aws.sh` — `CONNECTIVITY_BACKEND=aws` (requires AWS credentials + configured backend)
 
 **What to validate:**
-- Both runs complete
-- Measured throughput and latency are consistent within fidelity bounds from Example 05
-- The experiment spec JSON is identical between the two runs — only the backend config changes
+- Both runs complete with identical experiment spec JSON — only the backend config changes
+- NDT-reported throughput and latency are consistent within fidelity bounds from Example 05
 
 ---
 
@@ -163,10 +164,10 @@ This is the data that enables:
 |---------|---------------|-------------|----------------|
 | 01 | Plumbing works | iperf3 (shell) | Intent → data pipeline |
 | 02 | Different tool, same bottleneck | NDT (shell) | Same spec, different measurement methodology — do they agree? |
-| **03** | **The headline** | **iperf3 + NDT + YouTube + page load** | **Same bottleneck, many apps — the composability that matters** |
-| 04 | Sweeps work | YouTube × 4 capacities | Parameter variation, ABR adaptation visible |
-| 05 | Reproducibility works | YouTube × 5 trials | Fidelity proof for non-deterministic apps |
-| 06 | Portability works | YouTube on local + AWS | Thin waist = portable spec |
+| **03** | **The headline** | **NDT + iperf3 + YouTube + page load** | **Same bottleneck, many apps — the composability that matters** |
+| 04 | Sweeps work | NDT × 4 capacities | Parameter variation, throughput vs. capacity under cross-traffic |
+| 05 | Reproducibility works | iperf3 × 5 trials | Fidelity proof with deterministic app (isolate platform variance) |
+| 06 | Portability works | NDT on local + AWS | Thin waist = portable spec |
 
 Examples 01 and 02 are setup. **Example 03 is the money shot** — it demonstrates the capability that no existing tool provides: diverse applications generating traffic through the exact same replicable bottleneck link. If you only have time to show one example to a stakeholder, show 03. Everything else is either building blocks (01, 02) or extensions (04, 05, 06).
 
