@@ -207,18 +207,34 @@ Each example is a self-contained directory under `examples/`. Every directory ha
 
 **Goal:** Prove that the experiment specification — not the infrastructure it runs on — determines the results. The same specification should produce equivalent data whether it runs on your laptop or on cloud infrastructure.
 
-**What you'll do:** Run the same experiment from Example 06 (iperf3 + NDT, 5 trials each, same network conditions) on two different substrates: local Docker and AWS. Compare the fidelity of locally generated data against cloud-generated data.
+**What you'll do:** Submit the same experiment from Example 06 (iperf3 + NDT, 5 trials each, same network conditions), but tell the platform to run it on two different infrastructures: local Docker and AWS. The experiment description is identical — only the infrastructure preference changes. One orchestrator, two requests.
 
-**Intent:** Same as Example 06.
+**Design principle being tested:** The choice of where to run an experiment is separate from the experiment itself. It is a *deployment preference*, not part of the scientific specification. The researcher should never need to restart the platform or use a different script to change where experiments execute. They express the preference in the request; the platform handles the rest.
 
-**Two runs:**
-```bash
-./run_local.sh    # Runs on local Docker (your laptop)
-./run_aws.sh      # Runs on AWS (cloud infrastructure)
+**Intent (local run):**
+```json
+{
+  "intent": "Run iperf3 and NDT at 10 Mbps with 50ms latency with moderate cross-traffic, 5 trials each",
+  "preferences": {
+    "infrastructure": "local"
+  }
+}
 ```
 
+**Intent (AWS run):**
+```json
+{
+  "intent": "Run iperf3 and NDT at 10 Mbps with 50ms latency with moderate cross-traffic, 5 trials each",
+  "preferences": {
+    "infrastructure": "aws"
+  }
+}
+```
+
+The `intent` field is identical. The `preferences.infrastructure` field is the only difference. The orchestrator dispatches to the appropriate backend, tags the results with the infrastructure that produced them, and stores everything in the same telemetry service.
+
 **What to expect:**
-- The experiment specification is identical between the two runs — only the infrastructure backend changes
+- Both requests complete through the same orchestrator, same telemetry, same result schema
 - For each application, compare three Wasserstein distances:
   - **Within-local:** variance across the 5 local trials (from Example 06)
   - **Within-AWS:** variance across the 5 AWS trials
@@ -228,7 +244,7 @@ Each example is a self-contained directory under `examples/`. Every directory ha
 - If across-substrate Wasserstein ≈ within-substrate Wasserstein, the specification layer is doing its job — the data is equivalent regardless of where it was generated. The infrastructure is interchangeable.
 - If across-substrate Wasserstein >> within-substrate Wasserstein, the two substrates are introducing systematic differences (different kernel versions, different NIC drivers, different timing behavior) that the specification layer does not fully abstract away. This is a finding, not a failure — it tells us where the abstraction has limits.
 
-**The punchline:** The experiment specification is the "thin waist" of the platform — the narrow interface between what you want to measure and where you measure it. If the Wasserstein distances are comparable across substrates, that interface is holding. The same specification, the same data, regardless of the machine underneath.
+**Implementation note:** The current codebase selects the infrastructure backend via an environment variable (`CONNECTIVITY_BACKEND`) set at orchestrator startup, which means the orchestrator can only talk to one backend at a time. This example requires a small refactor: the `OrchestrationManager` should accept a registry of available backends and select per-experiment based on `preferences.infrastructure`. The `ConnectivityManager` constructor already accepts a `backend` parameter — the change is wiring it to the intent's preferences instead of a global env var. This is the first concrete step toward the constraint mapping problem described in the platform vision: the orchestrator must be able to reason about which infrastructure can satisfy which experiment.
 
 ---
 
