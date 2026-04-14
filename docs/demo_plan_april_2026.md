@@ -50,27 +50,24 @@ Each directory contains:
 
 ---
 
-## Example 02: YouTube Under Pressure
+## Example 02: NDT Speed Test Under Controlled Conditions
 
-**Intent:** `"Watch a YouTube video at 10 Mbps with 50ms latency for 60 seconds"`
+**Intent:** `"Run an NDT speed test at 10 Mbps with 50ms latency"`
 
-**What it demonstrates:** The platform runs real browser-based applications, not just CLI tools. A Playwright-driven browser navigates to YouTube, watches a video for 60 seconds, and does so through a controlled bottleneck with real cross-traffic — all from the same intent interface.
+**What it demonstrates:** The platform runs a real-world speed test tool — not just raw iperf3 — through a controlled bottleneck with known ground truth. NDT is a different measurement methodology from iperf3 (different server, different algorithm, different protocol stack), yet it runs through the exact same bottleneck spec. This is the first step beyond "hello world" — a tool that researchers actually use in the wild, now with ground truth.
 
-**Workflow type:** Browser (YouTube via Playwright/Browserless)
+**Workflow type:** Shell (NDT via ndt-client)
 
-**Why this matters:** This is the differentiator. Anybody can run iperf3 with tc. Running YouTube through a controlled, reproducible bottleneck with synchronized packet capture — that requires the full thin waist pipeline: orchestrator → NetGent browser workflow → substrate worker (shaping + Browserless) → CTP replay → tshark capture → telemetry.
+**Why NDT here (not YouTube yet):** NDT is a shell workflow like iperf3, so it doesn't add the Browserless dependency. But it uses a completely different measurement methodology — NDT has its own throughput estimation algorithm, its own server infrastructure (M-Lab), and its own protocol behavior. Running NDT and iperf3 through the same bottleneck immediately surfaces the question: do they agree on capacity? If not, why? This is exactly the diagnostic question that motivates KC and Ricky's RABBIT work, and it requires no browser to demonstrate.
 
 **What to validate:**
-- Pipeline completes with `runtime == "browser"`
-- PCAP contains YouTube video traffic (QUIC/HTTPS to Google IPs)
-- Shaping is reflected: throughput in PCAP is bounded by configured capacity
-- Cross-traffic from CTP is interleaved in the capture
-- The same bottleneck spec that ran iperf3 in Example 01 now runs YouTube — same spec language, different application, same infrastructure
+- Pipeline completes with a different workflow than Example 01 (NDT, not iperf3)
+- Same bottleneck config as Example 01 (10 Mbps, 50ms) — proving the spec language works across tools
+- NDT-reported throughput may differ from iperf3-reported throughput under identical conditions — this difference IS the interesting finding
+- PCAP captures NDT traffic (TCP to M-Lab servers) interleaved with CTP cross-traffic
+- Telemetry stores both Example 01 and Example 02 results, queryable side by side
 
-**What to observe in the PCAP (screenshot opportunity):**
-- Application traffic (YouTube QUIC streams) and cross-traffic (CTP replay) sharing the bottleneck
-- Throughput time series showing YouTube's adaptive bitrate responding to the capacity constraint
-- This is data that does not exist in any public dataset — real application behavior under known, controlled, reproducible network conditions
+**What to observe:** Compare the iperf3 result from Example 01 and the NDT result from Example 02 — same bottleneck, different tool, potentially different answer. The platform provides the controlled conditions that make this comparison meaningful.
 
 ---
 
@@ -165,7 +162,7 @@ This is the data that enables:
 | Example | What It Proves | Application | Key Capability |
 |---------|---------------|-------------|----------------|
 | 01 | Plumbing works | iperf3 (shell) | Intent → data pipeline |
-| 02 | Real apps work | YouTube (browser) | Browser workflows under controlled bottleneck |
+| 02 | Different tool, same bottleneck | NDT (shell) | Same spec, different measurement methodology — do they agree? |
 | **03** | **The headline** | **iperf3 + NDT + YouTube + page load** | **Same bottleneck, many apps — the composability that matters** |
 | 04 | Sweeps work | YouTube × 4 capacities | Parameter variation, ABR adaptation visible |
 | 05 | Reproducibility works | YouTube × 5 trials | Fidelity proof for non-deterministic apps |
