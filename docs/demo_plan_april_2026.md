@@ -205,46 +205,66 @@ Each example is a self-contained directory under `examples/`. Every directory ha
 
 ## Example 07: Execution and Infrastructure Decoupling
 
-**Goal:** Prove that the experiment specification — not the infrastructure it runs on — determines the results. The same specification should produce equivalent data whether it runs on your laptop or on cloud infrastructure.
+**Goal:** Prove that the experiment specification — not the machine it runs on — determines the results. The same specification should produce equivalent data whether the experiment executes on your laptop or on a cloud server.
 
-**What you'll do:** Submit the same experiment from Example 06 (iperf3 + NDT, 5 trials each, same network conditions), but tell the platform to run it on two different infrastructures: local Docker and AWS. The experiment description is identical — only the infrastructure preference changes. One orchestrator, two requests.
+**How the platform's service placement works:** The platform has two categories of services:
 
-**Design principle being tested:** The choice of where to run an experiment is separate from the experiment itself. It is a *deployment preference*, not part of the scientific specification. The researcher should never need to restart the platform or use a different script to change where experiments execute. They express the preference in the request; the platform handles the rest.
+1. **Stationary services** — the orchestrator (which parses your intent and coordinates everything), the background traffic corpus (which stores reusable traffic profiles), the telemetry service (which stores results), and the workflow registry (which stores application definitions). These run wherever you set them up — typically your local machine or a lab server. They don't move per-experiment.
 
-**Intent (local run):**
+2. **Ephemeral execution workers** — the substrate workers that actually create the bottleneck link, replay background traffic, run the application, and capture packets. These are created fresh for each experiment and destroyed after. They are the only component whose placement changes.
+
+When you submit an experiment, the `execution_backend` preference tells the orchestrator where to place the execution worker. Everything else stays where it is. The orchestrator on your laptop talks to the same background traffic corpus, the same telemetry service, and the same workflow registry regardless of whether the execution worker is local or on AWS.
+
+**What you'll do:** Submit the same experiment from Example 06 twice — once with the execution worker running locally, once with it running on AWS.
+
+**Intent (local execution):**
 ```json
 {
   "intent": "Run iperf3 and NDT at 10 Mbps with 50ms latency with moderate cross-traffic, 5 trials each",
   "preferences": {
-    "infrastructure": "local"
+    "execution_backend": "local"
   }
 }
 ```
 
-**Intent (AWS run):**
+**Intent (AWS execution):**
 ```json
 {
   "intent": "Run iperf3 and NDT at 10 Mbps with 50ms latency with moderate cross-traffic, 5 trials each",
   "preferences": {
-    "infrastructure": "aws"
+    "execution_backend": "aws"
   }
 }
 ```
 
-The `intent` field is identical. The `preferences.infrastructure` field is the only difference. The orchestrator dispatches to the appropriate backend, tags the results with the infrastructure that produced them, and stores everything in the same telemetry service.
+The `intent` is identical. The `execution_backend` is the only difference. The orchestrator provisions the execution worker on the requested backend, the worker fetches its background traffic profile from the corpus service, runs the experiment, streams the packet capture to the telemetry service, and is destroyed. Results from both runs land in the same telemetry service, tagged by the backend that produced them.
 
 **What to expect:**
-- Both requests complete through the same orchestrator, same telemetry, same result schema
+- Both requests complete through the same orchestrator, same corpus, same telemetry, same result schema
 - For each application, compare three Wasserstein distances:
   - **Within-local:** variance across the 5 local trials (from Example 06)
   - **Within-AWS:** variance across the 5 AWS trials
-  - **Across-substrate:** local trials vs. AWS trials
+  - **Across-backend:** local trials vs. AWS trials
 
 **What "success" looks like:**
-- If across-substrate Wasserstein ≈ within-substrate Wasserstein, the specification layer is doing its job — the data is equivalent regardless of where it was generated. The infrastructure is interchangeable.
-- If across-substrate Wasserstein >> within-substrate Wasserstein, the two substrates are introducing systematic differences (different kernel versions, different NIC drivers, different timing behavior) that the specification layer does not fully abstract away. This is a finding, not a failure — it tells us where the abstraction has limits.
+- If across-backend Wasserstein ≈ within-backend Wasserstein, the specification layer is doing its job — the data is equivalent regardless of where it was generated. The execution location is interchangeable.
+- If across-backend >> within-backend, the two execution environments are introducing systematic differences (different kernel versions, different NIC drivers, different timing behavior). This is a finding, not a failure — it tells us where the abstraction has limits and what needs investigation.
 
-**Implementation note:** The current codebase selects the infrastructure backend via an environment variable (`CONNECTIVITY_BACKEND`) set at orchestrator startup, which means the orchestrator can only talk to one backend at a time. This example requires a small refactor: the `OrchestrationManager` should accept a registry of available backends and select per-experiment based on `preferences.infrastructure`. The `ConnectivityManager` constructor already accepts a `backend` parameter — the change is wiring it to the intent's preferences instead of a global env var. This is the first concrete step toward the constraint mapping problem described in the platform vision: the orchestrator must be able to reason about which infrastructure can satisfy which experiment.
+**Implementation status:** The connectivity layer (`connectivity.py`) already defines the backend abstraction with `LocalDockerBackend` fully implemented and `AWSBackend` stubbed. Currently, the backend is selected via an environment variable (`CONNECTIVITY_BACKEND`) set at orchestrator startup — meaning the orchestrator can only talk to one backend at a time. This example requires a refactor: the `OrchestrationManager` should accept a registry of available backends and select per-experiment based on `preferences.execution_backend`. The `ConnectivityManager` constructor already accepts a `backend` parameter — the change is wiring it to the intent's preferences instead of a global env var.
+
+**Future extension:** When the platform supports constrained infrastructure (campus testbeds, residential edge nodes), the preferences could grow to include per-service placement hints:
+```json
+{
+  "preferences": {
+    "placement": {
+      "execution_worker": "pinot-cluster",
+      "traffic_corpus": "snl-server-9",
+      "telemetry": "local"
+    }
+  }
+}
+```
+This is the constraint mapping problem described in the platform vision — the orchestrator reasons about which infrastructure can host which service and whether the experiment is feasible given the constraints. Example 07 is the first step: one service, two placement options, same results.
 
 ---
 
