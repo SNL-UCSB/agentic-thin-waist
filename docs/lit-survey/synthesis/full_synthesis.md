@@ -68,6 +68,8 @@ This thread BUILDS the evaluation substrate that all other threads assume exists
 
 **This is the only thread that addresses the infrastructure layer itself as a research contribution.**
 
+**The vertical trap:** When the infrastructure gap becomes acute, teams build domain-specific testbeds: Pantheon for congestion control, Puffer for ABR, NetSecBed (Bitzki et al., 2026) for cybersecurity dataset generation. These verticals share the same motivations — container-native execution, declarative specs, automated capture, reproducibility — but each serves one community and one application. NetSecBed's 60 attack containers cannot measure application QoE under controlled bottleneck regimes; Puffer cannot generate labeled security datasets. The composable backend subsumes these verticals by providing the shared infrastructure (controlled network conditions, automated capture, structured telemetry) as reusable services that any domain-specific experiment can plug into. The verticals prove the need; the thin waist is the horizontal that eliminates the need to keep rebuilding from scratch.
+
 ---
 
 ## 3. The Verification Wall
@@ -162,6 +164,8 @@ Evidence:
 - CWL: "reduced set of abstractions that are both used in practice and implemented in many systems"
 
 The thin waist is a **Minimal Experiment Specification** — a target-agnostic task graph specifying experimental parameters and success criteria without assuming the substrate.
+
+**Critical clarification: the thin waist is the spec layer, not the infrastructure layer.** Heterogeneous substrates (Docker, AWS, FABRIC, ARK, Scamper-instrumented Raspberry Pis, edge nodes) sit *below* the waist. Diverse research intents sit *above* it. The waist is the spec language plus the orchestrator that translates an intent into the subset of substrate operations that satisfy it. Critics frequently confuse the substrate with the waist; this conflation is the source of most "thin waist won't work" objections, which are actually objections to specific substrate choices. Substrates are interchangeable; the waist is what makes them interchangeable.
 
 ### Decomposed > Monolithic (Strong Evidence)
 
@@ -275,6 +279,21 @@ Distilled from 48 cross-domain papers:
 
 ## 8. Open Questions and Future Directions
 
+### 8.0 The Constraint Mapping Problem (the central unsolved challenge)
+
+The MVP runs on Docker and AWS — substrates that impose few constraints on what experiments we can express. The interesting research begins when we try to port the same experiment specification onto real edge infrastructure (CAIDA's ARK, FABRIC slices, residential Raspberry Pis, scamper-instrumented home routers) where bandwidth is committed to hosts, kernel-level operations are forbidden, and operators cannot afford to reserve resources per Docker container.
+
+Naïvely "shipping a Docker container to ARK" violates host commitments and is the model that killed Planet Lab and EdgeNet. Naïvely "rewriting every experiment as Scamper-callable code" defeats the point of a thin waist. The research is in designing the abstractions that bridge these worlds:
+
+1. **Formal specification of infrastructure constraints** — what services each node type can host, what policies (rate limits, time windows, kernel access) apply.
+2. **A many-to-many service-to-node mapping graph** — for each microservice in the experiment, which node types can host it, and at what cost.
+3. **Intent satisfiability checking** — given a user intent and an infrastructure's constraint set, can this experiment run? If not, what is the minimal relaxation that makes it feasible?
+4. **Constructive feedback to the user** — when the requested experiment cannot run on the chosen substrate, the orchestrator should explain why and propose alternatives.
+
+**The edge fidelity imperative.** Cloud is convenient and easy to dispatch to. But for many measurement questions, *where* the experiment runs is part of *what* it measures. Running a residential broadband study from AWS loses the very thing the study was about. The thin waist must work on edge nodes — with their constraints — or it becomes irrelevant for the research it claims to enable. (As surfaced in the KC Claffy meeting, 2026-04-10: "Not cracking the code of how we make this work with edge infrastructure is going to be the silent death for this type of idea.")
+
+**Open question:** What is the formal language for expressing infrastructure constraints, and what is the algorithm for computing intent satisfiability against those constraints?
+
 ### 8.1 Provenance for Agent-Driven Experiments
 
 PROV-AGENT (ORNL) extends W3C PROV to capture agent-specific constructs — not just data lineage but **decision lineage**: why the agent chose each action. This is critical for trust: when an agent runs 100 experiments and claims a result, the provenance chain must be auditable. Flowcept demonstrates that provenance must be embedded in the execution layer, not bolted on.
@@ -313,4 +332,4 @@ The convergence of thin-waist patterns across domains — networking (thin-waist
 
 ---
 
-*Synthesis produced from 30+ NLM-grounded sources, 73+ tracked papers, 48 cross-domain papers, and primary analysis of Glia, Confucius, AI Scientist v2, SkyDiscover, OpenClaw, Osprey, Flowcept, netUnicorn, and NetForge.*
+*Synthesis produced from 39 NLM-grounded sources, 79 tracked papers, 48 cross-domain papers, and primary analysis of Glia, Confucius, AI Scientist v2, SkyDiscover, OpenClaw, Osprey, Flowcept, NetSecBed, netUnicorn, and NetForge. Updated 2026-04-07 with vertical-vs-horizontal framing and NetSecBed positioning. Updated 2026-04-10 with the specification-vs-substrate clarification, the constraint mapping problem as the central research challenge, and the edge fidelity imperative — all surfaced in the KC Claffy collaboration meeting.*

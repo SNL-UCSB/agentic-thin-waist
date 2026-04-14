@@ -100,12 +100,13 @@ Last updated: 2026-04-06
 | 76 | Towards an AI Co-Scientist | Google DeepMind | 2025 | arXiv:2502.18864 | NLM ✅ | co-scientist |
 | 77 | PROV-AGENT: Unified Provenance for AI Agent Workflows | — | 2025 | arXiv:2508.02866 | NLM ✅ | provenance |
 | 78 | LLM Optimizers via Agent-System Interfaces | — | 2024 | arXiv:2410.15625 | NLM ✅ | agent interfaces |
+| 79 | NetSecBed: Container-Native Testbed for Reproducible Cybersecurity Experimentation | Bitzki, Kreutz et al. | 2026 | arXiv:2604.04121 | NLM ✅ | composable testbed vertical; evidence for pattern but not agentic; no bottleneck control |
 
 ## Corpus Statistics
 
-- **Total papers tracked:** 78
-- **In NLM notebook:** 38 good sources (12 wrong arXiv resolutions waste slots; 50 total)
+- **Total papers tracked:** 79
+- **In NLM notebook:** 39 good sources (12 wrong arXiv resolutions waste slots; 51 total)
 - **PDFs downloaded:** 8
 - **Pass 1 complete:** 7 (Glia, Confucius, AI Scientist v2, SkyDiscover, Osprey, Academy, Flowcept)
 - **Still truly pending (not in NLM):** 13 (#19 Credibility Crisis, #20 Strategic Data Collection, #24 Voyager, #25 Holistic Incident Mgmt, #26 MetaEase, #29 LLM Network Mgmt Survey, #30 MeshAgent, #31 BiAn, #36 Deep Research Survey, #39 Kgent, #46 gpCAM, #47 Colmena, #48 INTERSECT)
-- **Archetype budget:** Examiner (80-150 papers) — currently at 78, on track
+- **Archetype budget:** Examiner (80-150 papers) — currently at 79, on track
