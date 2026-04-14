@@ -2,7 +2,7 @@
 
 This document specifies a set of self-contained, reproducible examples that serve as both the demo and the onboarding path for new users. Each example is a standalone directory under `examples/` with its own README, scripts, expected outputs, and screenshots. Anyone should be able to `git clone`, follow the README, and reproduce the results.
 
-The examples are structured as three progressive acts. Each act builds on the previous one and demonstrates a distinct capability of the platform.
+The examples are structured as five progressive acts. Each builds on the previous and demonstrates a distinct capability of the platform.
 
 ---
 
@@ -10,298 +10,194 @@ The examples are structured as three progressive acts. Each act builds on the pr
 
 ```
 examples/
-├── 01-intent-to-data/
-│   ├── README.md              # Self-contained walkthrough
-│   ├── run.sh                 # One-command execution script
-│   ├── intent.json            # The input intent
-│   ├── expected_output/       # Reference results for validation
-│   │   ├── orchestration_status.json
-│   │   ├── experiment_result.json
-│   │   └── reasoning_trace.json
-│   └── screenshots/           # Annotated screenshots of each step
-│       ├── 01_submit_intent.png
-│       ├── 02_orchestration_progress.png
-│       ├── 03_telemetry_result.png
-│       └── 04_reasoning_trace.png
-│
-├── 02-capacity-sweep/
-│   ├── README.md
-│   ├── run.sh
-│   ├── intent.json
-│   ├── expected_output/
-│   │   ├── sweep_results.json
-│   │   └── configured_vs_measured.csv
-│   └── screenshots/
-│       ├── 01_submit_sweep.png
-│       ├── 02_three_experiments_progress.png
-│       ├── 03_telemetry_comparison.png
-│       └── 04_configured_vs_measured_plot.png
-│
-├── 03-fidelity-validation/
-│   ├── README.md
-│   ├── run.sh
-│   ├── intent.json
-│   ├── expected_output/
-│   │   ├── trial_results.json
-│   │   └── wasserstein_distances.csv
-│   └── screenshots/
-│       ├── 01_repeated_runs.png
-│       ├── 02_throughput_timeseries_overlay.png
-│       └── 03_wasserstein_summary.png
-│
-└── 04-cross-substrate/         # (stretch — requires AWS)
-    ├── README.md
-    ├── run_local.sh
-    ├── run_aws.sh
-    ├── intent.json
-    ├── expected_output/
-    │   ├── local_result.json
-    │   └── aws_result.json
-    └── screenshots/
-        ├── 01_local_run.png
-        ├── 02_aws_run.png
-        └── 03_comparison.png
+├── 01-intent-to-data/           # Hello world: one intent, one result
+├── 02-youtube-under-pressure/   # Real browser app under controlled bottleneck
+├── 03-application-comparison/   # Same bottleneck, three different applications
+├── 04-capacity-sweep/           # Same app, varying network conditions
+├── 05-fidelity-validation/      # Reproducibility proof via repeated runs
+└── 06-cross-substrate/          # (stretch) Same spec, different substrate
+```
+
+Each directory contains:
+```
+├── README.md              # Self-contained walkthrough (the demo script)
+├── run.sh                 # One-command execution
+├── intent.json            # The input intent
+├── expected_output/       # Reference results for validation
+├── screenshots/           # Annotated screenshots at each step
+└── validate.py            # Compares actual vs. expected, reports pass/fail
 ```
 
 ---
 
 ## Example 01: Intent to Data
 
-**What it demonstrates:** A researcher submits one sentence. The platform parses it, provisions infrastructure, configures the network, runs the experiment, captures traffic, and stores structured results — automatically.
+**Intent:** `"Run iperf3 to measure throughput at 10 Mbps with 50ms latency"`
 
-**Why it matters:** This is the core value proposition. Zero-to-data with no manual infrastructure setup.
+**What it demonstrates:** The core pipeline works end-to-end. A researcher types a sentence; the platform parses it, provisions infrastructure, configures the network, selects cross-traffic, captures packets, and stores structured results. Zero manual setup.
 
-### README Contents (outline)
+**Workflow type:** Shell (iperf3)
 
-#### Prerequisites
-- Docker and Docker Compose installed
-- `ANTHROPIC_API_KEY` set (for intent parsing)
-- Platform services running: `docker compose up -d` from repo root
-- Global CTP service reachable (or set `CTP_SERVICE_GLOBAL` to a local instance)
+**Why iperf3 here:** This is the "hello world" — iperf3 is deterministic, has no external dependencies (no browser, no video server), and produces ground-truth throughput numbers we can validate precisely. It proves the plumbing.
 
-#### Step 1: Review the Intent
-
-```json
-// examples/01-intent-to-data/intent.json
-{
-  "intent": "Run iperf3 to measure throughput at 10 Mbps with 50ms latency"
-}
-```
-
-This intent specifies:
-- **Application:** iperf3 (ground-truth throughput measurement)
-- **Static bottleneck:** 10 Mbps capacity, 50ms base latency
-- **Dynamic pressure:** CTP automatically selected from the corpus (matching ~10 Mbps intensity)
-- **Defaults applied:** cubic congestion control, fq_codel AQM, 60s duration
-
-#### Step 2: Submit the Intent
-
-```bash
-curl -X POST http://localhost:8005/intent \
-  -H "Content-Type: application/json" \
-  -d @intent.json
-```
-
-**Expected response:**
-```json
-{"orchestration_id": "orch-a1b2c3d4", "status": "pending"}
-```
-
-*Screenshot: `01_submit_intent.png` — terminal showing the curl command and response*
-
-#### Step 3: Watch the Pipeline Execute
-
-```bash
-# Poll orchestration status
-watch -n 2 'curl -s http://localhost:8005/orchestration/orch-a1b2c3d4 | python -m json.tool'
-```
-
-The status progresses through these stages:
-1. `parsing` — Claude extracts structured parameters from the NL intent
-2. `generating` — Cartesian product produces experiment specs
-3. `selecting_workflow` — NetGent workflow fetched from GitHub registry
-4. `provisioning_worker` — ephemeral Docker container created
-5. `selecting_ctp` — global CTP service queried for matching cross-traffic
-6. `executing` — synchronized capture + replay + workflow fire at next minute boundary
-7. `streaming_pcap` — PCAP uploaded to telemetry service
-8. `complete` — worker destroyed, results persisted
-
-*Screenshot: `02_orchestration_progress.png` — JSON showing stage flags and iteration details*
-
-#### Step 4: Inspect the Results
-
-```bash
-# Experiment results
-curl -s http://localhost:8005/orchestration/orch-a1b2c3d4/results | python -m json.tool
-
-# Claude's reasoning trace
-curl -s http://localhost:8005/orchestration/orch-a1b2c3d4/reasoning | python -m json.tool
-
-# Telemetry query
-curl -s 'http://localhost:8004/results?experiment_id=shell-10mbps-50ms-cubic-001' | python -m json.tool
-```
-
-*Screenshot: `03_telemetry_result.png` — JSON showing configured_capacity=10, measured_throughput=~9.2 (reduced by cross-traffic), configured_latency=50, measured_rtt=~52*
-
-*Screenshot: `04_reasoning_trace.png` — Claude's intent parsing and workflow selection reasoning*
-
-#### Step 5: Validate Against Expected Output
-
-```bash
-# Compare key fields against reference
-python validate.py --actual <(curl -s http://localhost:8005/orchestration/orch-a1b2c3d4/results) \
-                    --expected expected_output/experiment_result.json
-```
-
-Validation checks:
-- `status == "complete"`
-- `configured_capacity == 10.0`
-- `configured_latency == 50.0`
-- `measured_throughput` within [5.0, 10.0] (cross-traffic reduces available capacity)
-- `measured_rtt` within [45, 60] (base latency ± jitter)
+**What to validate:**
+- Pipeline completes: `status == "complete"`
+- Shaping applied: `configured_capacity == 10.0`, `configured_latency == 50.0`
+- CTP selected: a cross-traffic profile from the corpus was applied
+- Measured throughput < configured capacity (because cross-traffic is sharing the link)
 - PCAP artifact exists in telemetry
-
-**What to look for:** The measured throughput should be *less* than the configured capacity because cross-traffic (from the CTP) is sharing the bottleneck. The gap between configured and measured IS the effect of realistic congestion. This is the ground truth that static datasets cannot provide.
-
----
-
-## Example 02: Capacity Sweep
-
-**What it demonstrates:** One intent generates multiple experiments across a parameter sweep. The platform handles the combinatorics, runs each experiment independently, and stores results that can be compared side by side.
-
-**Why it matters:** Research questions are almost never "run one experiment." They're "how does X change as Y varies?" The platform handles the sweep; the researcher thinks about the question.
-
-### README Contents (outline)
-
-#### The Intent
-
-```json
-{
-  "intent": "Compare iperf3 throughput at 5, 10, and 25 Mbps with 50ms latency"
-}
-```
-
-This generates three experiments:
-- `shell-5mbps-50ms-cubic-001`
-- `shell-10mbps-50ms-cubic-002`
-- `shell-25mbps-50ms-cubic-003`
-
-All three share the same latency, congestion control, and AQM. Only capacity varies.
-
-#### What to Observe
-
-After all three experiments complete, query telemetry:
-
-```bash
-curl -s 'http://localhost:8004/results?latency_min=49&latency_max=51&sort_by=configured_capacity' \
-  | python -m json.tool
-```
-
-**Validation table (included in README as reference):**
-
-| Configured Capacity | Expected Measured Throughput | CTP Intensity |
-|--------------------|-----------------------------|---------------|
-| 5 Mbps | 2–5 Mbps (CTP consumes significant share) | ~5 Mbps band |
-| 10 Mbps | 5–9 Mbps | ~10 Mbps band |
-| 25 Mbps | 15–23 Mbps | ~25 Mbps band |
-
-*Screenshot: `04_configured_vs_measured_plot.png` — bar chart or scatter plot showing the three data points*
-
-**The point:** Static attributes (capacity) and dynamic pressure (CTP) are independently controlled. The researcher specified the capacity sweep; the platform selected matching cross-traffic for each capacity independently. This is the static/dynamic decomposition in action.
+- Reasoning trace shows Claude's parsing and workflow selection
 
 ---
 
-## Example 03: Fidelity Validation
+## Example 02: YouTube Under Pressure
 
-**What it demonstrates:** Running the same experiment multiple times under identical conditions produces consistent results. This is what makes the platform a scientific instrument.
+**Intent:** `"Watch a YouTube video at 10 Mbps with 50ms latency for 60 seconds"`
 
-**Why it matters:** If results aren't reproducible, the platform is a random number generator, not a measurement tool.
+**What it demonstrates:** The platform runs real browser-based applications, not just CLI tools. A Playwright-driven browser navigates to YouTube, watches a video for 60 seconds, and does so through a controlled bottleneck with real cross-traffic — all from the same intent interface.
 
-### README Contents (outline)
+**Workflow type:** Browser (YouTube via Playwright/Browserless)
 
-#### The Intent
+**Why this matters:** This is the differentiator. Anybody can run iperf3 with tc. Running YouTube through a controlled, reproducible bottleneck with synchronized packet capture — that requires the full thin waist pipeline: orchestrator → NetGent browser workflow → substrate worker (shaping + Browserless) → CTP replay → tshark capture → telemetry.
 
-```json
-{
-  "intent": "Run iperf3 at 10 Mbps with 50ms latency, 5 trials"
-}
-```
+**What to validate:**
+- Pipeline completes with `runtime == "browser"`
+- PCAP contains YouTube video traffic (QUIC/HTTPS to Google IPs)
+- Shaping is reflected: throughput in PCAP is bounded by configured capacity
+- Cross-traffic from CTP is interleaved in the capture
+- The same bottleneck spec that ran iperf3 in Example 01 now runs YouTube — same spec language, different application, same infrastructure
 
-This generates one experiment spec but requests 5 independent runs.
-
-#### What to Observe
-
-For each trial, extract the throughput time series from the PCAP (100ms bins, 300 bins per 30s window). Overlay all 5 time series on one plot.
-
-**Validation:**
-- Wasserstein distance between each pair of trials should be < threshold (Jaber has established this)
-- Visual inspection: time series should track each other closely, with small stochastic variation from CTP replay
-
-*Screenshot: `02_throughput_timeseries_overlay.png` — 5 overlaid time series, tight spread*
-*Screenshot: `03_wasserstein_summary.png` — table of pairwise Wasserstein distances*
-
-**The point:** Same intent → same spec → same bottleneck → consistent results. The CTP replay introduces realistic variation (it's a real traffic trace, not synthetic), but the variation is bounded and quantifiable.
+**What to observe in the PCAP (screenshot opportunity):**
+- Application traffic (YouTube QUIC streams) and cross-traffic (CTP replay) sharing the bottleneck
+- Throughput time series showing YouTube's adaptive bitrate responding to the capacity constraint
+- This is data that does not exist in any public dataset — real application behavior under known, controlled, reproducible network conditions
 
 ---
 
-## Example 04: Cross-Substrate Portability (stretch)
+## Example 03: Same Bottleneck, Many Applications
 
-**What it demonstrates:** The same experiment specification produces consistent results on different substrates (local Docker vs. AWS).
+**This is the flagship example.** This is what no existing tool does.
 
-**Why it matters:** This is the thin waist in action — the specification layer decouples intent from infrastructure.
+**Intent:** `"Compare iperf3, NDT, YouTube, and a web page load at 10 Mbps with 50ms latency"`
 
-### README Contents (outline)
+**What it demonstrates:** One bottleneck regime, four applications, all generating traffic through the exact same controlled network conditions. The platform dispatches shell workflows (iperf3, NDT) and browser workflows (YouTube, web page) through the same pipeline. The bottleneck is identical across all four — same capacity, same latency, same cross-traffic profile, same AQM. The only variable is the application.
 
-#### Run Locally
+**Workflow types:** Shell (iperf3, NDT) + Browser (YouTube, page load)
 
-```bash
-./run_local.sh   # CONNECTIVITY_BACKEND=local_docker
-```
+**Why this is the key capability:** Today, if you want to compare how YouTube, Zoom, NDT, and iperf3 behave under the same network conditions, you have to build four separate test setups and hope the conditions are equivalent. They never are. The thin waist makes this trivial: specify the bottleneck once, vary the application. The network conditions are not just "similar" — they are identical. Same tc shaping, same netem latency, same CTP replay file, same capture interface. The only thing that changes is what application generates the traffic.
 
-#### Run on AWS
+This is the data that enables:
+- Fair comparison of speed test tools under known ground truth (KC/Ricky's RABBIT use case)
+- Understanding how different applications respond to the same congestion (ABR adaptation vs. rate control vs. greedy TCP)
+- Generating multi-application datasets under controlled conditions (something that does not exist in any public dataset)
 
-```bash
-./run_aws.sh     # CONNECTIVITY_BACKEND=aws (requires AWS credentials + configured ECS)
-```
+**What to validate:**
+- Four experiments generated from one intent
+- Two shell workflows (iperf3, NDT) + two browser workflows (YouTube, page load) dispatched
+- Identical bottleneck config across all four (10 Mbps, 50ms, same CTP cluster, same AQM)
+- Results in telemetry are queryable by application: `GET /results?capacity_min=9&capacity_max=11`
+- Throughput differs across applications — iperf3 saturates the link, NDT uses a different measurement methodology, YouTube adapts bitrate, page load has bursty short flows — but all operate through the same bottleneck with the same ground truth
+- PCAPs for each run contain the application traffic interleaved with the same CTP cross-traffic
 
-#### Compare
+**The punchline:** "Four applications, one bottleneck, identical conditions, reproducible data. Vary the application, not the network. This is the composability that the thin waist provides."
 
-Show that configured capacity, measured throughput, and measured latency are consistent across the two substrates. Differences should be within the fidelity bounds established in Example 03.
+**Screenshot opportunity:** Side-by-side throughput time series from all four PCAPs, with the CTP cross-traffic visible in each. Same background noise pattern, different foreground application behavior. This one image tells the whole story.
 
-**The point:** "The experiment specification is the thin waist. The substrate is interchangeable."
+---
+
+## Example 04: Capacity Sweep
+
+**Intent:** `"Measure YouTube streaming quality at 2, 5, 10, and 25 Mbps with 50ms latency"`
+
+**What it demonstrates:** One intent generates a parameter sweep across capacities. YouTube's adaptive bitrate algorithm responds differently at each capacity level. The platform handles the combinatorics; the researcher thinks about the question.
+
+**Workflow type:** Browser (YouTube)
+
+**Why YouTube for the sweep (not iperf3):** iperf3 at different capacities is boring — it just reports the cap. YouTube is interesting because its ABR algorithm makes different decisions at different capacities: lower resolutions at 2 Mbps, 720p at 5 Mbps, 1080p at 10 Mbps, etc. This shows the platform generating data about real application adaptation to network conditions — the core scientific use case.
+
+**What to validate:**
+- Four experiments generated (2, 5, 10, 25 Mbps)
+- Each gets a CTP matched to its capacity band
+- YouTube throughput in PCAP scales with capacity (but not linearly — ABR is step-wise)
+- Telemetry results show a progression: as capacity increases, measured throughput and video quality metrics improve
+- The static/dynamic decomposition is visible: capacity varies (static), CTP intensity matches (dynamic), latency is constant
+
+---
+
+## Example 05: Fidelity Validation
+
+**Intent:** `"Run YouTube at 10 Mbps with 50ms latency, 5 trials"`
+
+**What it demonstrates:** Same experiment, same conditions, five times. Results are consistent. This is what makes the platform a scientific instrument.
+
+**Workflow type:** Browser (YouTube)
+
+**Why YouTube for fidelity (not iperf3):** Proving reproducibility with iperf3 is trivial — it's a deterministic tool. Proving reproducibility with YouTube is meaningful — it's a real application making adaptive decisions based on network feedback. If five YouTube runs under identical bottleneck conditions produce similar throughput time series, that demonstrates the platform provides controlled, reproducible conditions even for complex, non-deterministic applications.
+
+**What to validate:**
+- Five trials complete independently
+- Throughput time series extracted from each PCAP (100ms bins)
+- Wasserstein distance between all pairs of trials < established threshold
+- Visual: overlay of 5 time series shows tight spread with bounded stochastic variation
+- "Same intent, same spec, same bottleneck — consistent results even for adaptive applications"
+
+---
+
+## Example 06: Cross-Substrate Portability (stretch)
+
+**Intent:** Same as Example 02 (YouTube at 10 Mbps)
+
+**What it demonstrates:** The same experiment specification produces consistent results on local Docker and AWS. The spec is the thin waist; the substrate is interchangeable.
+
+**Two runs:**
+- `./run_local.sh` — `CONNECTIVITY_BACKEND=local_docker`
+- `./run_aws.sh` — `CONNECTIVITY_BACKEND=aws` (requires AWS credentials + configured backend)
+
+**What to validate:**
+- Both runs complete
+- Measured throughput and latency are consistent within fidelity bounds from Example 05
+- The experiment spec JSON is identical between the two runs — only the backend config changes
+
+---
+
+## The Progression (Why This Order)
+
+| Example | What It Proves | Application | Key Capability |
+|---------|---------------|-------------|----------------|
+| 01 | Plumbing works | iperf3 (shell) | Intent → data pipeline |
+| 02 | Real apps work | YouTube (browser) | Browser workflows under controlled bottleneck |
+| **03** | **The headline** | **iperf3 + NDT + YouTube + page load** | **Same bottleneck, many apps — the composability that matters** |
+| 04 | Sweeps work | YouTube × 4 capacities | Parameter variation, ABR adaptation visible |
+| 05 | Reproducibility works | YouTube × 5 trials | Fidelity proof for non-deterministic apps |
+| 06 | Portability works | YouTube on local + AWS | Thin waist = portable spec |
+
+Examples 01 and 02 are setup. **Example 03 is the money shot** — it demonstrates the capability that no existing tool provides: diverse applications generating traffic through the exact same replicable bottleneck link. If you only have time to show one example to a stakeholder, show 03. Everything else is either building blocks (01, 02) or extensions (04, 05, 06).
 
 ---
 
 ## Instructions for the Team
 
-Each example directory must be self-contained. A user who has never seen the platform should be able to:
+**Quality bar:** If a reviewer can't reproduce the example by following the README alone — no Slack questions, no "ask Jaber" — the example is not done.
 
-1. Read the README from top to bottom
-2. Run the commands exactly as written
-3. See output that matches the expected output and screenshots
-4. Understand what the platform did, why it matters, and how to adapt it
+**For each example, produce:**
 
-**For each example, the team needs to produce:**
-
-- [ ] `README.md` — complete walkthrough with copy-pasteable commands
+- [ ] `README.md` — complete walkthrough with copy-pasteable commands, explanation of what to observe, and why it matters
 - [ ] `intent.json` — the input
 - [ ] `run.sh` — single-command execution (submit intent + poll + retrieve results)
-- [ ] `expected_output/` — reference JSON files for validation
-- [ ] `screenshots/` — annotated screenshots at each step (terminal + JSON output)
-- [ ] `validate.py` or `validate.sh` — script that compares actual vs. expected and reports pass/fail
+- [ ] `expected_output/` — reference JSON files with key fields annotated
+- [ ] `screenshots/` — annotated screenshots at each step (terminal output, JSON responses, PCAP timeseries where relevant)
+- [ ] `validate.py` — compares actual vs. expected, reports pass/fail with field-level checks
 
-**Quality bar:** If a reviewer can't reproduce the example by following the README alone (no Slack questions, no "ask Jaber"), the example is not done.
+**Critical for Examples 02-05:** The browser workflow (YouTube) must be tested end-to-end before documenting. If Browserless or the YouTube workflow doesn't work reliably, the example degrades to "here's what it should look like" — which is not acceptable. Examples must be reproducible, not aspirational.
+
+**The live demo IS these examples.** The presenter opens the README and runs the commands on screen. There is no separate demo script. The README is the script.
 
 ---
 
-## Relationship to Live Demo
+## Relationship to Vision Narrative
 
-The live demo IS these examples run in real-time. The presenter:
-1. Opens `examples/01-intent-to-data/README.md` on screen
-2. Runs the commands from the README
-3. Shows that the output matches the expected output and screenshots
-4. Narrates the "why it matters" from the README
+The examples demonstrate the *current* capabilities. The broader vision (constraint mapping, edge infrastructure, closed-loop agentic experimentation) is documented in:
+- `docs/thin_waist_one_pager.md` — platform summary for external audiences
+- `docs/lit-survey/paper_outline.md` — HotNets paper argument
 
-There is no separate demo script. The examples ARE the demo. The README IS the script. This ensures that everything shown in a demo is reproducible by anyone who clones the repo.
-
-For the vision narrative (what's next: real applications, real infrastructure, closing the loop), use the platform one-pager (`docs/thin_waist_one_pager.md`) as the talking-point guide. That content doesn't belong in the examples — it belongs in the docs.
+These examples are evidence items E2 (paper replication) and E3 (portability) from the HotNets evidence plan. They should be referenced in the paper as "see examples/ in the repository for reproducible demonstrations."
