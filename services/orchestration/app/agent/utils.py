@@ -12,6 +12,33 @@ from app.engine.orchestration_store import save_orchestration
 from app.models.schemas import OrchestrationStatus
 
 
+def _truncate_for_log(value: Any, limit: int = 1500) -> str:
+    text = str(value)
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "...<truncated>"
+
+
+def log_claude_step(
+    step: str,
+    *,
+    orchestration_id: str | None = None,
+    prompt: Any | None = None,
+    reasoning: Any | None = None,
+    output: Any | None = None,
+) -> None:
+    """Print structured logs for a Claude interaction step."""
+    prefix = f"[CLAUDE {orchestration_id}]" if orchestration_id else "[CLAUDE]"
+    print(f"{prefix} --- {step} ---")
+    if prompt is not None:
+        print(f"{prefix} prompt/input:\n{_truncate_for_log(prompt)}")
+    if reasoning is not None:
+        print(f"{prefix} reasoning:\n{_truncate_for_log(reasoning)}")
+    if output is not None:
+        print(f"{prefix} output:\n{_truncate_for_log(output)}")
+    print(f"{prefix} --- end {step} ---")
+
+
 def get_model() -> ChatAnthropic:
     """Build a ChatAnthropic instance from environment variables."""
     api_key = os.environ.get("CLAUDE_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")

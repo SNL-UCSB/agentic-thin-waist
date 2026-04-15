@@ -360,6 +360,9 @@ def _run_experiment_on_worker(
         f"latency={spec.get('latency_ms', 0)} ms  qdisc={spec.get('aqm_policy', 'pfifo')}"
     )
     print(
+        f"[STEP 3/4]   workflow_parameters={workflow_parameters}"
+    )
+    print(
         f"[STEP 3/4]   capture iface={capture_payload['interface']}  "
         f"duration={capture_payload['duration_seconds']}s  "
         f"telemetry_url={telemetry_url}"

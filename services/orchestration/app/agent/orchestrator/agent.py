@@ -22,7 +22,7 @@ from app.agent.orchestrator.prompts import (
 from app.agent.orchestrator.schemas import ParsedIntent
 from app.agent.shell.agent import ShellWorkflowContext
 from app.agent.shell.agent import create_agent as create_shell_agent
-from app.agent.utils import get_model, save_state
+from app.agent.utils import get_model, log_claude_step, save_state
 from app.engine.experiment_generator import ExperimentGenerator
 from app.engine.orchestration_manager import OrchestrationManager
 from app.models.schemas import OrchestrationStatus
@@ -72,10 +72,23 @@ def parse_intent(state: OrchestratorState) -> dict[str, Any]:
             "intent": intent,
         }
     )
+    log_claude_step(
+        "parse_intent",
+        orchestration_id=orchestration_id,
+        prompt="\n\n".join(
+            str(msg.content) for msg in prompt_value.messages if hasattr(msg, "content")
+        ),
+    )
 
     structured_model = model.with_structured_output(ParsedIntent)
     parsed: ParsedIntent = structured_model.invoke(prompt_value.messages)
     parsed_dict = parsed.model_dump()
+    log_claude_step(
+        "parse_intent",
+        orchestration_id=orchestration_id,
+        reasoning=parsed.reasoning,
+        output=parsed_dict,
+    )
 
     print(
         f"[AGENT {orchestration_id}] Intent parsed → "
@@ -293,6 +306,12 @@ def execute_experiments(
     }
     reasoning_steps = list(state.get("reasoning_steps") or [])
     reasoning_steps.append(reasoning_step)
+    print(f"[AGENT {orchestration_id}] Multi-step reasoning trace:")
+    for step in reasoning_steps:
+        print(
+            f"[AGENT {orchestration_id}]   step={step.get('step')} "
+            f"action={step.get('action')} reasoning={step.get('reasoning')}"
+        )
 
     final_status = (
         OrchestrationStatus.complete

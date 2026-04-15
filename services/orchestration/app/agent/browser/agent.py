@@ -9,7 +9,7 @@ from langgraph.graph.message import MessagesState
 from langgraph.runtime import Runtime
 from pydantic import BaseModel, ConfigDict
 
-from app.agent.utils import get_model
+from app.agent.utils import get_model, log_claude_step
 
 if TYPE_CHECKING:
     from clients.netgent.src.main import NetGent
@@ -71,7 +71,16 @@ def choose_workflow(
     ]
 
     model = get_model()
+    log_claude_step(
+        "browser_choose_workflow",
+        prompt="\n\n".join(str(msg.content) for msg in prompt if hasattr(msg, "content")),
+    )
     result: ChooseWorkflow = model.with_structured_output(ChooseWorkflow).invoke(prompt)
+    log_claude_step(
+        "browser_choose_workflow",
+        reasoning=result.reasoning,
+        output=result.model_dump(),
+    )
 
     if not result.is_valid:
         return {

@@ -459,8 +459,8 @@ class ConnectivityManager:
         }
         if qdisc_params:
             payload["qdisc_params"] = qdisc_params
-        if latency_ms > 0 and latency_location:
-            payload["latency_location"] = latency_location
+        if latency_ms > 0:
+            payload["latency_location"] = latency_location or "both"
 
         with httpx.Client(timeout=120) as client:
             resp = client.post(f"{info.endpoint}/shape", json=payload)
