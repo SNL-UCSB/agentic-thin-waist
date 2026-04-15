@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import json
 import os
-import time
 from typing import TYPE_CHECKING, Any
 
 import requests
@@ -16,24 +14,6 @@ from app.agent.utils import get_model, log_claude_step
 
 if TYPE_CHECKING:
     from clients.netgent.src.main import NetGent
-
-_DEBUG_LOG = "/home/haarika/imp_files/thinwaist/.cursor/debug-38a9fa.log"
-
-
-def _dblog(msg: str, data: dict, hypothesis_id: str = "H-A") -> None:
-    # #region agent log
-    entry = json.dumps({
-        "sessionId": "38a9fa", "timestamp": int(time.time() * 1000),
-        "location": "shell/agent.py", "message": msg,
-        "data": data, "hypothesisId": hypothesis_id,
-    })
-    try:
-        with open(_DEBUG_LOG, "a") as f:
-            f.write(entry + "\n")
-    except Exception:
-        pass
-    # #endregion
-
 
 WORKFLOW_INDEX_URL = "https://raw.githubusercontent.com/SNL-UCSB/netgent-workflow/main/workflows/index.json"
 
@@ -100,7 +80,6 @@ def choose_workflow(
         prompt="\n\n".join(str(msg.content) for msg in prompt if hasattr(msg, "content")),
     )
     result: ChooseWorkflow = model.with_structured_output(ChooseWorkflow).invoke(prompt)
-    _dblog("choose_workflow: LLM result", {"is_valid": result.is_valid, "id": result.id, "params": result.parameters, "reasoning": result.reasoning[:120]}, "H-B")
     print(f"[SHELL WF] LLM choose_workflow: is_valid={result.is_valid} id={result.id!r} params={result.parameters}")
     log_claude_step(
         "shell_choose_workflow",
@@ -141,11 +120,9 @@ def route_valid_workflow(state: ShellWorkflowGenerationState) -> str:
     """Route based on whether the chosen workflow is valid."""
     chosen = state.get("chosen_workflow")
     if chosen and chosen.get("is_valid"):
-        _dblog("route_valid_workflow: is_valid=True, keeping workflow", {"id": chosen.get("id")}, "H-C")
         print(f"[SHELL WF] route_valid_workflow: is_valid=True, id={chosen.get('id')!r}")
         return "choose_workflow"
     has_creds = bool(os.getenv("GOOGLE_API_KEY") or os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
-    _dblog("route_valid_workflow: is_valid=False", {"has_google_creds": has_creds}, "H-C")
     print(f"[SHELL WF] route_valid_workflow: is_valid=False, has_google_creds={has_creds}")
     if not has_creds:
         print("[SHELL WF] No Google creds — ending with invalid/missing workflow")
