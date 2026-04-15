@@ -246,8 +246,12 @@ class RunExperimentRequest(BaseModel):
     downstream_iface: str = Field("veth2", description="Download interface")
     # None = shaping already applied via POST /shape — skip re-shaping in /run.
     # Provide explicit values (>0) to apply shaping as part of this call.
-    download_mbps: Optional[float] = Field(None, gt=0, description="Download capacity in Mbps (omit to skip shaping)")
-    upload_mbps: Optional[float] = Field(None, gt=0, description="Upload capacity in Mbps (omit to skip shaping)")
+    download_mbps: Optional[float] = Field(
+        None, gt=0, description="Download capacity in Mbps (omit to skip shaping)"
+    )
+    upload_mbps: Optional[float] = Field(
+        None, gt=0, description="Upload capacity in Mbps (omit to skip shaping)"
+    )
     latency_ms: float = Field(0, ge=0, description="One-way delay in ms")
     latency_location: Optional[Literal["upstream", "downstream", "both"]] = None
     qdisc: str = Field("pfifo", description="Queue discipline")

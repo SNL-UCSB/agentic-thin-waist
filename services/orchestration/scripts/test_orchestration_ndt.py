@@ -34,11 +34,9 @@ ORCH_CONTAINER = os.getenv("ORCH_CONTAINER", "orchestration")
 POLL_INTERVAL = float(os.getenv("POLL_INTERVAL_SECONDS", "3"))
 TIMEOUT_SECONDS = float(os.getenv("TIMEOUT_SECONDS", "300"))
 
-INTENT = (
-    "Run an ndt speedtest at 10 Mbps download and 20ms RTT latency"
-)
+INTENT = "Run an ndt speedtest at 10 Mbps download and 20ms RTT latency"
 
-    # "Run an ndt speedtest at 10 Mbps download speed and 5 Mbps upload speed and 100ms RTT latency"
+# "Run an ndt speedtest at 10 Mbps download speed and 5 Mbps upload speed and 100ms RTT latency"
 
 #
 # INTENTPerform a Network Diagnostic Test (NDT) to measure network performance, specifically testing 'download' and 'upload' speeds as configured.

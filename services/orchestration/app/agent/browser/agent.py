@@ -73,7 +73,9 @@ def choose_workflow(
     model = get_model()
     log_claude_step(
         "browser_choose_workflow",
-        prompt="\n\n".join(str(msg.content) for msg in prompt if hasattr(msg, "content")),
+        prompt="\n\n".join(
+            str(msg.content) for msg in prompt if hasattr(msg, "content")
+        ),
     )
     result: ChooseWorkflow = model.with_structured_output(ChooseWorkflow).invoke(prompt)
     log_claude_step(
