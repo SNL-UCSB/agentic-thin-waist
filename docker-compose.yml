@@ -142,6 +142,8 @@ services:
       - BROWSER_PROXY_PORT=8888
       - CAPTURE_DIR=${SUBSTRATE_CAPTURE_DIR:-/tmp/substrate-capture}
       - CTP_DIR=${SUBSTRATE_CTP_DIR:-/tmp/substrate-ctp}
+      - NETGENT_USE_LOCAL=${NETGENT_USE_LOCAL:-false}
+      - NETGENT_NAMESPACE=${NETGENT_NAMESPACE:-ns1}
     depends_on:
       - telemetry-service
     networks:

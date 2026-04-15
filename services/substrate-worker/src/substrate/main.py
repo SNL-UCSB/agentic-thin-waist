@@ -244,8 +244,14 @@ class RunExperimentRequest(BaseModel):
     # --- Shaping ---
     upstream_iface: str = Field("veth4", description="Upload interface")
     downstream_iface: str = Field("veth2", description="Download interface")
-    download_mbps: float = Field(100.0, gt=0, description="Download capacity in Mbps")
-    upload_mbps: float = Field(100.0, gt=0, description="Upload capacity in Mbps")
+    # None = shaping already applied via POST /shape — skip re-shaping in /run.
+    # Provide explicit values (>0) to apply shaping as part of this call.
+    download_mbps: Optional[float] = Field(
+        None, gt=0, description="Download capacity in Mbps (omit to skip shaping)"
+    )
+    upload_mbps: Optional[float] = Field(
+        None, gt=0, description="Upload capacity in Mbps (omit to skip shaping)"
+    )
     latency_ms: float = Field(0, ge=0, description="One-way delay in ms")
     latency_location: Optional[Literal["upstream", "downstream", "both"]] = None
     qdisc: str = Field("pfifo", description="Queue discipline")
@@ -1140,43 +1146,47 @@ def run_experiment(req: RunExperimentRequest) -> RunExperimentResponse:
     """
     global CURRENT_BOTTLENECK_STATE, CURRENT_INTERFACES
 
-    # 1. Apply shaping
-    _validate_qdisc_request(req.qdisc, req.buffer_packets, req.qdisc_params)
-    state = BottleneckState(
-        download_mbps=req.download_mbps,
-        upload_mbps=req.upload_mbps,
-        latency_ms=req.latency_ms,
-        latency_location=req.latency_location,
-        qdisc=req.qdisc,
-        verified=False,
-        buffer_packets=req.buffer_packets,
-        qdisc_params=req.qdisc_params,
-    )
-    CURRENT_BOTTLENECK_STATE = state
-    CURRENT_INTERFACES = {
-        "downstream_iface": req.downstream_iface,
-        "upstream_iface": req.upstream_iface,
-    }
-    try:
-        apply_shaping(
-            downstream_iface=req.downstream_iface,
-            upstream_iface=req.upstream_iface,
-            download_mbps=req.download_mbps,
-            upload_mbps=req.upload_mbps,
+    # 1. Apply shaping (skipped when download_mbps/upload_mbps are None,
+    #    meaning the caller already shaped via POST /shape)
+    if req.download_mbps is not None or req.upload_mbps is not None:
+        dl = req.download_mbps or 100.0
+        ul = req.upload_mbps or 100.0
+        _validate_qdisc_request(req.qdisc, req.buffer_packets, req.qdisc_params)
+        state = BottleneckState(
+            download_mbps=dl,
+            upload_mbps=ul,
             latency_ms=req.latency_ms,
+            latency_location=req.latency_location,
             qdisc=req.qdisc,
+            verified=False,
             buffer_packets=req.buffer_packets,
             qdisc_params=req.qdisc_params,
-            latency_location=req.latency_location,
         )
-    except subprocess.CalledProcessError as exc:
-        CURRENT_BOTTLENECK_STATE = None
-        CURRENT_INTERFACES = None
-        raise HTTPException(status_code=500, detail=f"tc command failed: {exc}")
-    except Exception as exc:
-        CURRENT_BOTTLENECK_STATE = None
-        CURRENT_INTERFACES = None
-        raise HTTPException(status_code=500, detail=str(exc))
+        CURRENT_BOTTLENECK_STATE = state
+        CURRENT_INTERFACES = {
+            "downstream_iface": req.downstream_iface,
+            "upstream_iface": req.upstream_iface,
+        }
+        try:
+            apply_shaping(
+                downstream_iface=req.downstream_iface,
+                upstream_iface=req.upstream_iface,
+                download_mbps=dl,
+                upload_mbps=ul,
+                latency_ms=req.latency_ms,
+                qdisc=req.qdisc,
+                buffer_packets=req.buffer_packets,
+                qdisc_params=req.qdisc_params,
+                latency_location=req.latency_location,
+            )
+        except subprocess.CalledProcessError as exc:
+            CURRENT_BOTTLENECK_STATE = None
+            CURRENT_INTERFACES = None
+            raise HTTPException(status_code=500, detail=f"tc command failed: {exc}")
+        except Exception as exc:
+            CURRENT_BOTTLENECK_STATE = None
+            CURRENT_INTERFACES = None
+            raise HTTPException(status_code=500, detail=str(exc))
 
     # 2. Apply congestion control
     set_congestion(CongestionRequest(algorithm=req.cca, namespace=req.cca_namespace))

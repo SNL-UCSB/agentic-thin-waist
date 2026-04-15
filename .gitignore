@@ -222,3 +222,6 @@ __marimo__/
 docs/lit-survey/pdfs/*.pdf
 
 .codex
+
+# Local scratch captures (pcaps can exceed GitHub limits)
+junk/

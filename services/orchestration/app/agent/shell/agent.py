@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING, Any
 
 import requests
@@ -9,10 +10,12 @@ from langgraph.graph.message import MessagesState
 from langgraph.runtime import Runtime
 from pydantic import BaseModel, ConfigDict
 
-from app.agent.utils import get_model
+from app.agent.utils import get_model, log_claude_step
 
 if TYPE_CHECKING:
     from clients.netgent.src.main import NetGent
+
+WORKFLOW_INDEX_URL = "https://raw.githubusercontent.com/SNL-UCSB/netgent-workflow/main/workflows/index.json"
 
 
 class ShellWorkflowGenerationState(MessagesState):
@@ -33,9 +36,6 @@ class ChooseWorkflow(BaseModel):
     reasoning: str
     id: str | None = None
     parameters: dict[str, Any] | None = None
-
-
-WORKFLOW_INDEX_URL = "https://raw.githubusercontent.com/SNL-UCSB/netgent-workflow/main/workflows/index.json"
 
 
 def choose_workflow(
@@ -75,21 +75,51 @@ def choose_workflow(
     ]
 
     model = get_model()
+    log_claude_step(
+        "shell_choose_workflow",
+        prompt="\n\n".join(
+            str(msg.content) for msg in prompt if hasattr(msg, "content")
+        ),
+    )
     result: ChooseWorkflow = model.with_structured_output(ChooseWorkflow).invoke(prompt)
+    print(
+        f"[SHELL WF] LLM choose_workflow: is_valid={result.is_valid} id={result.id!r} params={result.parameters}"
+    )
+    log_claude_step(
+        "shell_choose_workflow",
+        reasoning=result.reasoning,
+        output=result.model_dump(),
+    )
 
     chosen_entry = next((w for w in available if w["id"] == result.id), None)
-    if chosen_entry and chosen_entry.get("link"):
+    reasoning = result.reasoning
+    has_creds = bool(
+        os.getenv("GOOGLE_API_KEY") or os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+    )
+
+    if result.is_valid and chosen_entry and chosen_entry.get("link"):
         try:
             workflow = requests.get(chosen_entry["link"], timeout=10).json()
         except Exception:
             workflow = {"id": result.id}
-    else:
+    elif result.is_valid and result.id:
         workflow = {"id": result.id}
+    else:
+        # is_valid=False: return empty workflow so orchestration ends via fail_no_workflow.
+        workflow = {}
+        if not has_creds:
+            reasoning = (
+                f"{result.reasoning} Workflow not present for this intent or invalid request, "
+                "and workflow generation is unavailable because Google credentials are not configured."
+            )
+            print(
+                "[SHELL WF] Invalid/no matching workflow and no Google creds; failing request"
+            )
 
     return {
         "workflow": workflow,
         "parameters": result.parameters,
-        "reasoning": result.reasoning,
+        "reasoning": reasoning,
         "chosen_workflow": result.model_dump(),
     }
 
@@ -98,6 +128,18 @@ def route_valid_workflow(state: ShellWorkflowGenerationState) -> str:
     """Route based on whether the chosen workflow is valid."""
     chosen = state.get("chosen_workflow")
     if chosen and chosen.get("is_valid"):
+        print(
+            f"[SHELL WF] route_valid_workflow: is_valid=True, id={chosen.get('id')!r}"
+        )
+        return "choose_workflow"
+    has_creds = bool(
+        os.getenv("GOOGLE_API_KEY") or os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+    )
+    print(
+        f"[SHELL WF] route_valid_workflow: is_valid=False, has_google_creds={has_creds}"
+    )
+    if not has_creds:
+        print("[SHELL WF] No Google creds — ending with invalid/missing workflow")
         return "choose_workflow"
     return "generate"
 
