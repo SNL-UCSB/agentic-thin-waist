@@ -12,7 +12,10 @@ from playwright.async_api import Playwright
 
 load_dotenv()
 
-BROWSER_USE_HEADLESS = os.getenv("BROWSER_USE_HEADLESS", "true").lower() == "true"
+
+def _is_headless() -> bool:
+    return os.getenv("BROWSER_USE_HEADLESS", "true").lower() == "true"
+
 
 IGNORED_ACTIONS = {
     "done",
@@ -158,16 +161,16 @@ def build_controller(exclude_actions: list[str] | None = None) -> Controller:
     @controller.registry.action(
         "Wait for x seconds (minimum 1 second actual sleep). "
         "Use this to pause before the next action when a page needs time to load or animate. "
-        "Reduces wait by 3 seconds to account for LLM overhead, but always sleeps at least 1 second. "
+        "Sleeps for the requested duration, rounded down to a whole number of seconds. "
         "Accepts a sensitive_data placeholder (e.g. x_wait) in place of a literal number."
     )
     async def wait(seconds: str = "3") -> ActionResult:
         try:
-            seconds_int = int(seconds)
+            seconds_int = int(float(seconds))
         except (ValueError, TypeError):
             seconds_int = 3
-        actual_seconds = max(seconds_int - 3, 1)
-        msg = f"Waiting for {actual_seconds + 3} seconds"
+        actual_seconds = max(seconds_int, 1)
+        msg = f"Waiting for {actual_seconds} seconds"
         await asyncio.sleep(actual_seconds)
         return ActionResult(extracted_content=msg)
 
@@ -186,7 +189,7 @@ async def open_browser_session(
     if endpoint:
         browser = await playwright.chromium.connect(endpoint)
     else:
-        browser = await playwright.chromium.launch(headless=BROWSER_USE_HEADLESS)
+        browser = await playwright.chromium.launch(headless=_is_headless())
     context_kwargs: dict[str, Any] = {}
     if record_har_path:
         context_kwargs["record_har_path"] = record_har_path

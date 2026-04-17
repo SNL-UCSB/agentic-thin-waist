@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from typing import Any, Literal
 
 from api.utils import (
@@ -80,7 +81,10 @@ def _run_netgent_job(job_id: str, *, operation: Literal["generate", "execute"]) 
             update_job_status(session, job_id, "running")
             session.commit()
 
-        client = NetGent()
+        client = NetGent(
+            cdp_url=os.environ.get("BROWSERLESS_WS_ENDPOINT", "").strip() or None,
+            headless=True,
+        )
         if operation == "generate":
             agent_state = asyncio.run(
                 client.generate(specification, type=workflow_type)
