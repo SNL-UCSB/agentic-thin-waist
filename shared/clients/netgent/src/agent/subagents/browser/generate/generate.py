@@ -434,6 +434,19 @@ def _selector_from_interacted_element(interacted_element: Any) -> str | None:
     return selectors[0] if selectors else None
 
 
+def _coerce_wait_seconds(value: Any) -> int:
+    if isinstance(value, bool):
+        return 3
+    if isinstance(value, int | float):
+        return max(int(value), 1)
+    if isinstance(value, str):
+        try:
+            return max(int(float(value.strip())), 1)
+        except ValueError:
+            return 3
+    return 3
+
+
 def _convert_action(action: dict[str, Any]) -> WorkflowAction | None:
     action_type = action.get("type")
     if not isinstance(action_type, str):
@@ -466,10 +479,8 @@ def _convert_action(action: dict[str, Any]) -> WorkflowAction | None:
         return WorkflowAction(type="go_back", params={})
 
     if workflow_action_type == "wait":
-        seconds = params.get("seconds", 3)
-        if not isinstance(seconds, int | float):
-            seconds = 3
-        return WorkflowAction(type="wait", params={"seconds": int(seconds)})
+        seconds = _coerce_wait_seconds(params.get("seconds", 3))
+        return WorkflowAction(type="wait", params={"seconds": seconds})
 
     if workflow_action_type == "input_text":
         text = params.get("text")

@@ -1,0 +1,34 @@
+{
+  "specification": "1. Go to <secret>url</secret>.\n    2. If a consent, cookie, or welcome dialog appears, dismiss it without signing in.\n    3. Make sure the video plays\n    4. Wait for the video player page to finish loading.\n    5. If playback has not started, press the Play button.\n    6. When the video player is active and playback is running, wait for <secret>watch_seconds</secret> seconds before stopping.",
+  "states": [
+    {
+      "checks": [
+        {
+          "type": "always_true",
+          "params": {}
+        }
+      ],
+      "actions": [
+        {
+          "type": "go_to_url",
+          "params": {
+            "url": "{{url}}",
+            "new_tab": false
+          }
+        },
+        {
+          "type": "wait",
+          "params": {
+            "seconds": "{{watch_seconds}}"
+          }
+        }
+      ],
+      "end_state": "Workflow Completed",
+      "executed": []
+    }
+  ],
+  "parameters": [
+    "url",
+    "watch_seconds"
+  ]
+}
