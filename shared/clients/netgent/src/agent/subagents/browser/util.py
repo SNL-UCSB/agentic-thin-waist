@@ -12,8 +12,10 @@ from playwright.async_api import Playwright
 
 load_dotenv()
 
+
 def _is_headless() -> bool:
     return os.getenv("BROWSER_USE_HEADLESS", "true").lower() == "true"
+
 
 IGNORED_ACTIONS = {
     "done",

@@ -186,10 +186,12 @@ def shell_workflow(state: OrchestratorState) -> dict[str, Any]:
             "reasoning": "",
             "messages": [],
         },
-        context=ShellWorkflowContext(netgent=NetGent(
-            cdp_url=os.environ.get("BROWSERLESS_WS_ENDPOINT", "").strip() or None,
-            headless=True,
-        )),
+        context=ShellWorkflowContext(
+            netgent=NetGent(
+                cdp_url=os.environ.get("BROWSERLESS_WS_ENDPOINT", "").strip() or None,
+                headless=True,
+            )
+        ),
     )
     return {
         "workflow": result.get("workflow") or {},
@@ -219,10 +221,12 @@ def browser_workflow(state: OrchestratorState) -> dict[str, Any]:
             "reasoning": "",
             "messages": [],
         },
-        context=BrowserWorkflowContext(netgent=NetGent(
-            cdp_url=os.environ.get("BROWSERLESS_WS_ENDPOINT", "").strip() or None,
-            headless=True,
-        )),
+        context=BrowserWorkflowContext(
+            netgent=NetGent(
+                cdp_url=os.environ.get("BROWSERLESS_WS_ENDPOINT", "").strip() or None,
+                headless=True,
+            )
+        ),
     )
     return {
         "workflow": result.get("workflow") or {},
