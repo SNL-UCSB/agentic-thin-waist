@@ -36,6 +36,29 @@ class NetGent:
         result = asyncio.run(client.execute(workflow, parameters={"host": "8.8.8.8", "count": "3"}))
     """
 
+    def __init__(
+        self,
+        *,
+        cdp_url: str | None = None,
+        headless: bool = False,
+    ) -> None:
+        """Create a NetGent client.
+
+        Args:
+            cdp_url:  Remote Chromium CDP URL (e.g. ``ws://browserless:3000/...``).
+                      When truthy, browser workflows use **CDP mode** and connect
+                      to the remote browser. When ``None`` or empty, uses
+                      **Local mode** and launches Chromium on this machine.
+            headless: In Local mode, run Chromium headless. Defaults to ``False``
+                      (visible browser). Ignored in CDP mode.
+        """
+        self.cdp_url = cdp_url
+        self.headless = headless
+        # Propagate to env vars so the internal LLM agent / browser_use
+        # (which read these directly) pick up the same configuration.
+        os.environ["BROWSERLESS_WS_ENDPOINT"] = cdp_url or ""
+        os.environ["BROWSER_USE_HEADLESS"] = "true" if headless else "false"
+
     @staticmethod
     def _create_agent() -> Any:
         from clients.netgent.src.agent.agent import create_agent
@@ -97,9 +120,14 @@ class NetGent:
         environments that do not have the LLM dependencies installed
         (e.g. the substrate-worker container).
 
-        For browser/hybrid workflows, connects to the Chromium instance via
-        CDP (using ``BROWSERLESS_WS_ENDPOINT``) and manages the browser
-        lifecycle automatically.
+        For browser/hybrid workflows, selects between two modes based on
+        the ``cdp_url`` passed to ``NetGent(...)``:
+
+        * **CDP mode** — if ``cdp_url`` is set, connects to the remote Chromium
+          instance (e.g. Browserless) via CDP.
+        * **Local mode** — otherwise, launches Chromium on this machine.
+          Headless is controlled by the ``headless=`` kwarg on ``NetGent(...)``
+          (defaults to ``False`` / visible).
 
         Args:
             workflow:    Workflow dict with specification, states, etc.
@@ -146,7 +174,7 @@ class NetGent:
 
         from playwright.async_api import async_playwright
 
-        endpoint = os.environ.get("BROWSERLESS_WS_ENDPOINT", "").strip()
+        endpoint = (self.cdp_url or "").strip()
         har_path: str | None = None
 
         if record_har:
@@ -156,9 +184,11 @@ class NetGent:
 
         async with async_playwright() as pw:
             if endpoint:
+                # CDP mode: connect to a remote browser (e.g. Browserless)
                 browser = await pw.chromium.connect(endpoint)
             else:
-                browser = await pw.chromium.launch(headless=True)
+                # Local mode: launch Chromium on this machine.
+                browser = await pw.chromium.launch(headless=self.headless)
 
             context_kwargs: dict[str, Any] = {}
             if har_path:

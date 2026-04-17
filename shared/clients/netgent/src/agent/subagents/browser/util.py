@@ -12,7 +12,8 @@ from playwright.async_api import Playwright
 
 load_dotenv()
 
-BROWSER_USE_HEADLESS = os.getenv("BROWSER_USE_HEADLESS", "true").lower() == "true"
+def _is_headless() -> bool:
+    return os.getenv("BROWSER_USE_HEADLESS", "true").lower() == "true"
 
 IGNORED_ACTIONS = {
     "done",
@@ -186,7 +187,7 @@ async def open_browser_session(
     if endpoint:
         browser = await playwright.chromium.connect(endpoint)
     else:
-        browser = await playwright.chromium.launch(headless=BROWSER_USE_HEADLESS)
+        browser = await playwright.chromium.launch(headless=_is_headless())
     context_kwargs: dict[str, Any] = {}
     if record_har_path:
         context_kwargs["record_har_path"] = record_har_path

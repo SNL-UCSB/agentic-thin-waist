@@ -1195,7 +1195,10 @@ def run_experiment(req: RunExperimentRequest) -> RunExperimentResponse:
     from clients.netgent.src.main import NetGent
 
     try:
-        client = NetGent()
+        client = NetGent(
+            cdp_url=os.environ.get("BROWSERLESS_WS_ENDPOINT", "").strip() or None,
+            headless=True,
+        )
         result = client.run_workflow(
             req.workflow,
             type=req.runtime,

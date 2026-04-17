@@ -83,7 +83,10 @@ def run_workflow(workflow_path, runtime, parameters):
 
     from clients.netgent.src.main import NetGent
 
-    client = NetGent()
+    client = NetGent(
+        cdp_url=os.environ.get("BROWSERLESS_WS_ENDPOINT", "").strip() or None,
+        headless=True,
+    )
     result = client.run_workflow(workflow, parameters=parameters, type=runtime)
 
     print("\n[+] Workflow Output:")
