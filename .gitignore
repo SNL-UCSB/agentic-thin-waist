@@ -225,3 +225,7 @@ docs/lit-survey/pdfs/*.pdf
 
 # Local scratch captures (pcaps can exceed GitHub limits)
 junk/
+
+# AWS provisioner cache and keys
+.agentic-thin-waist/
+*.pem
