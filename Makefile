@@ -1,4 +1,4 @@
-.PHONY: help build up down logs test clean install
+.PHONY: help build up down logs test clean install up-aws down-aws logs-aws status-aws
 
 help:
 	@echo "Agentic Thin Waist - Available Commands"
@@ -12,6 +12,12 @@ help:
 	@echo "make clean      - Clean up containers and volumes"
 	@echo "make status     - Check service status"
 	@echo "make shell      - Open shell in experiment-api container"
+	@echo ""
+	@echo "AWS Hybrid Mode (local services + AWS EC2 substrate workers):"
+	@echo "make up-aws     - Start with AWS substrate workers"
+	@echo "make down-aws   - Stop AWS hybrid stack"
+	@echo "make logs-aws   - View logs (AWS mode)"
+	@echo "make status-aws - Check service status (AWS mode)"
 
 install:
 	pip install -r requirements.txt
@@ -90,6 +96,49 @@ version:
 	@echo "Agentic Thin Waist v0.1.0"
 	@echo "Development Build"
 	@echo "Last Updated: 2026-03-04"
+
+# AWS hybrid deployment: local services + AWS EC2 substrate workers
+up-aws:
+	@echo "Starting hybrid deployment (local services + AWS substrate workers)..."
+	@echo "AWS Region: $${AWS_REGION:-us-west-1}"
+	@echo ""
+	@echo "NOTE: On first run, AWS infrastructure provisioning takes ~10 minutes."
+	@echo "      Subsequent runs reuse the cached AMI."
+	@echo ""
+	docker compose -f docker-compose.yml -f docker-compose.aws.yml up -d
+	@echo ""
+	@echo "Waiting for services to be ready (max 30 seconds)..."
+	@for i in {1..30}; do \
+		if curl -s http://localhost:8005/health > /dev/null 2>&1; then \
+			echo "All services ready!"; \
+			break; \
+		fi; \
+		if [ $$i -eq 30 ]; then \
+			echo "Services still starting, check with 'make logs-aws'"; \
+		else \
+			echo -n "."; \
+			sleep 1; \
+		fi; \
+	done
+	@echo ""
+	@echo "Services running on:"
+	@echo "  Experiment API     : http://localhost:8000"
+	@echo "  CTP Service        : http://localhost:8001"
+	@echo "  Substrate Worker   : AWS EC2 (provisioned on demand)"
+	@echo "  Telemetry Service  : http://localhost:8004"
+	@echo "  Orchestration      : http://localhost:8005"
+	@echo ""
+	@echo "Disabled in AWS mode: substrate-worker, netgent-service, netgent-worker"
+
+down-aws:
+	docker compose -f docker-compose.yml -f docker-compose.aws.yml down
+
+logs-aws:
+	docker compose -f docker-compose.yml -f docker-compose.aws.yml logs -f
+
+status-aws:
+	@echo "Service Status (AWS hybrid mode):"
+	@docker compose -f docker-compose.yml -f docker-compose.aws.yml ps
 
 # Cloud deployment commands
 build-cloud:

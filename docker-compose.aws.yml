@@ -1,0 +1,84 @@
+# AWS hybrid deployment: local services + AWS EC2 substrate workers
+#
+# Usage:
+#   make up-aws                    # or:
+#   docker compose -f docker-compose.yml -f docker-compose.aws.yml up -d
+#
+# Prerequisites:
+#   - Docker Compose v5+ (check with: docker compose version)
+#   - AWS credentials configured (aws configure / env vars / ~/.aws)
+#   - .env file with local service config (copy from .env.example)
+#
+# What happens:
+#   - postgres, minio, ctp-service, telemetry-service, experiment-api,
+#     and orchestration run locally as normal
+#   - substrate-worker, netgent-service, and netgent-worker do NOT start
+#   - When the orchestrator needs a substrate worker, it provisions an
+#     EC2 instance on demand via the AWSBackend
+#   - On first run, AWS infrastructure (key pair, security group, AMI)
+#     is auto-provisioned (~10 min). Subsequent runs reuse the cached AMI.
+#
+# Limitations:
+#   - Browser workflows (Playwright) are not supported in AWS mode
+#     since they require PID/network namespace sharing with a local
+#     substrate worker. Shell workflows (iperf3, ping, ndt) work fine.
+
+services:
+  # Override orchestration to use AWS backend
+  orchestration:
+    environment:
+      - CONNECTIVITY_BACKEND=aws
+      - AWS_REGION=${AWS_REGION:-us-west-1}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:-}
+      - AWS_SUBSTRATE_ECR_URI=${AWS_SUBSTRATE_ECR_URI:-}
+      - AWS_SUBSTRATE_SECURITY_GROUP=${AWS_SUBSTRATE_SECURITY_GROUP:-}
+      - AWS_SUBSTRATE_AMI=${AWS_SUBSTRATE_AMI:-}
+      - AWS_SUBSTRATE_INSTANCE_TYPE=${AWS_SUBSTRATE_INSTANCE_TYPE:-c5.xlarge}
+      - AWS_SUBSTRATE_AUTO_PROVISION=${AWS_SUBSTRATE_AUTO_PROVISION:-true}
+      - AWS_SUBSTRATE_BOOT_TIMEOUT=${AWS_SUBSTRATE_BOOT_TIMEOUT:-300}
+      - AWS_SUBSTRATE_KEY_PAIR=${AWS_SUBSTRATE_KEY_PAIR:-}
+      - AWS_SUBSTRATE_IAM_PROFILE=${AWS_SUBSTRATE_IAM_PROFILE:-}
+      - REPO_ROOT=/repo
+    depends_on:
+      experiment-api:
+        condition: service_healthy
+      ctp-service:
+        condition: service_healthy
+      telemetry-service:
+        condition: service_healthy
+    volumes:
+      - ./services/orchestration:/app
+      - ./shared:/shared
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Mount AWS credentials from host (fallback if env vars not set)
+      - ${HOME}/.aws:/root/.aws
+      # Persist provisioner cache so AMI isn't rebuilt on container restart
+      - ${HOME}/.agentic-thin-waist:/root/.agentic-thin-waist
+      # Mount repo root so provisioner can SCP substrate-worker code to EC2
+      - .:/repo:ro
+
+  # Override experiment-api to remove substrate-worker dependency
+  experiment-api:
+    depends_on:
+      ctp-service:
+        condition: service_healthy
+      telemetry-service:
+        condition: service_healthy
+
+  # Don't start local substrate worker — runs on AWS EC2 instead
+  substrate-worker:
+    deploy:
+      replicas: 0
+
+  # Don't start netgent — requires local substrate worker PID namespace
+  netgent-service:
+    pid: ""
+    deploy:
+      replicas: 0
+
+  netgent-worker:
+    pid: ""
+    deploy:
+      replicas: 0

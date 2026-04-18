@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -286,20 +287,350 @@ class LocalDockerBackend(ConnectivityBackend):
 # ---------------------------------------------------------------------------
 
 
+def _build_user_data(
+    *,
+    worker_image: str,
+    telemetry_url: str,
+    ecr_region: str = "",
+) -> str:
+    """Build the EC2 user-data script that starts the substrate worker.
+
+    The script runs on first boot (cloud-init) and:
+    1. Installs Docker if not present
+    2. Authenticates to ECR if the image is an ECR reference
+    3. Pulls the substrate-worker image
+    4. Launches it in privileged host-network mode
+    """
+    env_flags = f"-e TELEMETRY_SERVICE_URL={telemetry_url}" if telemetry_url else ""
+
+    # Build ECR login block if image is from ECR
+    ecr_login = ""
+    if ".dkr.ecr." in worker_image and ecr_region:
+        registry = worker_image.split("/")[0]
+        ecr_login = f"""
+# Authenticate Docker to ECR
+echo "Authenticating to ECR..."
+aws ecr get-login-password --region {ecr_region} | \\
+    docker login --username AWS --password-stdin {registry}
+"""
+
+    return f"""#!/bin/bash
+set -euo pipefail
+exec > /var/log/substrate-worker-init.log 2>&1
+
+echo "Starting substrate worker at $(date)"
+
+# Install Docker if not present
+if ! command -v docker &> /dev/null; then
+    echo "Installing Docker..."
+    yum update -y -q
+    yum install -y -q docker aws-cli-2 2>/dev/null || yum install -y -q docker awscli
+    systemctl enable docker
+fi
+
+# Ensure Docker is running
+systemctl start docker || true
+sleep 2
+{ecr_login}
+# Pull image
+echo "Pulling image {worker_image}..."
+docker pull {worker_image}
+
+# Run substrate worker
+docker run -d \\
+    --name substrate-worker \\
+    --restart unless-stopped \\
+    --privileged \\
+    --cap-add NET_ADMIN \\
+    --cap-add SYS_ADMIN \\
+    --net=host \\
+    {env_flags} \\
+    {worker_image}
+
+echo "Substrate worker started at $(date)"
+"""
+
+
 class AWSBackend(ConnectivityBackend):
-    """AWS ECS/Fargate substrate worker provisioning — not yet implemented."""
+    """Provisions substrate workers as EC2 instances on AWS.
+
+    Each worker is a dedicated EC2 instance running the substrate-worker
+    Docker container in ``--privileged --net=host`` mode, giving full
+    access to ``tc``/``netem`` for traffic shaping.
+
+    When ``AWS_SUBSTRATE_AUTO_PROVISION=true`` (the default), the backend
+    automatically creates the ECR repository, pushes the Docker image,
+    and creates a security group on first use.  This takes ~2-3 minutes
+    on the first call; results are cached to
+    ``~/.agentic-thin-waist/aws-resources.json`` for subsequent runs.
+
+    Prerequisites:
+        1. AWS credentials configured (``aws configure`` or env vars).
+        2. Either:
+           a. Set ``AWS_SUBSTRATE_ECR_URI`` and ``AWS_SUBSTRATE_SECURITY_GROUP``
+              to use pre-existing resources, OR
+           b. Leave them blank and let auto-provisioning handle it.
+
+    See :mod:`app.engine.aws_config` for the full list of environment
+    variables.
+    """
+
+    def __init__(self) -> None:
+        from app.engine.aws_config import AWSConfig
+
+        self._config = AWSConfig()
+        self._config.validate()
+        self._workers: dict[str, WorkerInfo] = {}
+        self._provisioned = False
+        self._docker_ami_id: str = ""  # Populated by auto-provisioning
+
+        try:
+            import boto3
+        except ImportError:
+            raise ImportError(
+                "boto3 is required for the AWS backend. "
+                "Install it with: pip install boto3"
+            )
+        self._ec2 = boto3.client("ec2", region_name=self._config.region)
+
+    # --- Public API -------------------------------------------------------
 
     def create_worker(self, config: dict[str, Any]) -> WorkerInfo:
-        raise NotImplementedError(
-            "AWS backend is not implemented. "
-            "Set CONNECTIVITY_BACKEND=local_docker or provide an AWS ECS task definition."
+        """Launch an EC2 instance running the substrate-worker container.
+
+        Supported *config* keys (all optional, override env-var defaults):
+            ami (str)            — AMI ID (uses Docker-ready AMI if blank)
+            instance_type (str)  — EC2 instance type
+            security_group (str) — Security group ID
+            subnet_id (str)      — VPC subnet ID
+            key_pair (str)       — SSH key pair name
+            telemetry_url (str)  — TELEMETRY_SERVICE_URL for the container
+            ecr_uri (str)        — ECR image URI (e.g. ACCOUNT.dkr.ecr.REGION.amazonaws.com/repo)
+            boot_timeout (int)   — Max seconds to wait for healthy worker
+        """
+        # Auto-provision infrastructure on first call if needed
+        if self._config.needs_provisioning and not self._provisioned:
+            self._auto_provision()
+
+        ami = config.get("ami", self._docker_ami_id)
+        instance_type = config.get("instance_type", self._config.instance_type)
+        sg = config.get("security_group", self._config.security_group_id)
+        subnet = config.get("subnet_id", self._config.subnet_id)
+        key_pair = config.get("key_pair", self._config.key_pair)
+        telemetry_url = config.get("telemetry_url", self._config.telemetry_url)
+        ecr_uri = config.get("ecr_uri", self._config.ecr_uri)
+        worker_image = f"{ecr_uri}:latest" if ecr_uri else "substrate-worker"
+        boot_timeout = int(config.get("boot_timeout", self._config.boot_timeout))
+
+        worker_id = f"worker-{uuid.uuid4().hex[:8]}"
+
+        user_data = _build_user_data(
+            worker_image=worker_image,
+            telemetry_url=telemetry_url,
+            ecr_region=self._config.region,
         )
 
+        run_kwargs: dict[str, Any] = {
+            "ImageId": ami,
+            "InstanceType": instance_type,
+            "MinCount": 1,
+            "MaxCount": 1,
+            "SecurityGroupIds": [sg],
+            "UserData": user_data,
+            "TagSpecifications": [
+                {
+                    "ResourceType": "instance",
+                    "Tags": [
+                        {"Key": "Name", "Value": f"substrate-worker-{worker_id}"},
+                        {"Key": "substrate_worker_id", "Value": worker_id},
+                        {"Key": "Project", "Value": "agentic-thin-waist"},
+                        {"Key": "ManagedBy", "Value": "orchestration"},
+                    ],
+                }
+            ],
+        }
+        if subnet:
+            run_kwargs["SubnetId"] = subnet
+        if key_pair:
+            run_kwargs["KeyName"] = key_pair
+        if self._config.iam_instance_profile:
+            run_kwargs["IamInstanceProfile"] = {
+                "Name": self._config.iam_instance_profile,
+            }
+
+        # Launch instance
+        resp = self._ec2.run_instances(**run_kwargs)
+        instance_id = resp["Instances"][0]["InstanceId"]
+        logger.info(
+            "Launched EC2 instance %s for worker %s (ami=%s, type=%s)",
+            instance_id,
+            worker_id,
+            ami,
+            instance_type,
+        )
+
+        # Wait for running state + public IP
+        try:
+            public_ip = self._wait_for_instance(instance_id, boot_timeout)
+        except Exception:
+            logger.error("Instance %s failed to start, terminating", instance_id)
+            self._terminate_instance(instance_id)
+            raise
+
+        endpoint = f"http://{public_ip}:{_SUBSTRATE_CONTAINER_PORT}"
+
+        # Wait for substrate-worker /health to respond
+        try:
+            self._wait_for_health(endpoint, boot_timeout)
+        except Exception:
+            logger.error(
+                "Worker health check failed on %s, terminating %s",
+                endpoint,
+                instance_id,
+            )
+            self._terminate_instance(instance_id)
+            raise
+
+        info = WorkerInfo(
+            worker_id=worker_id,
+            endpoint=endpoint,
+            backend="aws",
+            container_id=instance_id,
+            metadata={
+                "instance_id": instance_id,
+                "instance_type": instance_type,
+                "ami": ami,
+                "public_ip": public_ip,
+                "region": self._config.region,
+            },
+        )
+        self._workers[worker_id] = info
+        logger.info(
+            "AWS worker %s ready → %s (instance %s)",
+            worker_id,
+            endpoint,
+            instance_id,
+        )
+        return info
+
     def destroy_worker(self, worker_id: str) -> None:
-        raise NotImplementedError("AWS backend is not implemented.")
+        """Terminate the EC2 instance for *worker_id*."""
+        info = self._get(worker_id)
+        instance_id = info.metadata.get("instance_id") or info.container_id
+        if instance_id:
+            self._terminate_instance(instance_id)
+            logger.info(
+                "Terminated EC2 instance %s for worker %s",
+                instance_id,
+                worker_id,
+            )
+        del self._workers[worker_id]
 
     def get_worker_info(self, worker_id: str) -> WorkerInfo:
-        raise NotImplementedError("AWS backend is not implemented.")
+        return self._get(worker_id)
+
+    # --- Internals --------------------------------------------------------
+
+    def _get(self, worker_id: str) -> WorkerInfo:
+        info = self._workers.get(worker_id)
+        if info is None:
+            raise KeyError(f"Unknown worker_id: {worker_id!r}")
+        return info
+
+    def _terminate_instance(self, instance_id: str) -> None:
+        try:
+            self._ec2.terminate_instances(InstanceIds=[instance_id])
+        except Exception as exc:
+            logger.warning("Failed to terminate instance %s: %s", instance_id, exc)
+
+    def _wait_for_instance(self, instance_id: str, timeout: int) -> str:
+        """Poll until instance is running and has a public IP. Returns the IP."""
+        deadline = time.monotonic() + timeout
+        poll_interval = 5
+
+        while time.monotonic() < deadline:
+            resp = self._ec2.describe_instances(InstanceIds=[instance_id])
+            instance = resp["Reservations"][0]["Instances"][0]
+            state = instance["State"]["Name"]
+
+            if state == "terminated" or state == "shutting-down":
+                raise RuntimeError(
+                    f"Instance {instance_id} entered state '{state}' "
+                    f"before becoming ready"
+                )
+
+            if state == "running":
+                public_ip = instance.get("PublicIpAddress")
+                if public_ip:
+                    logger.info("Instance %s running at %s", instance_id, public_ip)
+                    return public_ip
+
+            logger.debug("Waiting for instance %s (state=%s)...", instance_id, state)
+            time.sleep(poll_interval)
+
+        raise TimeoutError(
+            f"Instance {instance_id} did not reach running state with a "
+            f"public IP within {timeout}s"
+        )
+
+    def _wait_for_health(self, endpoint: str, timeout: int) -> None:
+        """Poll ``GET /health`` until the substrate worker responds 200."""
+        deadline = time.monotonic() + timeout
+        poll_interval = 5
+        health_url = f"{endpoint}/health"
+        last_error: str = ""
+
+        while time.monotonic() < deadline:
+            try:
+                with httpx.Client(timeout=5) as client:
+                    resp = client.get(health_url)
+                if resp.status_code == 200:
+                    logger.info("Health check passed at %s", health_url)
+                    return
+                last_error = f"HTTP {resp.status_code}"
+            except Exception as exc:
+                last_error = str(exc)
+
+            logger.debug("Waiting for health at %s (%s)...", health_url, last_error)
+            time.sleep(poll_interval)
+
+        raise TimeoutError(
+            f"Substrate worker at {endpoint} did not become healthy "
+            f"within {timeout}s (last error: {last_error})"
+        )
+
+    def _auto_provision(self) -> None:
+        """Run the AWS provisioner to create ECR repo, push image, and create SG.
+
+        Updates ``self._config`` fields in-place (via object.__setattr__
+        since the dataclass is frozen) so that subsequent calls use the
+        provisioned resources.
+        """
+        from app.engine.aws_provisioner import AWSProvisioner
+
+        provisioner = AWSProvisioner(region=self._config.region)
+        result = provisioner.ensure_infrastructure()
+
+        # Update the frozen config with provisioned values
+        object.__setattr__(self._config, "ecr_uri", result.ecr_uri)
+        object.__setattr__(self._config, "security_group_id", result.security_group_id)
+        if not self._config.key_pair:
+            object.__setattr__(self._config, "key_pair", result.key_pair_name)
+        if result.instance_profile_name and not self._config.iam_instance_profile:
+            object.__setattr__(
+                self._config, "iam_instance_profile", result.instance_profile_name
+            )
+        self._docker_ami_id = result.docker_ami_id
+
+        self._provisioned = True
+        logger.info(
+            "Auto-provisioned AWS resources: ECR=%s, SG=%s, Key=%s, AMI=%s, Profile=%s",
+            result.ecr_uri,
+            result.security_group_id,
+            result.key_pair_name,
+            result.docker_ami_id,
+            result.instance_profile_name,
+        )
 
 
 class GCPBackend(ConnectivityBackend):
