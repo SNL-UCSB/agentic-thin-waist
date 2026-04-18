@@ -7,7 +7,6 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -43,9 +42,9 @@ def _mock_ec2_client(
                     {
                         "InstanceId": instance_id,
                         "State": {"Name": start_state},
-                        "PublicIpAddress": public_ip
-                        if start_state == "running"
-                        else None,
+                        "PublicIpAddress": (
+                            public_ip if start_state == "running" else None
+                        ),
                     }
                 ]
             }
