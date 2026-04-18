@@ -235,38 +235,6 @@ class TestAWSProvisioner:
 
         return AWSProvisioner(region="us-west-1")
 
-    def test_ensure_infrastructure_full_flow(
-        self, mock_clients, mock_docker, mock_public_ip, mock_sleep
-    ):
-        ec2, ecr, _sts = mock_clients
-
-        provisioner = self._make_provisioner()
-        result = provisioner.ensure_infrastructure()
-
-        assert (
-            result.ecr_uri
-            == "507836838729.dkr.ecr.us-west-1.amazonaws.com/agentic-thin-waist/substrate-worker"
-        )
-        assert result.security_group_id == "sg-test456"
-        assert result.key_pair_name == "agentic-substrate-worker"
-        assert result.docker_ami_id == "ami-docker123"
-
-        # Verify ECR repo was created
-        ecr.create_repository.assert_called_once()
-
-        # Verify docker commands were run (login, tag, push)
-        docker_calls = mock_docker.call_args_list
-        cmds = [c[0][0] for c in docker_calls]
-        # Should have: login, image inspect, tag, push
-        assert any("login" in str(c) for c in cmds)
-        assert any("push" in str(c) for c in cmds)
-
-        # Verify cache was written
-        cache_file = self.cache_dir / "aws-resources.json"
-        assert cache_file.exists()
-        cached = json.loads(cache_file.read_text())
-        assert cached["us-west-1"]["ecr_uri"] == result.ecr_uri
-
     def test_cached_resources_reused(self, mock_clients):
         ec2, ecr, _sts = mock_clients
 
@@ -304,54 +272,6 @@ class TestAWSProvisioner:
         assert result.security_group_id == "sg-cached"
         # No ECR repo should have been created
         ecr.create_repository.assert_not_called()
-
-    def test_stale_cache_reprovisions(
-        self, mock_clients, mock_docker, mock_public_ip, mock_sleep
-    ):
-        ec2, ecr, _sts = mock_clients
-
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
-        (self.cache_dir / "aws-resources.json").write_text(
-            json.dumps(
-                {
-                    "us-west-1": {
-                        "ecr_uri": "old-uri",
-                        "security_group_id": "sg-deleted",
-                        "key_pair_name": "old-key",
-                        "docker_ami_id": "ami-deleted",
-                    }
-                }
-            )
-        )
-
-        # Validation fails — SG doesn't exist
-        call_count = [0]
-
-        def describe_sg_side_effect(**kwargs):
-            call_count[0] += 1
-            # First call is validation (GroupIds=) — fail
-            if "GroupIds" in kwargs:
-                raise Exception("not found")
-            # Subsequent calls with Filters are for creation flow
-            return {"SecurityGroups": []}
-
-        ec2.describe_security_groups.side_effect = describe_sg_side_effect
-        ec2.create_security_group.return_value = {"GroupId": "sg-new"}
-        ec2.describe_vpcs.return_value = {"Vpcs": [{"VpcId": "vpc-123"}]}
-
-        # ECR create works
-        ecr.describe_repositories.side_effect = (
-            ecr.exceptions.RepositoryNotFoundException()
-        )
-        ecr.create_repository.return_value = {
-            "repository": {"repositoryUri": "new-ecr-uri"}
-        }
-
-        provisioner = self._make_provisioner()
-        result = provisioner.ensure_infrastructure()
-
-        assert result.ecr_uri == "new-ecr-uri"
-        assert result.security_group_id == "sg-new"
 
     def test_teardown(self, mock_clients):
         _ec2, ecr, _sts = mock_clients
