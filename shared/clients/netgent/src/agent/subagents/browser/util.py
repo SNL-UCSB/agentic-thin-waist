@@ -17,6 +17,61 @@ def _is_headless() -> bool:
     return os.getenv("BROWSER_USE_HEADLESS", "true").lower() == "true"
 
 
+# Fake silent/black media devices are fed to any site that requests mic/camera,
+# and permission prompts are auto-accepted so automation never stalls on a dialog.
+# Real host mic/camera are never opened.
+MEDIA_STREAM_DISABLE_ARGS = [
+    "--use-fake-device-for-media-stream",
+    "--use-fake-ui-for-media-stream",
+]
+
+# Strips the most obvious automation fingerprints that sites like Google Meet
+# use to block Playwright/Puppeteer sessions. Covers both the Chrome-level
+# "Chrome is being controlled by automated test software" banner and the JS
+# `navigator.webdriver === true` signal.
+STEALTH_LAUNCH_ARGS = [
+    "--disable-blink-features=AutomationControlled",
+    "--disable-features=IsolateOrigins,site-per-process",
+    "--disable-site-isolation-trials",
+    "--no-default-browser-check",
+    "--no-first-run",
+    "--password-store=basic",
+    "--use-mock-keychain",
+    "--disable-infobars",
+    "--exclude-switches=enable-automation",
+]
+
+# A recent Chrome-on-macOS UA. Using the default Playwright HeadlessChrome /
+# Chrome-for-Testing UA is a dead giveaway to bot detection.
+STEALTH_USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/145.0.0.0 Safari/537.36"
+)
+
+# Injected into every page before any site script runs. Patches the fingerprints
+# that `navigator.webdriver`-style checks inspect.
+STEALTH_INIT_SCRIPT = """
+Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+if (!window.chrome) { window.chrome = {}; }
+if (!window.chrome.runtime) { window.chrome.runtime = {}; }
+Object.defineProperty(navigator, 'languages', {
+    get: () => ['en-US', 'en'],
+});
+Object.defineProperty(navigator, 'plugins', {
+    get: () => [1, 2, 3, 4, 5],
+});
+const _permissionsQuery = window.navigator.permissions && window.navigator.permissions.query;
+if (_permissionsQuery) {
+    window.navigator.permissions.query = (parameters) => (
+        parameters && parameters.name === 'notifications'
+            ? Promise.resolve({ state: Notification.permission })
+            : _permissionsQuery(parameters)
+    );
+}
+"""
+
+
 IGNORED_ACTIONS = {
     "done",
     "extract_page_content",
@@ -189,12 +244,20 @@ async def open_browser_session(
     if endpoint:
         browser = await playwright.chromium.connect(endpoint)
     else:
-        browser = await playwright.chromium.launch(headless=_is_headless())
-    context_kwargs: dict[str, Any] = {}
+        browser = await playwright.chromium.launch(
+            headless=_is_headless(),
+            args=[*MEDIA_STREAM_DISABLE_ARGS, *STEALTH_LAUNCH_ARGS],
+            ignore_default_args=["--enable-automation"],
+        )
+    context_kwargs: dict[str, Any] = {
+        "permissions": [],
+        "user_agent": STEALTH_USER_AGENT,
+    }
     if record_har_path:
         context_kwargs["record_har_path"] = record_har_path
         context_kwargs["record_har_mode"] = "full"
         context_kwargs["record_har_content"] = "embed"
     browser_context = await browser.new_context(**context_kwargs)
+    await browser_context.add_init_script(STEALTH_INIT_SCRIPT)
     page = await browser_context.new_page()
     return browser, browser_context, page

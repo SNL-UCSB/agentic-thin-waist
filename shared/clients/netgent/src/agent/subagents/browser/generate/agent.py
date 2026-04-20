@@ -121,7 +121,12 @@ async def generate_workflow(state: BrowserGenerateState):
             }
         }
     parsed_history = parse_agent_history(pruned_history[0].model_dump())
-    workflow = gen_workflow(parsed_history, specification=state["task"])
+    parameter_names = list((state.get("parameters") or {}).keys())
+    workflow = gen_workflow(
+        parsed_history,
+        specification=state["task"],
+        parameters=parameter_names,
+    )
     print(workflow)
     return {
         "workflow": workflow,

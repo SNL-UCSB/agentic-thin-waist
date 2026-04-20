@@ -1,0 +1,29 @@
+{
+  "specification": "1. Go to 'https://meet.google.com/<meeting_code> '.\n    2. On the pre-join screen, if prompted for a name, type <secret>display_name</secret> into the display name input.\n    3. Click the 'Ask to join' button to request entry to the meeting.\n    4. Once in the meeting (or while waiting in the lobby to be admitted), wait for <secret>wait_seconds</secret> seconds before stopping.",
+  "states": [
+    {
+      "checks": [
+        {
+          "type": "always_true",
+          "params": {}
+        }
+      ],
+      "actions": [
+        {
+          "type": "go_to_url",
+          "params": {
+            "url": "https://meet.google.com/{{meeting_code}}",
+            "new_tab": false
+          }
+        }
+      ],
+      "end_state": "Workflow Completed",
+      "executed": []
+    }
+  ],
+  "parameters": [
+    "meeting_code",
+    "display_name",
+    "wait_seconds"
+  ]
+}
