@@ -538,6 +538,7 @@ def _convert_action(action: dict[str, Any]) -> WorkflowAction | None:
 def gen_workflow(
     parsed_history: list[dict[str, Any]],
     specification: str = "Replay browser task history",
+    parameters: list[str] | None = None,
 ) -> dict[str, Any]:
     actions: list[WorkflowAction] = []
     for step in parsed_history:
@@ -559,5 +560,6 @@ def gen_workflow(
                 end_state="Workflow Completed",
             )
         ],
+        parameters=list(parameters or []),
     )
     return workflow.model_dump(mode="json")

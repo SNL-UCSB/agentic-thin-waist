@@ -97,6 +97,40 @@ def route_workflow(state: BrowserExecuteState, runtime: Runtime[BrowserExecuteCo
     return END
 
 
+def _patched_workflow_actions(patched_workflow: dict[str, Any]) -> list[dict[str, Any]]:
+    merged: list[dict[str, Any]] = []
+    for patched_state in patched_workflow.get("states") or []:
+        if not isinstance(patched_state, dict):
+            continue
+        for action in patched_state.get("actions") or []:
+            if isinstance(action, dict):
+                merged.append(action)
+    return merged
+
+
+def _build_final_workflow(
+    original_workflow: dict[str, Any],
+    completed_actions: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Return a copy of the original workflow whose first state holds the
+    flat list of actions that were actually executed (pre-failure originals
+    plus any patched continuation). All other top-level metadata — spec,
+    parameters, extra states — is preserved from the original workflow."""
+    original_states = original_workflow.get("states") or []
+    if not original_states:
+        return {**original_workflow, "states": original_states}
+
+    merged_first_state = {
+        **original_states[0],
+        "actions": list(completed_actions),
+        "executed": [],
+    }
+    return {
+        **original_workflow,
+        "states": [merged_first_state, *original_states[1:]],
+    }
+
+
 async def execute_workflow(
     state: BrowserExecuteState, runtime: Runtime[BrowserExecuteContext]
 ):
@@ -112,21 +146,33 @@ async def execute_workflow(
 
     result: list[Any] = []
     current_workflow = workflow
+    # Flat record of every action that ran successfully across all repair
+    # attempts — original pre-failure actions plus recovered continuations.
+    completed_actions: list[dict[str, Any]] = []
 
     for repair_attempt in range(DEFAULT_MAX_REPAIR_ATTEMPTS + 1):
         validated_workflow = runner.validate(current_workflow)
         passed_states = await runner.controller.acheck(validated_workflow["states"])
         if not passed_states:
-            return {"result": result, "workflow": current_workflow}
+            return {
+                "result": result,
+                "workflow": _build_final_workflow(workflow, completed_actions),
+            }
 
         try:
             for workflow_state in passed_states:
                 state_results = await _execute_state_actions(workflow_state, runner)
                 result.append(state_results)
-            return {"result": result, "workflow": current_workflow}
+                completed_actions.extend(workflow_state.get("actions") or [])
+            return {
+                "result": result,
+                "workflow": _build_final_workflow(workflow, completed_actions),
+            }
         except WorkflowExecutionError as exc:
             if exc.completed_results:
                 result.append(exc.completed_results)
+            # The actions before the failing index ran successfully this round.
+            completed_actions.extend(workflow_state["actions"][: exc.action_index])
 
             if repair_attempt >= DEFAULT_MAX_REPAIR_ATTEMPTS:
                 return {
@@ -137,7 +183,7 @@ async def execute_workflow(
                         "completed_results": exc.completed_results,
                         "repair_attempts": repair_attempt,
                     },
-                    "workflow": current_workflow,
+                    "workflow": _build_final_workflow(workflow, completed_actions),
                 }
 
             debug_response = await debug_workflow(
@@ -161,12 +207,18 @@ async def execute_workflow(
                         "error": str(exc.original_error),
                         "message": "Workflow repair failed to produce a patched workflow",
                     },
-                    "workflow": current_workflow,
+                    "workflow": _build_final_workflow(workflow, completed_actions),
                 }
 
+            # Execute only the patched continuation — we're already past the
+            # completed actions in the live browser and don't want to re-run
+            # them. The merged final workflow is assembled separately.
             current_workflow = patched_workflow
 
-    return {"result": result, "workflow": current_workflow}
+    return {
+        "result": result,
+        "workflow": _build_final_workflow(workflow, completed_actions),
+    }
 
 
 async def _execute_state_actions(

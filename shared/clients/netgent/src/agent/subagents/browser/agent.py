@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import re
 import tempfile
 from typing import Any, NotRequired
 
@@ -36,20 +37,31 @@ def _browser_parameter_placeholder(name: str) -> str:
     return "{{" + name + "}}"
 
 
-def _extract_browser_secret_placeholder(
-    value: Any, parameters: dict[str, str]
-) -> str | None:
-    if not isinstance(value, str):
-        return None
-    prefix = "<secret>"
-    suffix = "</secret>"
-    if not (value.startswith(prefix) and value.endswith(suffix)):
+_SECRET_TAG_RE = re.compile(r"<secret>\s*(\w+)\s*</secret>")
+
+
+def _substitute_embedded_secrets(value: str, parameters: dict[str, str]) -> str | None:
+    """Replace every ``<secret>name</secret>`` tag inside *value* with
+    ``{{name}}`` — but only for names that exist in *parameters*.
+
+    Returns the substituted string if at least one tag was replaced, or
+    ``None`` if no known-parameter tag was present (so callers can fall
+    back to their existing whole-value matching logic)."""
+    if "<secret>" not in value:
         return None
 
-    placeholder_name = value[len(prefix) : -len(suffix)].strip()
-    if placeholder_name in parameters:
-        return placeholder_name
-    return None
+    made_change = False
+
+    def _sub(match: re.Match[str]) -> str:
+        nonlocal made_change
+        name = match.group(1)
+        if name in parameters:
+            made_change = True
+            return _browser_parameter_placeholder(name)
+        return match.group(0)
+
+    new_value = _SECRET_TAG_RE.sub(_sub, value)
+    return new_value if made_change else None
 
 
 def _infer_browser_parameter_name(
@@ -96,19 +108,21 @@ def _parameterize_browser_workflow(
                 continue
 
             for param_name, param_value in list(params.items()):
+                # First: rewrite any embedded <secret>name</secret> tags into
+                # {{name}} placeholders. Handles both full-value matches and
+                # values where the secret is inside a larger string (e.g. a
+                # URL like ``https://whereby.com/<secret>code</secret>``).
+                if isinstance(param_value, str):
+                    substituted = _substitute_embedded_secrets(param_value, parameters)
+                    if substituted is not None:
+                        params[param_name] = substituted
+                        continue
+
                 replacement_name: str | None = None
 
-                replacement_name = _extract_browser_secret_placeholder(
-                    param_value, parameters
-                )
-
-                if (
-                    replacement_name is None
-                    and isinstance(param_value, str)
-                    and param_value in value_to_key
-                ):
+                if isinstance(param_value, str) and param_value in value_to_key:
                     replacement_name = value_to_key[param_value]
-                elif replacement_name is None and isinstance(param_value, (int, float)):
+                elif isinstance(param_value, (int, float)):
                     replacement_name = value_to_key.get(str(param_value))
 
                 if replacement_name is None:

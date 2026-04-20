@@ -183,20 +183,35 @@ class NetGent:
             har_path = har_file.name
 
         async with async_playwright() as pw:
+            from clients.netgent.src.agent.subagents.browser.util import (
+                MEDIA_STREAM_DISABLE_ARGS,
+                STEALTH_INIT_SCRIPT,
+                STEALTH_LAUNCH_ARGS,
+                STEALTH_USER_AGENT,
+            )
+
             if endpoint:
                 # CDP mode: connect to a remote browser (e.g. Browserless)
                 browser = await pw.chromium.connect(endpoint)
             else:
                 # Local mode: launch Chromium on this machine.
-                browser = await pw.chromium.launch(headless=self.headless)
+                browser = await pw.chromium.launch(
+                    headless=self.headless,
+                    args=[*MEDIA_STREAM_DISABLE_ARGS, *STEALTH_LAUNCH_ARGS],
+                    ignore_default_args=["--enable-automation"],
+                )
 
-            context_kwargs: dict[str, Any] = {}
+            context_kwargs: dict[str, Any] = {
+                "permissions": [],
+                "user_agent": STEALTH_USER_AGENT,
+            }
             if har_path:
                 context_kwargs["record_har_path"] = har_path
                 context_kwargs["record_har_mode"] = "full"
                 context_kwargs["record_har_content"] = "embed"
 
             browser_context = await browser.new_context(**context_kwargs)
+            await browser_context.add_init_script(STEALTH_INIT_SCRIPT)
             page = await browser_context.new_page()
 
             try:

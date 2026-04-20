@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+import re
 import time
 import types
 import typing
@@ -54,26 +55,46 @@ def _get_type_hints(func: Any) -> dict[str, Any]:
         return {}
 
 
+_PLACEHOLDER_RE = re.compile(r"\{\{\s*(\w+)\s*\}\}")
+
+
 def _resolve_params(
     params: Mapping[str, Any],
     parameters: dict[str, str],
     type_hints: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Replace {{key}} placeholders in action params with values from parameters.
+    """Replace ``{{key}}`` placeholders in action params with values from
+    *parameters*.
 
-    If *type_hints* is provided (from typing.get_type_hints), resolved string
-    values are coerced to match the annotated type (e.g. "5" → 5 for int).
+    Supports both full-value placeholders (``"{{key}}"``) and embedded
+    placeholders (``"https://example.com/{{key}}"``). Full-value placeholders
+    are additionally coerced to match the action's type annotation when
+    *type_hints* is provided (e.g. ``"5"`` → ``5`` for ``int``). Embedded
+    placeholders always produce a string.
     """
     resolved: dict[str, Any] = {}
     for k, v in params.items():
-        if isinstance(v, str) and v.startswith("{{") and v.endswith("}}"):
-            placeholder_key = v[2:-2].strip()
+        if not isinstance(v, str):
+            resolved[k] = v
+            continue
+
+        match = _PLACEHOLDER_RE.fullmatch(v.strip())
+        if match is not None:
+            placeholder_key = match.group(1)
             value = parameters.get(placeholder_key, v)
             if type_hints is not None and k in type_hints and isinstance(value, str):
                 value = _coerce_to_annotation(value, type_hints[k])
             resolved[k] = value
-        else:
-            resolved[k] = v
+            continue
+
+        if "{{" in v:
+            resolved[k] = _PLACEHOLDER_RE.sub(
+                lambda m: parameters.get(m.group(1), m.group(0)),
+                v,
+            )
+            continue
+
+        resolved[k] = v
     return resolved
 
 
@@ -106,7 +127,7 @@ class StateExecutor:
         self._parameters: dict[str, str] = dict(parameters or {})
 
         default_config = {
-            "action_period": 1,
+            "action_period": 5,
         }
         self.config = {**default_config, **dict(config or {})}
 
