@@ -36,7 +36,7 @@ POLL_INTERVAL = float(os.getenv("POLL_INTERVAL_SECONDS", "3"))
 TIMEOUT_SECONDS = float(os.getenv("TIMEOUT_SECONDS", "300"))
 
 INTENT = (
-    "Run 100 ping experiments to 8.8.8.8 at 10 Mbps bottleneck capacity with 30 ms RTT latency for each capacity with a ctp between 4 and 5 Mbps, 1 trial"
+    "Run 100 ping experiments to 1.1.1.1 at 10 Mbps bottleneck capacity with 30 ms RTT latency for each capacity with a ctp between 4 and 5 Mbps, 1 trial"
 )
 
 TERMINAL_STATUSES = {"complete", "failed", "partial"}
