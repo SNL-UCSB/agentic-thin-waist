@@ -47,6 +47,24 @@ and constraints from your Thin Waist system prompt and knowledge files.
 Use that knowledge to interpret the intent, but DO NOT invent parameters
 that the user has not implied. Prefer asking for clarification when needed.
 
+Return ONLY a JSON object containing:
+- applications
+- application_type
+- capacities
+- latencies
+- cc_algorithms
+- aqm_policy
+- ctp_cluster
+- ctp_capacity_range (object with lower_value and higher_value, both in Mbps)
+- duration_seconds
+- num_trials
+- clarification_needed
+- design_type
+- reasoning
+
+If the user does not specify ctp_capacity_range, set:
+ctp_capacity_range = {"lower_value": 1, "higher_value": 10}
+
 Intent: {{{intent}}}""",
     template_format="mustache",
 )

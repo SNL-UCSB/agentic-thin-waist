@@ -28,6 +28,13 @@ class ParsedIntent(BaseModel):
     ctp_cluster: Optional[str] = Field(
         None, description="Cross-traffic profile cluster id"
     )
+    ctp_capacity_range: Optional[Dict[str, float]] = Field(
+        default_factory=lambda: {"lower_value": 1.0, "higher_value": 10.0},
+        description=(
+            "Optional CTP capacity range in Mbps used for CTP selection only. "
+            "Keys: lower_value, higher_value."
+        ),
+    )
     duration_seconds: Optional[int] = Field(
         None, description="Experiment duration in seconds"
     )

@@ -6,7 +6,7 @@ How it works
 2. For each spec, sequentially (or in parallel):
    a. Provision an ephemeral substrate worker via ConnectivityManager.
    b. Query the global CTP service for a transformed background-traffic profile
-      whose intensity is close to the experiment's capacity_mbps.
+      using the experiment's explicit ctp_capacity_range (Mbps).
    c. Tell the worker to fetch that CTP's download + upload PCAPs (POST /ctp/fetch).
    d. Compute the next whole-minute boundary, then fire three threads simultaneously:
       - POST /capture  — start tshark pcap recording on the worker
@@ -20,7 +20,6 @@ Environment variables
 ---------------------
 CTP_SERVICE_GLOBAL               Global CTP service URL  (default: http://128.111.5.236:8001)
 ORCH_CTP_SELECT_LIMIT            Max CTPs returned by /ctps/select  (default: 10)
-ORCH_CTP_INTENSITY_TOLERANCE_RATIO  Band around capacity_mbps for CTP selection (default: 0.5)
 ORCH_CTP_INTENSITY_DIRECTION     Optional: pass ``download`` or ``upload`` on /ctps/select query
 ORCH_CTP_POINTER_MODE            ``export`` (default) = HTTP URL ``.../ctps/{id}/export`` ZIP fetch
                                  on the worker; ``local_path`` = use ``download_pcap`` from select
@@ -67,23 +66,32 @@ def _global_ctp_url() -> str:
     return os.getenv("CTP_SERVICE_GLOBAL", "http://128.111.5.236:8001").rstrip("/")
 
 
-def _intensity_range(capacity_mbps: float) -> list[float]:
-    """Return [low, high] Mbps band around capacity for the CTP query."""
-    ratio = float(os.getenv("ORCH_CTP_INTENSITY_TOLERANCE_RATIO", "0.5"))
-    low = max(0.01, capacity_mbps * (1.0 - ratio))
-    high = max(low + 0.01, capacity_mbps * (1.0 + ratio))
-    return [round(low, 4), round(high, 4)]
-
-
-def _select_ctp(capacity_mbps: float, experiment_id: str) -> dict[str, Any] | None:
+def _select_ctp(
+    ctp_capacity_range: Any, experiment_id: str
+) -> dict[str, Any] | None:
     """Query the global CTP service and return the first matching transformed CTP.
 
     Returns the raw CTP object (which contains download_pcap, upload_pcap, ctp_id, etc.)
     or None if nothing matched or the request failed.
     """
+    default_range = [1.0, 10.0]
+    if isinstance(ctp_capacity_range, dict):
+        try:
+            low = float(ctp_capacity_range["lower_value"])
+            high = float(ctp_capacity_range["higher_value"])
+            if high < low:
+                low, high = high, low
+            low = max(0.01, low)
+            high = max(low + 0.01, high)
+            intensity_range_mbps = [round(low, 4), round(high, 4)]
+        except Exception:
+            intensity_range_mbps = default_range
+    else:
+        intensity_range_mbps = default_range
+
     query: dict[str, Any] = {
         "is_transformed": True,
-        "intensity_range_mbps": _intensity_range(capacity_mbps),
+        "intensity_range_mbps": intensity_range_mbps,
         "intensity_direction": "download",
     }
     limit = int(os.getenv("ORCH_CTP_SELECT_LIMIT", "10"))
@@ -290,7 +298,7 @@ def _run_experiment_on_worker(
 
     # Step 1: Pick a background-traffic profile from the global CTP service.
     print(f"\n[STEP 1/4] Selecting CTP background-traffic profile …")
-    ctp = _select_ctp(capacity, exp_id)
+    ctp = _select_ctp(spec.get("ctp_capacity_range"), exp_id)
     result["ctp_selected"] = ctp
 
     # Step 2: Tell the worker to fetch download + upload PCAPs (HTTP /export ZIP by default).

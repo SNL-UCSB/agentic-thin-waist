@@ -30,6 +30,7 @@ class IntentParser:
         - cc_algorithms: list[str] | None
         - aqm_policy: str | None
         - ctp_cluster: str | None
+        - ctp_capacity_range: dict with keys lower_value/higher_value in Mbps
         - duration_seconds: int | None
         - num_trials: int
         - clarification_needed: list[str]
@@ -67,6 +68,11 @@ Return ONLY a JSON object with these fields:
 - cc_algorithms: list of CC algorithms (or null if not specified)
 - aqm_policy: string (or null if not specified)
 - ctp_cluster: string (cross-traffic profile cluster id from CTP knowledge, or null if not specified)
+- ctp_capacity_range: object describing CTP selection range in Mbps with:
+    - lower_value: minimum CTP capacity in Mbps
+    - higher_value: maximum CTP capacity in Mbps
+  If the user does not specify this, default to:
+  {{"lower_value": 1, "higher_value": 10}}
 - duration_seconds: integer (or null if not specified)
 - num_trials: integer (default 1)
 - clarification_needed: list of strings describing what needs clarification
@@ -82,6 +88,7 @@ Intent: {intent}
         result = json.loads(json_str)
         # Ensure optional fields exist so downstream never sees a missing key
         result.setdefault("ctp_cluster", None)
+        result.setdefault("ctp_capacity_range", {"lower_value": 1, "higher_value": 10})
         return result
 
     def _extract_json(self, text: str) -> str:

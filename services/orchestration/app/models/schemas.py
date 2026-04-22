@@ -31,6 +31,9 @@ class GeneratedExperiment(BaseModel):
     cc_algorithm: str = "cubic"
     aqm_policy: str = "pfifo"
     ctp_cluster: Optional[str] = None
+    ctp_capacity_range: Optional[Dict[str, float]] = Field(
+        default_factory=lambda: {"lower_value": 1.0, "higher_value": 10.0}
+    )
     reasoning: str = ""
 
 
