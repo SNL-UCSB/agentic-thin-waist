@@ -25,7 +25,9 @@ _SCHEMAS_PATH = (
 _WORKFLOW_SCHEMAS: dict[str, dict[str, dict[str, Any]]] = (
     json.loads(_SCHEMAS_PATH.read_text()) if _SCHEMAS_PATH.exists() else {}
 )
-_IPV4_RE = re.compile(r"\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b")
+_IPV4_RE = re.compile(
+    r"\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b"
+)
 _DOMAIN_RE = re.compile(r"\b(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}\b")
 
 
@@ -61,7 +63,9 @@ def _load_shell_workflows() -> list[dict[str, Any]]:
         return []
 
 
-def _infer_workflow_id_from_intent(intent: str, available: list[dict[str, Any]]) -> str | None:
+def _infer_workflow_id_from_intent(
+    intent: str, available: list[dict[str, Any]]
+) -> str | None:
     lowered = intent.lower()
     keyword_to_ids = (
         ("ndt", ("test_ndt_workflow",)),
@@ -82,9 +86,7 @@ def _default_params_for_workflow(workflow_id: str) -> dict[str, Any] | None:
     if not schema:
         return None
     return {
-        key: meta.get("default")
-        for key, meta in schema.items()
-        if "default" in meta
+        key: meta.get("default") for key, meta in schema.items() if "default" in meta
     } or None
 
 
@@ -226,7 +228,9 @@ def choose_workflow(
     )
 
     if force_existing:
-        selected_id = forced_workflow_id or _infer_workflow_id_from_intent(intent, available)
+        selected_id = forced_workflow_id or _infer_workflow_id_from_intent(
+            intent, available
+        )
         source = "env override" if forced_workflow_id else "intent keyword"
         chosen_entry = next((w for w in available if w.get("id") == selected_id), None)
         if not selected_id or not chosen_entry:
