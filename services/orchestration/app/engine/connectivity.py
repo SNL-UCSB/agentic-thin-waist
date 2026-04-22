@@ -122,12 +122,27 @@ class LocalDockerBackend(ConnectivityBackend):
             "telemetry_url",
             os.getenv("TELEMETRY_SERVICE_URL", "http://telemetry-service:8004"),
         )
-        ctp_dir = config.get(
-            "ctp_dir", os.getenv("SUBSTRATE_CTP_DIR", "/mnt/md0/ctp_test")
-        )
-        capture_dir = config.get(
-            "capture_dir", os.getenv("SUBSTRATE_CAPTURE_DIR", "/mnt/md0/cap_test")
-        )
+        netgent_use_local = str(
+            config.get("netgent_use_local") or os.getenv("NETGENT_USE_LOCAL")
+        ).strip()
+        netgent_namespace = str(
+            config.get("netgent_namespace") or os.getenv("NETGENT_NAMESPACE")
+        ).strip()
+        ctp_dir = config.get("ctp_dir") or os.getenv("SUBSTRATE_CTP_DIR")
+        capture_dir = config.get("capture_dir") or os.getenv("SUBSTRATE_CAPTURE_DIR")
+
+        required_values = {
+            "NETGENT_USE_LOCAL": netgent_use_local,
+            "NETGENT_NAMESPACE": netgent_namespace,
+            "SUBSTRATE_CTP_DIR": ctp_dir,
+            "SUBSTRATE_CAPTURE_DIR": capture_dir,
+        }
+        missing = [name for name, value in required_values.items() if not value]
+        if missing:
+            raise ValueError(
+                "Missing required worker provisioning configuration: "
+                + ", ".join(missing)
+            )
 
         worker_id = f"worker-{uuid.uuid4().hex[:8]}"
         container_name = f"substrate-worker-{worker_id}"
@@ -138,6 +153,8 @@ class LocalDockerBackend(ConnectivityBackend):
                 f"TELEMETRY_SERVICE_URL={telemetry_url}",
                 f"CTP_DIR={ctp_dir}",
                 f"CAPTURE_DIR={capture_dir}",
+                f"NETGENT_USE_LOCAL={netgent_use_local}",
+                f"NETGENT_NAMESPACE={netgent_namespace}",
             ],
             "ExposedPorts": {f"{_SUBSTRATE_CONTAINER_PORT}/tcp": {}},
             "Labels": {"substrate_worker_id": worker_id},

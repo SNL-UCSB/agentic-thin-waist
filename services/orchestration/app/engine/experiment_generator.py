@@ -31,6 +31,10 @@ class ExperimentGenerator:
         num_trials = parsed_intent.get("num_trials", 1) or 1
         reasoning = parsed_intent.get("reasoning") or ""
         ctp_cluster = parsed_intent.get("ctp_cluster") or "cluster0"
+        ctp_capacity_range = parsed_intent.get("ctp_capacity_range") or {
+            "lower_value": 1,
+            "higher_value": 10,
+        }
 
         experiments: List[GeneratedExperiment] = []
         counter = 1
@@ -46,6 +50,7 @@ class ExperimentGenerator:
                 num_trials=int(num_trials),
                 reasoning=reasoning,
                 ctp_cluster=ctp_cluster,
+                ctp_capacity_range=ctp_capacity_range,
             )
             experiments.append(exp)
             counter += 1

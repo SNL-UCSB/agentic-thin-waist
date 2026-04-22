@@ -74,7 +74,7 @@ EXTRACTED:
 }
 REASONING: "The user wants to compare YouTube vs Zoom at a fixed 25 Mbps capacity. This is a classic application comparison design. I will include three experiments: one with YouTube in isolation, one with Zoom in isolation, and one concurrent experiment where both run simultaneously so interaction effects can be observed (as required by the behavioral rules when two or more distinct applications are mentioned). Latency defaults to 50 ms, CC to cubic, and AQM to fq_codel per knowledge file defaults. Duration will use each application's default (60s for YouTube, 120s for Zoom). No cross-traffic was specified, so ctp_cluster is None — no background CTP is added for pure baseline comparison. No clarifications are needed; the intent is clear and the 25 Mbps capacity is well above the minimum thresholds for both YouTube (~3 Mbps) and Zoom (~1.5 Mbps)."
 
-INTENT: "Compare CUBIC vs BBR for YouTube at 10 Mbps"
+INTENT: "Compare CUBIC vs BBR for YouTube at 10 Mbps with a ctp between 2 and 5Mbps"
 EXTRACTED:
 {
   "applications": [
@@ -90,6 +90,10 @@ EXTRACTED:
   ],
   "aqm_policy": None,
   "ctp_cluster": None,
+  "ctp_capacity_range": {
+    "lower_value": 2,
+    "higher_value": 5
+  },
   "duration_seconds": None,
   "num_trials": 1,
   "clarification_needed": [],
@@ -97,9 +101,9 @@ EXTRACTED:
     "isolated",
     "isolated"
   ],
-  "reasoning": "The intent is a classic CC algorithm comparison: CUBIC vs BBR for YouTube at a fixed 10 Mbps capacity. This maps directly to the 'CC Algorithm Comparisons' design pattern in the knowledge files. Applications: [youtube] (explicitly stated). Capacities: [10] Mbps (explicitly stated). CC algorithms: [cubic, bbr] (explicitly stated). Latency is not specified, so the default of 50 ms will be used at experiment generation time. AQM policy is not specified, so the default fq_codel will be applied. No cross-traffic is mentioned, so ctp_cluster is None. Duration is not specified, so the YouTube application default of 60s will be used. num_trials defaults to 1 since not specified. The two experiments are 'isolated' because each CC algorithm run is a separate, independent configuration (not concurrent). No clarification is needed \u2014 the intent is unambiguous and well-constrained."
+  "reasoning": "The intent is a CC algorithm comparison with an explicit CTP capacity band. CUBIC and BBR are compared for YouTube at 10 Mbps bottleneck capacity, while CTP selection is constrained to 2–5 Mbps via ctp_capacity_range. This keeps shaping capacity and CTP query range separate. Latency and AQM are unspecified so defaults apply. No clarification is needed."
 }
-REASONING: "The intent is a classic CC algorithm comparison: CUBIC vs BBR for YouTube at a fixed 10 Mbps capacity. This maps directly to the 'CC Algorithm Comparisons' design pattern in the knowledge files. Applications: [youtube] (explicitly stated). Capacities: [10] Mbps (explicitly stated). CC algorithms: [cubic, bbr] (explicitly stated). Latency is not specified, so the default of 50 ms will be used at experiment generation time. AQM policy is not specified, so the default fq_codel will be applied. No cross-traffic is mentioned, so ctp_cluster is None. Duration is not specified, so the YouTube application default of 60s will be used. num_trials defaults to 1 since not specified. The two experiments are 'isolated' because each CC algorithm run is a separate, independent configuration (not concurrent). No clarification is needed — the intent is unambiguous and well-constrained."
+REASONING: "The intent is a CC algorithm comparison with an explicit CTP capacity band. CUBIC and BBR are compared for YouTube at 10 Mbps bottleneck capacity, while CTP selection is constrained to 2–5 Mbps via ctp_capacity_range. This keeps shaping capacity and CTP query range separate. Latency and AQM are unspecified so defaults apply. No clarification is needed."
 
 INTENT: "How does Netflix perform?"
 EXTRACTED:

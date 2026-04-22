@@ -193,9 +193,12 @@ def shell_workflow(state: OrchestratorState) -> dict[str, Any]:
             )
         ),
     )
+    # Shell workflow parameter mapping is centralized in shell/agent.py.
+    # Do not override with parse_intent workflow_parameters.
+    selected_params = result.get("parameters")
     return {
         "workflow": result.get("workflow") or {},
-        "workflow_parameters": result.get("parameters"),
+        "workflow_parameters": selected_params,
         "workflow_reasoning": result.get("reasoning"),
     }
 

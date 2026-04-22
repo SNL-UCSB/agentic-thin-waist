@@ -19,5 +19,17 @@
       ]
     }
   ],
-  "parameters": ["download", "upload"]
+  "parameters": ["download", "upload"],
+  "parameter_schema": {
+    "download": {
+      "type": "boolean",
+      "default": true,
+      "description": "Run the download direction of the NDT test (true/false)"
+    },
+    "upload": {
+      "type": "boolean",
+      "default": true,
+      "description": "Run the upload direction of the NDT test (true/false)"
+    }
+  }
 }

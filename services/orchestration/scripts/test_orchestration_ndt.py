@@ -33,8 +33,9 @@ ORCH_URL = os.getenv("ORCH_URL", "http://localhost:8005").rstrip("/")
 ORCH_CONTAINER = os.getenv("ORCH_CONTAINER", "orchestration")
 POLL_INTERVAL = float(os.getenv("POLL_INTERVAL_SECONDS", "3"))
 TIMEOUT_SECONDS = float(os.getenv("TIMEOUT_SECONDS", "300"))
+# INTENT = "Run an ndt speedtest with capacity of 20 Mbps"
 
-INTENT = "Run an ndt speedtest at 10 Mbps download and 20ms RTT latency"
+INTENT = "Run an ndt speedtest at 40 Mbps capacity and 100 ms RTT latency with a ctp between 4 and 5 Mbps for each"
 
 # "Run an ndt speedtest at 10 Mbps download speed and 5 Mbps upload speed and 100ms RTT latency"
 
