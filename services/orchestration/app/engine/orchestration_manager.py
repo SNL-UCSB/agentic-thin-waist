@@ -477,7 +477,7 @@ def _run_experiment_on_worker(
                 runtime=spec.get("runtime") or spec.get("application_type", "shell"),
                 parameters=workflow_parameters,
                 experiment_id=exp_id,
-                application=workflow.get("specification", ""),
+                application=str(spec.get("application") or "").strip(),
                 telemetry_url=telemetry_url,
             )
             thread_results["run"] = r
