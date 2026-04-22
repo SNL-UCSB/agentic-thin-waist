@@ -57,7 +57,9 @@ from app.engine.experiment_generator import ExperimentGenerator
 from app.engine.telemetry_capture_pull import stream_capture_pcap_to_telemetry
 
 logger = logging.getLogger(__name__)
-_SCHEMAS_PATH = pathlib.Path(__file__).parent.parent / "config" / "workflow_schemas.json"
+_SCHEMAS_PATH = (
+    pathlib.Path(__file__).parent.parent / "config" / "workflow_schemas.json"
+)
 _WORKFLOW_SCHEMAS: dict[str, dict[str, dict[str, Any]]] = (
     json.loads(_SCHEMAS_PATH.read_text()) if _SCHEMAS_PATH.exists() else {}
 )
@@ -117,9 +119,7 @@ def _global_ctp_url() -> str:
     return os.getenv("CTP_SERVICE_GLOBAL", "http://128.111.5.236:8001").rstrip("/")
 
 
-def _select_ctp(
-    ctp_capacity_range: Any, experiment_id: str
-) -> dict[str, Any] | None:
+def _select_ctp(ctp_capacity_range: Any, experiment_id: str) -> dict[str, Any] | None:
     """Query the global CTP service and return the first matching transformed CTP.
 
     Returns the raw CTP object (which contains download_pcap, upload_pcap, ctp_id, etc.)

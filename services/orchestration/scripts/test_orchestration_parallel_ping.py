@@ -33,8 +33,7 @@ TIMEOUT_SECONDS = float(os.getenv("TIMEOUT_SECONDS", "1800"))
 MAX_PARALLEL_WORKERS = int(os.getenv("MAX_PARALLEL_WORKERS", "8"))
 CONNECTIVITY_BACKEND = os.getenv("CONNECTIVITY_BACKEND", "local_docker").strip().lower()
 
-INTENT = (
-    "Run 4 ping experiments to 8.8.8.8 at 10 Mbps with 20ms RTT, 20 Mbps with 30ms RTT, 30 Mbps with 40ms RTT, and 40 Mbps with 50ms RTT latency for each capacity with a ctp between 4 and 5 Mbps for each")
+INTENT = "Run 4 ping experiments to 8.8.8.8 at 10 Mbps with 20ms RTT, 20 Mbps with 30ms RTT, 30 Mbps with 40ms RTT, and 40 Mbps with 50ms RTT latency for each capacity with a ctp between 4 and 5 Mbps for each"
 
 TERMINAL_STATUSES = {"complete", "failed", "partial"}
 
