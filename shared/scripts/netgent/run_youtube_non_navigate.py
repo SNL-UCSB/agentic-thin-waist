@@ -44,8 +44,8 @@ async def main() -> None:
         description="Generate and run a YouTube video workflow from a direct link."
     )
     parser.add_argument(
-        "url",
-        help="Direct YouTube video URL to open and play.",
+        "video_id",
+        help="YouTube video ID (e.g. 'dQw4w9WgXcQ' from https://www.youtube.com/watch?v=dQw4w9WgXcQ).",
     )
     parser.add_argument(
         "--watch-seconds",
@@ -56,14 +56,14 @@ async def main() -> None:
 
     load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".env"))
 
-    specification = """1. Go to <secret>url</secret>.
+    specification = """1. Go to 'https://www.youtube.com/watch?v=<secret>video_id</secret>&autoplay=1'.
     2. If a consent, cookie, or welcome dialog appears, dismiss it without signing in.
     3. Make sure the video plays
     4. Wait for the video player page to finish loading.
     5. If playback has not started, press the Play button.
     6. When the video player is active and playback is running, wait for <secret>watch_seconds</secret> seconds before stopping."""
     parameters = {
-        "url": args.url,
+        "video_id": args.video_id,
         "watch_seconds": args.watch_seconds,
     }
     client = NetGent(cdp_url=None, headless=False)
