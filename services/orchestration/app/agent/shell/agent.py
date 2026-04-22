@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import os
+import pathlib
 from typing import TYPE_CHECKING, Any
 
 import requests
@@ -16,6 +18,26 @@ if TYPE_CHECKING:
     from clients.netgent.src.main import NetGent
 
 WORKFLOW_INDEX_URL = "https://raw.githubusercontent.com/SNL-UCSB/netgent-workflow/main/workflows/index.json"
+_SCHEMAS_PATH = (
+    pathlib.Path(__file__).parent.parent.parent / "config" / "workflow_schemas.json"
+)
+_WORKFLOW_SCHEMAS: dict[str, dict[str, dict[str, Any]]] = (
+    json.loads(_SCHEMAS_PATH.read_text()) if _SCHEMAS_PATH.exists() else {}
+)
+
+
+def _build_param_hint(workflow_id: str, param_names: list[str]) -> str:
+    schema = _WORKFLOW_SCHEMAS.get(workflow_id, {})
+    parts: list[str] = []
+    for name in param_names:
+        if name in schema:
+            meta = schema[name]
+            parts.append(
+                f"{name} ({meta['type']}, default={meta['default']}): {meta['description']}"
+            )
+        else:
+            parts.append(name)
+    return "[" + ", ".join(parts) + "]"
 
 
 class ShellWorkflowGenerationState(MessagesState):
@@ -55,7 +77,7 @@ def choose_workflow(
 
     workflows_block = (
         "\n".join(
-            f"- id: {w['id']}\n  name: {w.get('name', '')}\n  description: {w.get('description', '')}\n  parameters: {w.get('parameters', [])}"
+            f"- id: {w['id']}\n  name: {w.get('name', '')}\n  description: {w.get('description', '')}\n  parameters: {_build_param_hint(w['id'], w.get('parameters', []))}"
             for w in available
         )
         if available
@@ -69,7 +91,8 @@ def choose_workflow(
                 f"Intent: {intent}\n\n"
                 f"Available workflows:\n{workflows_block}\n\n"
                 "If an existing workflow matches the intent well, set is_valid=true and provide its id and parameters. "
-                "Otherwise set is_valid=false and explain in reasoning."
+                "Otherwise set is_valid=false and explain in reasoning.\n\n"
+                "IMPORTANT: For boolean parameters output exactly true or false — never a number."
             )
         )
     ]
@@ -100,6 +123,7 @@ def choose_workflow(
     if result.is_valid and chosen_entry and chosen_entry.get("link"):
         try:
             workflow = requests.get(chosen_entry["link"], timeout=10).json()
+            workflow.setdefault("id", result.id)
         except Exception:
             workflow = {"id": result.id}
     elif result.is_valid and result.id:

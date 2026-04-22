@@ -40,9 +40,11 @@ CAPTURE_DOWNLOAD_TOKEN           Optional; if set on worker, orchestrator must s
 
 from __future__ import annotations
 
+import json
 import logging
 import math
 import os
+import pathlib
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -55,6 +57,55 @@ from app.engine.experiment_generator import ExperimentGenerator
 from app.engine.telemetry_capture_pull import stream_capture_pcap_to_telemetry
 
 logger = logging.getLogger(__name__)
+_SCHEMAS_PATH = pathlib.Path(__file__).parent.parent / "config" / "workflow_schemas.json"
+_WORKFLOW_SCHEMAS: dict[str, dict[str, dict[str, Any]]] = (
+    json.loads(_SCHEMAS_PATH.read_text()) if _SCHEMAS_PATH.exists() else {}
+)
+
+
+# ---------------------------------------------------------------------------
+# Workflow parameter normalization
+# ---------------------------------------------------------------------------
+
+
+def _to_bool_like(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "y", "on"}:
+            return True
+        if normalized in {"false", "0", "no", "n", "off", ""}:
+            return False
+        try:
+            return float(normalized) != 0
+        except Exception:
+            return False
+    return bool(value)
+
+
+def _normalize_workflow_params(
+    raw_params: dict[str, Any] | None,
+    workflow: dict[str, Any],
+) -> dict[str, str] | None:
+    wf_id = str(workflow.get("id") or "")
+    schema = _WORKFLOW_SCHEMAS.get(wf_id) or {}
+    result: dict[str, str] = {}
+
+    for key, meta in schema.items():
+        val = (raw_params or {}).get(key, meta.get("default", ""))
+        if meta.get("type") == "boolean":
+            result[key] = "true" if _to_bool_like(val) else "false"
+        else:
+            result[key] = str(val)
+
+    for key, val in (raw_params or {}).items():
+        if key not in result:
+            result[key] = str(val)
+
+    return result or None
 
 
 # ---------------------------------------------------------------------------
@@ -347,9 +398,11 @@ def _run_experiment_on_worker(
     #         at the next whole-minute boundary for tight temporal alignment.
     workflow = spec.get("workflow") or _DEFAULT_WORKFLOW
     raw_params = spec.get("workflow_parameters")
-    workflow_parameters = (
-        {k: str(v) for k, v in raw_params.items()} if raw_params else None
-    )
+    workflow_parameters = _normalize_workflow_params(raw_params, workflow)
+    # Substrate workflow schema rejects unknown top-level keys (e.g. "id").
+    # Keep "id" only for orchestrator-side schema lookup, strip before /run.
+    workflow_payload = dict(workflow)
+    workflow_payload.pop("id", None)
     telemetry_url = os.getenv("TELEMETRY_SERVICE_URL", "http://telemetry-service:8004")
     capture_payload = _build_capture_payload(exp_id, spec)
     replay_payload = (
@@ -412,7 +465,7 @@ def _run_experiment_on_worker(
         try:
             r = manager.run_experiment(
                 worker_id=worker.worker_id,
-                workflow=workflow,
+                workflow=workflow_payload,
                 download_mbps=capacity,
                 upload_mbps=float(spec.get("upload_mbps") or capacity),
                 latency_ms=float(spec.get("latency_ms", 0)),

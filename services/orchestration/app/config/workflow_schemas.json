@@ -1,0 +1,14 @@
+{
+  "test_ndt_workflow": {
+    "download": {
+      "type": "boolean",
+      "default": true,
+      "description": "Run the download direction of the NDT test (true/false)"
+    },
+    "upload": {
+      "type": "boolean",
+      "default": true,
+      "description": "Run the upload direction of the NDT test (true/false)"
+    }
+  }
+}
