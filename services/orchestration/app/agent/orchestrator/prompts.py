@@ -57,6 +57,7 @@ Return ONLY a JSON object containing:
 - ctp_cluster
 - ctp_capacity_range (object with lower_value and higher_value, both in Mbps)
 - duration_seconds
+- workflow_parameters (optional workflow-specific params; for NDT download/upload booleans, infer true/false from intent such as "download only"/"no upload")
 - num_trials
 - clarification_needed
 - design_type

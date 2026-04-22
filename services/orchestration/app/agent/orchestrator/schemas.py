@@ -38,6 +38,13 @@ class ParsedIntent(BaseModel):
     duration_seconds: Optional[int] = Field(
         None, description="Experiment duration in seconds"
     )
+    workflow_parameters: Optional[Dict[str, Any]] = Field(
+        None,
+        description=(
+            "Optional workflow-specific parameter overrides inferred from intent "
+            "(e.g., for NDT: {'download': true, 'upload': false} for 'download only')."
+        ),
+    )
     num_trials: int = Field(1, description="Number of repeated trials")
     clarification_needed: List[str] = Field(
         default_factory=list,

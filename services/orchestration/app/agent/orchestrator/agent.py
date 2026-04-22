@@ -193,9 +193,20 @@ def shell_workflow(state: OrchestratorState) -> dict[str, Any]:
             )
         ),
     )
+    parsed_workflow_params = (state.get("parsed_intent") or {}).get("workflow_parameters")
+    selected_params = (
+        parsed_workflow_params
+        if parsed_workflow_params is not None
+        else result.get("parameters")
+    )
+    if parsed_workflow_params is not None:
+        print(
+            f"[AGENT {orchestration_id}] Using Claude parsed workflow_parameters override: "
+            f"{parsed_workflow_params}"
+        )
     return {
         "workflow": result.get("workflow") or {},
-        "workflow_parameters": result.get("parameters"),
+        "workflow_parameters": selected_params,
         "workflow_reasoning": result.get("reasoning"),
     }
 
