@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import re
 from typing import TYPE_CHECKING, Any
 
 import requests
@@ -24,6 +25,8 @@ _SCHEMAS_PATH = (
 _WORKFLOW_SCHEMAS: dict[str, dict[str, dict[str, Any]]] = (
     json.loads(_SCHEMAS_PATH.read_text()) if _SCHEMAS_PATH.exists() else {}
 )
+_IPV4_RE = re.compile(r"\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b")
+_DOMAIN_RE = re.compile(r"\b(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}\b")
 
 
 def _env_truthy(name: str, default: bool = False) -> bool:
@@ -110,6 +113,29 @@ class MapWorkflowParams(BaseModel):
     reasoning: str
 
 
+def _extract_explicit_host_from_intent(intent: str) -> str | None:
+    ip_match = _IPV4_RE.search(intent)
+    if ip_match:
+        return ip_match.group(0)
+    domain_match = _DOMAIN_RE.search(intent)
+    if domain_match:
+        return domain_match.group(0)
+    return None
+
+
+def _apply_intent_param_overrides(
+    intent: str, parameters: dict[str, Any] | None, param_names: list[str]
+) -> dict[str, Any] | None:
+    params = dict(parameters or {})
+    if not params:
+        return parameters
+    if "host" in param_names:
+        explicit_host = _extract_explicit_host_from_intent(intent)
+        if explicit_host:
+            params["host"] = explicit_host
+    return params
+
+
 def _validate_mapped_params(
     parameters: dict[str, Any] | None,
     param_names: list[str],
@@ -182,7 +208,8 @@ def _map_workflow_params_with_claude(
         reasoning=result.reasoning,
         output=result.model_dump(),
     )
-    mapped = _validate_mapped_params(result.parameters, param_names, workflow_schema)
+    mapped = _apply_intent_param_overrides(intent, result.parameters, param_names)
+    mapped = _validate_mapped_params(mapped, param_names, workflow_schema)
     return mapped, result.reasoning
 
 
