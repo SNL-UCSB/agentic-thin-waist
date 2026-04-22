@@ -667,7 +667,8 @@ class ConnectivityManager:
                         "qdisc": qdisc,
                         "buffer_packets": buffer_packets,
                     },
-                    "c_app": {"application": application},
+                    # Keep application bounded for telemetry DB constraints.
+                    "c_app": {"application": app_label},
                     "c_trans": {
                         "congestion_control": cca,
                         "runtime": runtime,

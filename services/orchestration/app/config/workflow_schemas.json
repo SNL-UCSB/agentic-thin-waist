@@ -1,4 +1,28 @@
 {
+  "test_youtube_workflow": {
+    "url": {
+      "type": "string",
+      "default": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      "description": "YouTube video URL to open and play"
+    },
+    "watch_seconds": {
+      "type": "integer",
+      "default": 30,
+      "description": "Seconds to keep playback running before stopping"
+    }
+  },
+  "test_youtube_general_workflow": {
+    "url": {
+      "type": "string",
+      "default": "https://www.youtube.com/watch?v=nXbHOUeFe8s",
+      "description": "YouTube video URL to watch in the general workflow"
+    },
+    "watch_time": {
+      "type": "integer",
+      "default": 30,
+      "description": "Duration in seconds to watch the YouTube video"
+    }
+  },
   "test_ndt_workflow": {
     "download": {
       "type": "boolean",
