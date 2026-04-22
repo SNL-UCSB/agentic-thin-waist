@@ -35,9 +35,7 @@ YOUTUBE_URL = os.getenv(
     "YOUTUBE_URL", "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 ).strip()
 WATCH_SECONDS = int(os.getenv("WATCH_SECONDS", "30"))
-INTENT = (
-    f"Run a youtube non navigate playback workflow using the URL https://www.youtube.com/watch?v=1G4isv_Fylg and watch for 30 seconds, make capacity 200 Mbps and latency 10ms and make the ctp between 99 and 100 Mbps "
-)
+INTENT = f"Run a youtube non navigate playback workflow using the URL https://www.youtube.com/watch?v=1G4isv_Fylg and watch for 30 seconds, make capacity 200 Mbps and latency 10ms and make the ctp between 99 and 100 Mbps "
 TERMINAL_STATUSES = {"complete", "failed", "partial"}
 
 
