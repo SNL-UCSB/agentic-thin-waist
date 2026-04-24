@@ -23,7 +23,12 @@ from app.agent.orchestrator.prompts import (
 from app.agent.orchestrator.schemas import ParsedIntent
 from app.agent.shell.agent import ShellWorkflowContext
 from app.agent.shell.agent import create_agent as create_shell_agent
-from app.agent.utils import get_model, log_claude_step, save_state
+from app.agent.utils import (
+    get_model,
+    log_claude_step,
+    save_state,
+    with_structured_output,
+)
 from app.engine.experiment_generator import ExperimentGenerator
 from app.engine.orchestration_manager import OrchestrationManager
 from app.models.schemas import OrchestrationStatus
@@ -81,7 +86,7 @@ def parse_intent(state: OrchestratorState) -> dict[str, Any]:
         ),
     )
 
-    structured_model = model.with_structured_output(ParsedIntent)
+    structured_model = with_structured_output(model, ParsedIntent)
     parsed: ParsedIntent = structured_model.invoke(prompt_value.messages)
     parsed_dict = parsed.model_dump()
     log_claude_step(

@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import quote
 
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.graph import END, START, MessagesState
 from langgraph.graph.state import StateGraph
 from playwright.async_api import async_playwright
@@ -27,7 +26,6 @@ from clients.netgent.src.registry.actions.playwright import PLAYWRIGHT_ACTIONS
 from clients.netgent.src.registry.triggers.base import always_true
 from clients.netgent.src.registry.triggers.playwright import PLAYWRIGHT_TRIGGERS
 
-model = ChatGoogleGenerativeAI(model="gemini-3.1-flash-lite-preview")
 WorkflowType = Literal["browser", "shell", "hybrid"]
 
 

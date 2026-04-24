@@ -3,7 +3,7 @@ import json
 import os
 from typing import Any, NotRequired
 
-from browser_use import Agent, Browser, ChatGoogle
+from browser_use import Agent, Browser
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.runtime import Runtime
 from playwright.async_api import (
@@ -18,6 +18,7 @@ from playwright.async_api import (
 )
 from pydantic import BaseModel, ConfigDict
 
+from clients.netgent.src.agent.model_factory import get_browser_use_model
 from clients.netgent.src.agent.subagents.browser.generate.generate import gen_workflow
 from clients.netgent.src.agent.subagents.browser.util import (
     build_controller,
@@ -25,7 +26,6 @@ from clients.netgent.src.agent.subagents.browser.util import (
 )
 from clients.netgent.src.engine.runner import WorkflowRunner
 
-browser_model = ChatGoogle(model="gemini-3.1-flash-lite-preview")
 DEFAULT_MAX_STEPS = int(os.getenv("BROWSER_USE_MAX_STEPS", "30"))
 DEFAULT_MAX_REPAIR_ATTEMPTS = int(os.getenv("BROWSER_USE_MAX_REPAIR_ATTEMPTS", "2"))
 EXCLUDED_BROWSER_USE_ACTIONS = [
@@ -301,7 +301,7 @@ async def debug_workflow(
             human_current_page=page,
         ),
         controller=build_controller(EXCLUDED_BROWSER_USE_ACTIONS),
-        llm=browser_model,
+        llm=get_browser_use_model(),
         task=debug_task,
         headless=BROWSER_USE_HEADLESS,
     )

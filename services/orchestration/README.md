@@ -44,7 +44,28 @@ python scripts/run_integration_pipeline_demo.py --mode executor
 
 ## Purpose
 
-The Orchestration Service is the agentic brain of the Agentic Thin Waist. It interprets natural language research intents and translates them into concrete, executable experiment specifications. Built on Claude (Anthropic) as the LLM backbone, this service implements multi-step reasoning about network conditions, applications, and experimental design strategies. Claude reasons through hypotheses about bottlenecks, generates parameter sweeps, and orchestrates complex multi-step experiment workflows.
+The Orchestration Service is the agentic brain of the Agentic Thin Waist. It interprets natural language research intents and translates them into concrete, executable experiment specifications. It uses a configurable LLM backbone for multi-step reasoning about network conditions, applications, and experimental design strategies. By default the service uses Anthropic/Claude, but it can also be switched to Gemini through environment configuration.
+
+## Runtime LLM Configuration
+
+Use `ORCHESTRATOR_LLM_PROVIDER` to choose the orchestration model provider:
+
+```bash
+export ORCHESTRATOR_LLM_PROVIDER="anthropic"
+```
+
+or:
+
+```bash
+export ORCHESTRATOR_LLM_PROVIDER="gemini"
+```
+
+Provider-specific credentials:
+
+- `ORCHESTRATOR_LLM_PROVIDER=anthropic`: set `ANTHROPIC_API_KEY` or `CLAUDE_API_KEY`
+- `ORCHESTRATOR_LLM_PROVIDER=gemini`: set `GOOGLE_API_KEY`
+
+Repository defaults currently preserve the old behavior by using `anthropic` for orchestration.
 
 ## Input
 
@@ -73,7 +94,7 @@ Orchestration Service produces:
 | `/orchestration/{id}/reasoning` | GET | Get Claude reasoning steps (for transparency) |
 | `/tools` | GET | List available tools (run_experiment, query_results, etc.) |
 | `/skills` | GET | List available skills (parameter_sweep, comparison, etc.) |
-| `/health` | GET | Health check: Claude API, Experiment API, Telemetry Service |
+| `/health` | GET | Health check: configured LLM API, Experiment API, Telemetry Service |
 
 ## YouTube MVP Example
 
@@ -758,7 +779,7 @@ Alert on: API errors, quota issues, degraded performance
 | Experiment API | POST /experiments, GET /experiments/{id} | Create and monitor experiments |
 | Telemetry Service | GET /results, POST /results | Query and store results |
 | CTP Service | POST /ctps/validate | Validate network configurations |
-| Claude API (Anthropic) | https://api.anthropic.com | LLM reasoning backbone |
+| Anthropic Claude API / Google Gemini API | https://api.anthropic.com / https://ai.google.dev/ | LLM reasoning backbone, depending on `ORCHESTRATOR_LLM_PROVIDER` |
 
 ## Testing Criteria
 
