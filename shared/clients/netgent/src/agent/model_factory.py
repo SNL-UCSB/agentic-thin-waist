@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from typing import Any, Literal
 
-from langchain_anthropic import ChatAnthropic as LangChainChatAnthropic
+from langchain_community.chat_models import ChatAnthropic as LangChainChatAnthropic
 from langchain_core.language_models import BaseChatModel
 from langchain_google_genai import ChatGoogleGenerativeAI
 from pydantic import SecretStr
@@ -76,8 +76,8 @@ def get_langchain_model() -> BaseChatModel:
             )
         return LangChainChatAnthropic(
             model_name=_get_anthropic_model_name(),
-            api_key=SecretStr(api_key),
-            timeout=60.0,
+            anthropic_api_key=SecretStr(api_key),
+            default_request_timeout=60.0,
             stop=None,
         )
 

@@ -40,7 +40,7 @@ def test_netgent_langchain_model_uses_anthropic(monkeypatch):
 
     assert isinstance(model, DummyAnthropic)
     assert captured["model_name"] == "claude-sonnet-4-6"
-    assert captured["api_key"].get_secret_value() == "anthropic-key"
+    assert captured["anthropic_api_key"].get_secret_value() == "anthropic-key"
 
 
 def test_netgent_browser_use_model_uses_anthropic(monkeypatch):
