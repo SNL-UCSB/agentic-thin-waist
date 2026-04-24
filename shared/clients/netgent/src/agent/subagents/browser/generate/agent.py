@@ -2,12 +2,13 @@ import asyncio
 import os
 from typing import Any, NotRequired
 
-from browser_use import Agent, AgentHistoryList, Browser, ChatGoogle
+from browser_use import Agent, AgentHistoryList, Browser
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.runtime import Runtime
 from playwright.async_api import Playwright, async_playwright
 from pydantic import BaseModel, ConfigDict
 
+from clients.netgent.src.agent.model_factory import get_browser_use_model
 from clients.netgent.src.agent.subagents.browser.generate.evolution import (
     BrowserEvolution,
     build_evolutionary_prompt,
@@ -22,7 +23,6 @@ from clients.netgent.src.agent.subagents.browser.util import (
     prune_agenthistorylist,
 )
 
-browser_model = ChatGoogle(model="gemini-3.1-flash-lite-preview")
 DEFAULT_MAX_STEPS = int(os.getenv("BROWSER_USE_MAX_STEPS", "30"))
 EXCLUDED_BROWSER_USE_ACTIONS = [
     "close_tab",
@@ -97,7 +97,7 @@ async def execute_task(
                     playwright=playwright,
                 ),
                 controller=build_controller(EXCLUDED_BROWSER_USE_ACTIONS),
-                llm=browser_model,
+                llm=get_browser_use_model(),
                 task=evolutionary_prompt,
                 sensitive_data=parameters or None,
                 headless=BROWSER_USE_HEADLESS,

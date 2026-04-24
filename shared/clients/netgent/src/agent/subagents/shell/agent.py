@@ -30,11 +30,11 @@ except ModuleNotFoundError:  # pragma: no cover - optional dependency
 
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.runtime import Runtime
 from pydantic import BaseModel, ConfigDict
 
+from clients.netgent.src.agent.model_factory import get_langchain_model
 from clients.netgent.src.engine.controller import ProgramController
 from clients.netgent.src.engine.executor import StateExecutor
 from clients.netgent.src.engine.runner import WorkflowRunner
@@ -61,8 +61,6 @@ class ShellAgentContext(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
     runner: WorkflowRunner
 
-
-model = ChatGoogleGenerativeAI(model="gemini-3.1-flash-lite-preview")
 
 EXECUTION_TOOL_ROUTES = {
     "RunIPerf3Tool": "run_iperf3",
@@ -103,6 +101,7 @@ def route_run_workflow(state: ShellRunAgentState):
 def decide(state: ShellRunAgentState) -> ShellRunAgentState:
     tools = [RunIPerf3Tool, RunNDT7Tool, RunPingTool, SendMessage]
 
+    model = get_langchain_model()
     decision_model = model.bind_tools(tools)
     prompt_value = DECIDE_PROMPT.invoke({"messages": state["messages"]})
     decision = decision_model.invoke(prompt_value.messages)

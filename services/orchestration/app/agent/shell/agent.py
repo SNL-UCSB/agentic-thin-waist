@@ -13,7 +13,11 @@ from langgraph.graph.message import MessagesState
 from langgraph.runtime import Runtime
 from pydantic import BaseModel, ConfigDict
 
-from app.agent.utils import get_model, log_claude_step
+from app.agent.utils import get_model, log_claude_step, with_structured_output
+from clients.netgent.src.agent.model_factory import (
+    get_llm_provider as get_netgent_llm_provider,
+    has_llm_credentials as netgent_has_llm_credentials,
+)
 
 if TYPE_CHECKING:
     from clients.netgent.src.main import NetGent
@@ -202,7 +206,7 @@ def _map_workflow_params_with_claude(
         ),
     )
     model = get_model()
-    result: MapWorkflowParams = model.with_structured_output(MapWorkflowParams).invoke(
+    result: MapWorkflowParams = with_structured_output(model, MapWorkflowParams).invoke(
         prompt
     )
     log_claude_step(
@@ -338,7 +342,9 @@ def choose_workflow(
             str(msg.content) for msg in prompt if hasattr(msg, "content")
         ),
     )
-    result: ChooseWorkflow = model.with_structured_output(ChooseWorkflow).invoke(prompt)
+    result: ChooseWorkflow = with_structured_output(model, ChooseWorkflow).invoke(
+        prompt
+    )
     print(
         f"[SHELL WF] LLM choose_workflow: is_valid={result.is_valid} id={result.id!r} params={result.parameters}"
     )
@@ -350,9 +356,8 @@ def choose_workflow(
 
     chosen_entry = next((w for w in available if w["id"] == result.id), None)
     reasoning = result.reasoning
-    has_creds = bool(
-        os.getenv("GOOGLE_API_KEY") or os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-    )
+    netgent_provider = get_netgent_llm_provider()
+    has_creds = netgent_has_llm_credentials(netgent_provider)
 
     if result.is_valid and chosen_entry and chosen_entry.get("link"):
         try:
@@ -368,10 +373,10 @@ def choose_workflow(
         if not has_creds:
             reasoning = (
                 f"{result.reasoning} Workflow not present for this intent or invalid request, "
-                "and workflow generation is unavailable because Google credentials are not configured."
+                f"and workflow generation is unavailable because {netgent_provider} credentials are not configured."
             )
             print(
-                "[SHELL WF] Invalid/no matching workflow and no Google creds; failing request"
+                "[SHELL WF] Invalid/no matching workflow and no NetGent LLM creds; failing request"
             )
 
     parameters: dict[str, Any] | None = None
@@ -429,14 +434,13 @@ def route_valid_workflow(state: ShellWorkflowGenerationState) -> str:
     if chosen and chosen.get("fail_fast"):
         print("[SHELL WF] route_valid_workflow: fail_fast=True, ending")
         return "choose_workflow"
-    has_creds = bool(
-        os.getenv("GOOGLE_API_KEY") or os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-    )
+    netgent_provider = get_netgent_llm_provider()
+    has_creds = netgent_has_llm_credentials(netgent_provider)
     print(
-        f"[SHELL WF] route_valid_workflow: is_valid=False, has_google_creds={has_creds}"
+        f"[SHELL WF] route_valid_workflow: is_valid=False, provider={netgent_provider} has_llm_creds={has_creds}"
     )
     if not has_creds:
-        print("[SHELL WF] No Google creds — ending with invalid/missing workflow")
+        print("[SHELL WF] No NetGent LLM creds — ending with invalid/missing workflow")
         return "choose_workflow"
     return "generate"
 

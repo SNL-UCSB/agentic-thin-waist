@@ -226,7 +226,7 @@ The service expects:
 - S3-compatible object storage for artifacts
 - valid `S3_ACCESS_KEY` and `S3_SECRET_KEY`
 - optional browserless / CDP configuration for browser workflows
-- a Gemini API key for the embedded `ChatGoogleGenerativeAI` agents
+- an LLM API key for the configured NetGent provider (`gemini` or `anthropic`)
 
 Important environment variables:
 
@@ -234,6 +234,7 @@ Important environment variables:
 - `NETGENT_PORT`
 - `NETGENT_TIMEOUT_DEFAULT`
 - `NETGENT_QUEUE_CONCURRENCY`
+- `NETGENT_LLM_PROVIDER` (`gemini` or `anthropic`)
 - `DB_HOST`
 - `DB_PORT`
 - `DB_NAME`
@@ -245,13 +246,30 @@ Important environment variables:
 - `S3_BUCKET_NAME` or `NETGENT_S3_BUCKET_NAME`
 - `NETGENT_S3_PUBLIC_URL`
 - `BROWSERLESS_CDP_ENDPOINT` or `BROWSERLESS_WS_ENDPOINT`
-- `GOOGLE_API_KEY`
+- `GOOGLE_API_KEY` when `NETGENT_LLM_PROVIDER=gemini`
+- `ANTHROPIC_API_KEY` or `CLAUDE_API_KEY` when `NETGENT_LLM_PROVIDER=anthropic`
 
-### Gemini API Key
+### LLM Provider Switch
 
-NetGent uses `ChatGoogleGenerativeAI` in the embedded agent stack, so local development must provide a Gemini API key.
+NetGent now supports both Gemini and Anthropic across its embedded LangChain and browser-use agents.
 
-For this repository, the canonical environment variable is `GOOGLE_API_KEY`, which is how the shared repo `.env` is currently configured.
+Use `NETGENT_LLM_PROVIDER` to choose the provider:
+
+```bash
+export NETGENT_LLM_PROVIDER="gemini"
+```
+
+or:
+
+```bash
+export NETGENT_LLM_PROVIDER="anthropic"
+```
+
+The default in this repository is `gemini`, which preserves the previous behavior.
+
+### Gemini Configuration
+
+When `NETGENT_LLM_PROVIDER=gemini`, provide `GOOGLE_API_KEY`.
 
 Get a Gemini API key from Google AI Studio:
 
@@ -265,15 +283,26 @@ Set it locally:
 export GOOGLE_API_KEY="your_api_key_here"
 ```
 
-If you want the setting to persist in `zsh`, add that line to `~/.zshrc` and reload it with:
+### Anthropic Configuration
+
+When `NETGENT_LLM_PROVIDER=anthropic`, provide either `ANTHROPIC_API_KEY` or `CLAUDE_API_KEY`.
+
+Set it locally:
+
+```bash
+export ANTHROPIC_API_KEY="your_api_key_here"
+```
+
+If you want the settings to persist in `zsh`, add the relevant `export` lines to `~/.zshrc` and reload it with:
 
 ```bash
 source ~/.zshrc
 ```
 
-Official reference:
+Official references:
 
 - `https://ai.google.dev/gemini-api/docs/api-key`
+- `https://docs.anthropic.com/en/api/getting-started`
 
 ## Recommended Client Flow
 
