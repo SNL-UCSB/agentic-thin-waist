@@ -1,5 +1,5 @@
 {
-  "specification": "1. Go to 'https://meet.google.com/<meeting_code> '.\n    2. On the pre-join screen, if prompted for a name, type <secret>display_name</secret> into the display name input.\n    3. Click the 'Ask to join' button to request entry to the meeting.\n    4. Once in the meeting (or while waiting in the lobby to be admitted), wait for <secret>wait_seconds</secret> seconds before stopping.",
+  "specification": "1. Go to https://meet.google.com/{{meeting_code}}\n2. On the pre-join screen, type {{display_name}} into the 'Your name' input.\n3. Click 'Ask to join' to request entry to the meeting.\n4. Once in the lobby or meeting, wait for {{wait_seconds}} seconds before stopping.",
   "states": [
     {
       "checks": [
@@ -17,28 +17,16 @@
           }
         },
         {
-          "type": "click_element",
-          "params": {
-            "selector": "button.UywwFc-LgbsSe.IMT1Gf"
-          }
-        },
-        {
           "type": "input_text",
           "params": {
-            "selector": "input.qdOxv-fmcmS-wGMbrd[id=\"c18\"][aria-label=\"Your name\"]",
+            "selector": "input[aria-label=\"Your name\"]",
             "text": "{{display_name}}"
           }
         },
         {
           "type": "click_element",
           "params": {
-            "selector": "button.UywwFc-LgbsSe.jI0PTc"
-          }
-        },
-        {
-          "type": "click_element",
-          "params": {
-            "selector": "button.UywwFc-LgbsSe.tusd3[aria-describedby=\"tt-c25\"]"
+            "selector": "button:has-text(\"Join now\")"
           }
         },
         {
@@ -52,9 +40,5 @@
       "executed": []
     }
   ],
-  "parameters": [
-    "meeting_code",
-    "display_name",
-    "wait_seconds"
-  ]
+  "parameters": ["meeting_code", "display_name", "wait_seconds"]
 }
