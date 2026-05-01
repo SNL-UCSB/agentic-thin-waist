@@ -15,6 +15,37 @@
             "url": "https://meet.google.com/{{meeting_code}}",
             "new_tab": false
           }
+        },
+        {
+          "type": "click_element",
+          "params": {
+            "selector": "button.UywwFc-LgbsSe.IMT1Gf"
+          }
+        },
+        {
+          "type": "input_text",
+          "params": {
+            "selector": "input.qdOxv-fmcmS-wGMbrd[id=\"c18\"][aria-label=\"Your name\"]",
+            "text": "{{display_name}}"
+          }
+        },
+        {
+          "type": "click_element",
+          "params": {
+            "selector": "button.UywwFc-LgbsSe.jI0PTc"
+          }
+        },
+        {
+          "type": "click_element",
+          "params": {
+            "selector": "button.UywwFc-LgbsSe.tusd3[aria-describedby=\"tt-c25\"]"
+          }
+        },
+        {
+          "type": "wait",
+          "params": {
+            "seconds": "{{wait_seconds}}"
+          }
         }
       ],
       "end_state": "Workflow Completed",

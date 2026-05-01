@@ -31,14 +31,27 @@ MEDIA_STREAM_DISABLE_ARGS = [
 # `navigator.webdriver === true` signal.
 STEALTH_LAUNCH_ARGS = [
     "--disable-blink-features=AutomationControlled",
-    "--disable-features=IsolateOrigins,site-per-process",
-    "--disable-site-isolation-trials",
     "--no-default-browser-check",
     "--no-first-run",
+    "--disable-sync",
+    "--disable-dev-shm-usage",
     "--password-store=basic",
     "--use-mock-keychain",
     "--disable-infobars",
     "--exclude-switches=enable-automation",
+    "--window-size=1280,720",
+]
+
+# Force a working GL backend so apps that lean on GPU compositing (Google
+# Meet's video tiles, glass-effect toolbar, avatar plates) actually paint.
+# Without these, Playwright's Chromium often falls back to a degraded
+# rasterizer that mounts the React tree but leaves the visible viewport
+# black even though the DOM is fully present.
+GPU_RENDERING_ARGS = [
+    "--ignore-gpu-blocklist",
+    "--enable-gpu-rasterization",
+    "--enable-zero-copy",
+    "--use-gl=angle",
 ]
 
 # A recent Chrome-on-macOS UA. Using the default Playwright HeadlessChrome /
@@ -50,26 +63,49 @@ STEALTH_USER_AGENT = (
 )
 
 # Injected into every page before any site script runs. Patches the fingerprints
-# that `navigator.webdriver`-style checks inspect.
+# that headless / automation detection inspects, including the WebGL renderer
+# string that Google Meet checks before deciding whether to render its
+# GPU-composited video tiles. Without the WebGL patch, Meet sees a generic
+# SwiftShader/ANGLE renderer and silently skips the in-call layout, leaving
+# a black viewport over a fully-mounted DOM.
 STEALTH_INIT_SCRIPT = """
-Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-if (!window.chrome) { window.chrome = {}; }
-if (!window.chrome.runtime) { window.chrome.runtime = {}; }
+Object.defineProperty(navigator, 'webdriver', { get: () => false });
+if (!window.chrome) { window.chrome = { runtime: {} }; }
 Object.defineProperty(navigator, 'languages', {
     get: () => ['en-US', 'en'],
 });
 Object.defineProperty(navigator, 'plugins', {
     get: () => [1, 2, 3, 4, 5],
 });
-const _permissionsQuery = window.navigator.permissions && window.navigator.permissions.query;
-if (_permissionsQuery) {
-    window.navigator.permissions.query = (parameters) => (
-        parameters && parameters.name === 'notifications'
-            ? Promise.resolve({ state: Notification.permission })
-            : _permissionsQuery(parameters)
-    );
+// Patch the prototype (not the instance) and use a real `function` so the
+// caller's `this` flows through to the native method. Calling the saved
+// reference as a bare function throws "Illegal invocation" — Google Meet
+// reports that error to /jserror and silently bails out of mounting the
+// in-call UI, leaving a black viewport.
+const _Permissions = window.Permissions && window.Permissions.prototype;
+const _origPermissionsQuery = _Permissions && _Permissions.query;
+if (_origPermissionsQuery) {
+    _Permissions.query = function (parameters) {
+        if (parameters && parameters.name === 'notifications') {
+            return Promise.resolve({ state: 'default', onchange: null });
+        }
+        return _origPermissionsQuery.call(this, parameters);
+    };
 }
+const _getWebGLParameter = WebGLRenderingContext.prototype.getParameter;
+WebGLRenderingContext.prototype.getParameter = function (param) {
+    // 37445 = UNMASKED_VENDOR_WEBGL, 37446 = UNMASKED_RENDERER_WEBGL.
+    // Reporting a real-looking GPU vendor/renderer keeps Meet from falling
+    // back to its no-GPU rendering path.
+    if (param === 37445) return 'Google Inc. (Apple)';
+    if (param === 37446) return 'ANGLE (Apple, Apple M1, OpenGL 4.1)';
+    return _getWebGLParameter.call(this, param);
+};
 """
+
+
+def _stealth_enabled() -> bool:
+    return os.getenv("NETGENT_DISABLE_STEALTH", "").lower() not in ("1", "true", "yes")
 
 
 IGNORED_ACTIONS = {
@@ -241,23 +277,37 @@ async def open_browser_session(
     playwright: Playwright, *, record_har_path: str | None = None
 ):
     endpoint = get_browserless_ws_endpoint()
+    stealth = _stealth_enabled()
     if endpoint:
         browser = await playwright.chromium.connect(endpoint)
     else:
-        browser = await playwright.chromium.launch(
-            headless=_is_headless(),
-            args=[*MEDIA_STREAM_DISABLE_ARGS, *STEALTH_LAUNCH_ARGS],
-            ignore_default_args=["--enable-automation"],
-        )
+        launch_args = [*MEDIA_STREAM_DISABLE_ARGS, *GPU_RENDERING_ARGS]
+        launch_kwargs: dict[str, Any] = {
+            "headless": _is_headless(),
+            "args": launch_args,
+        }
+        if stealth:
+            launch_kwargs["args"] = [*launch_args, *STEALTH_LAUNCH_ARGS]
+            launch_kwargs["ignore_default_args"] = ["--enable-automation"]
+        browser = await playwright.chromium.launch(**launch_kwargs)
+    # Grant camera + microphone so getUserMedia resolves successfully —
+    # the launch flags above feed it silent/black fake devices, so nothing
+    # leaks from the real host. Apps like Google Meet refuse to render
+    # their in-call UI when the permission is denied (the `<video>` tree
+    # never mounts → black canvas), even though we never want their real
+    # streams.
     context_kwargs: dict[str, Any] = {
-        "permissions": [],
-        "user_agent": STEALTH_USER_AGENT,
+        "permissions": ["camera", "microphone"],
+        "viewport": {"width": 1280, "height": 720},
     }
+    if stealth:
+        context_kwargs["user_agent"] = STEALTH_USER_AGENT
     if record_har_path:
         context_kwargs["record_har_path"] = record_har_path
         context_kwargs["record_har_mode"] = "full"
         context_kwargs["record_har_content"] = "embed"
     browser_context = await browser.new_context(**context_kwargs)
-    await browser_context.add_init_script(STEALTH_INIT_SCRIPT)
+    if stealth:
+        await browser_context.add_init_script(STEALTH_INIT_SCRIPT)
     page = await browser_context.new_page()
     return browser, browser_context, page
