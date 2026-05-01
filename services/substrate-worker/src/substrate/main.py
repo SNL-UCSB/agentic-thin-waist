@@ -344,6 +344,24 @@ def _build_qdisc_args(
     return " ".join(parts)
 
 
+def _detect_wan_iface() -> Optional[str]:
+    """Best-effort detection of the active IPv4 egress interface."""
+    candidates = [
+        "ip -4 route get 1.1.1.1 2>/dev/null | awk '/dev/ {for (i=1;i<=NF;i++) if ($i==\"dev\") {print $(i+1); exit}}'",
+        "ip -4 route show default 2>/dev/null | awk '{print $5; exit}'",
+    ]
+    for cmd in candidates:
+        res = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+        iface = (res.stdout or "").strip()
+        if iface:
+            exists = subprocess.run(
+                f"test -d /sys/class/net/{iface}", shell=True
+            ).returncode == 0
+            if exists:
+                return iface
+    return None
+
+
 def apply_shaping(
     downstream_iface: str,
     upstream_iface: str,
@@ -361,10 +379,18 @@ def apply_shaping(
     # -------------------------
     # Bandwidth shaping (HTB)
     # -------------------------
-    for iface, rate in [
-        (downstream_iface, download_mbps),
-        (upstream_iface, upload_mbps),
-    ]:
+    iface_rates = [(downstream_iface, download_mbps), (upstream_iface, upload_mbps)]
+    wan_iface = _detect_wan_iface()
+    # With the bridged setup, internet egress can bypass veth4; enforce upload
+    # shaping on WAN as well so ns1->internet upload is capped correctly.
+    if wan_iface:
+        iface_rates.append((wan_iface, upload_mbps))
+
+    seen_ifaces = set()
+    for iface, rate in iface_rates:
+        if iface in seen_ifaces:
+            continue
+        seen_ifaces.add(iface)
         c0 = f"tc qdisc del dev {iface} root 2>/dev/null || true"
         run_cmd(c0)
         applied.append(c0)
