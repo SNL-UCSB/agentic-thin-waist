@@ -70,6 +70,8 @@ def run_ping(
     timeout_seconds: int | None = None,
     packet_size: int | None = None,
 ) -> PingResult:
+    if count is not None:
+        count = int(count)
     client = PingClient()
     return client.run(
         host=host,

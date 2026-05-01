@@ -7,7 +7,7 @@ on first use if not provided.
 
 Environment variables
 ---------------------
-AWS_REGION                      AWS region (default: output of ``aws configure get region``, else ``us-west-2``)
+AWS_REGION                      AWS region (default: ``AWS_DEFAULT_REGION`` or ``aws configure get region``, else ``us-east-1``)
 AWS_SUBSTRATE_ECR_URI           ECR image URI for substrate-worker (auto-provisioned if blank)
 AWS_SUBSTRATE_INSTANCE_TYPE     EC2 instance type (default: ``c5.xlarge``)
 AWS_SUBSTRATE_SECURITY_GROUP    Security group ID allowing inbound 8002 (auto-provisioned if blank)
@@ -22,14 +22,41 @@ TELEMETRY_SERVICE_URL           Passed to the substrate worker container (defaul
 from __future__ import annotations
 
 import os
+import subprocess
 from dataclasses import dataclass, field
+
+
+def resolve_aws_region() -> str:
+    """Resolve AWS region from env, CLI config, then safe fallback."""
+    for key in ("AWS_REGION", "AWS_DEFAULT_REGION"):
+        value = os.getenv(key, "").strip()
+        if value:
+            return value
+
+    try:
+        result = subprocess.run(
+            ["aws", "configure", "get", "region"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=2,
+        )
+    except (OSError, subprocess.SubprocessError):
+        result = None
+
+    if result and result.returncode == 0:
+        configured_region = result.stdout.strip()
+        if configured_region:
+            return configured_region
+
+    return "us-east-1"
 
 
 @dataclass(frozen=True)
 class AWSConfig:
     """Immutable snapshot of AWS backend configuration."""
 
-    region: str = field(default_factory=lambda: os.getenv("AWS_REGION", "us-west-2"))
+    region: str = field(default_factory=resolve_aws_region)
     ecr_uri: str = field(default_factory=lambda: os.getenv("AWS_SUBSTRATE_ECR_URI", ""))
     instance_type: str = field(
         default_factory=lambda: os.getenv("AWS_SUBSTRATE_INSTANCE_TYPE", "c5.xlarge")

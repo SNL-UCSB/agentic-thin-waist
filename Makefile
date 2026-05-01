@@ -28,10 +28,10 @@ install:
 	done
 
 build:
-	docker-compose build
+	docker compose build
 
 up:
-	docker-compose up -d
+	docker compose up -d
 	@echo "Services starting..."
 	@sleep 2
 	@echo "Waiting for services to be ready (max 30 seconds)..."
@@ -57,15 +57,15 @@ up:
 	@echo "  Orchestration      : http://localhost:8005"
 
 down:
-	docker-compose down
+	docker compose down
 
 logs:
-	docker-compose logs -f
+	docker compose logs -f
 
 logs-service:
 	@echo "Usage: make logs-service SERVICE=<service-name>"
 	@echo "Example: make logs-service SERVICE=experiment-api"
-	docker-compose logs -f $(SERVICE)
+	docker compose logs -f $(SERVICE)
 
 test:
 	docker compose -f docker-compose.yml -f docker-compose.test.yml up --build --abort-on-container-exit --exit-code-from orchestration-tests orchestration-tests
@@ -75,7 +75,7 @@ test-local:
 	pytest tests/ -v
 
 clean:
-	docker-compose down -v
+	docker compose down -v
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	find . -type f -name "*.pyc" -delete
 	find . -type d -name ".pytest_cache" -exec rm -rf {} + 2>/dev/null || true
@@ -84,13 +84,13 @@ clean:
 
 status:
 	@echo "Service Status:"
-	@docker-compose ps
+	@docker compose ps
 
 shell:
-	docker-compose exec experiment-api /bin/bash
+	docker compose exec experiment-api /bin/bash
 
 restart:
-	docker-compose restart
+	docker compose restart
 
 version:
 	@echo "Agentic Thin Waist v0.1.0"
@@ -142,11 +142,11 @@ status-aws:
 
 # Cloud deployment commands
 build-cloud:
-	docker-compose -f docker-compose.cloud.yml build
+	docker compose -f docker-compose.yml -f docker-compose.cloud.yml build
 
 up-cloud:
 	@echo "Starting cloud deployment (requires AWS/Azure credentials)"
-	docker-compose -f docker-compose.cloud.yml up -d
+	docker compose -f docker-compose.yml -f docker-compose.cloud.yml up -d
 
 down-cloud:
-	docker-compose -f docker-compose.cloud.yml down
+	docker compose -f docker-compose.yml -f docker-compose.cloud.yml down

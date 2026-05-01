@@ -292,6 +292,8 @@ def _build_user_data(
     worker_image: str,
     telemetry_url: str,
     ecr_region: str = "",
+    netgent_use_local: str = "false",
+    netgent_namespace: str = "ns1",
 ) -> str:
     """Build the EC2 user-data script that starts the substrate worker.
 
@@ -301,7 +303,16 @@ def _build_user_data(
     3. Pulls the substrate-worker image
     4. Launches it in privileged host-network mode
     """
-    env_flags = f"-e TELEMETRY_SERVICE_URL={telemetry_url}" if telemetry_url else ""
+    env_parts: list[str] = []
+    if telemetry_url:
+        env_parts.append(f"-e TELEMETRY_SERVICE_URL={telemetry_url}")
+    # Shell workflows (ping, etc.) must run inside the same netns as the shaped
+    # veth path (ns1). NetGent defaults NETGENT_USE_LOCAL=true if unset, which
+    # bypasses `ip netns exec` — traffic exits the host directly and does not
+    # appear on SUBSTRATE_CAPTURE_IFACE (veth2). Match docker-compose substrate-worker.
+    env_parts.append(f"-e NETGENT_USE_LOCAL={netgent_use_local}")
+    env_parts.append(f"-e NETGENT_NAMESPACE={netgent_namespace}")
+    env_flags = " \\\n    ".join(env_parts)
 
     # Build ECR login block if image is from ECR
     ecr_login = ""
@@ -336,6 +347,14 @@ sleep 2
 echo "Pulling image {worker_image}..."
 docker pull {worker_image}
 
+# WAN interface for setup.sh SNAT (iptables MASQUERADE). Wrong iface => no return path
+# from ns1/ns2 => ping gets 0 replies and exits non-zero. Detect at boot from host routing.
+WAN_IF="$(ip -4 route show default 2>/dev/null | awk '{{print $5; exit}}')"
+if [ -z "$WAN_IF" ] || [ ! -d "/sys/class/net/$WAN_IF" ]; then
+  WAN_IF="eth0"
+fi
+echo "SUBSTRATE_WAN_IF=$WAN_IF (for SNAT to Internet from client netns)"
+
 # Run substrate worker
 docker run -d \\
     --name substrate-worker \\
@@ -345,6 +364,7 @@ docker run -d \\
     --cap-add SYS_ADMIN \\
     --net=host \\
     {env_flags} \\
+    -e SUBSTRATE_WAN_IF="$WAN_IF" \\
     {worker_image}
 
 echo "Substrate worker started at $(date)"
@@ -424,10 +444,18 @@ class AWSBackend(ConnectivityBackend):
 
         worker_id = f"worker-{uuid.uuid4().hex[:8]}"
 
+        netgent_use_local = str(
+            config.get("netgent_use_local") or os.getenv("NETGENT_USE_LOCAL", "false")
+        ).strip()
+        netgent_namespace = str(
+            config.get("netgent_namespace") or os.getenv("NETGENT_NAMESPACE", "ns1")
+        ).strip()
         user_data = _build_user_data(
             worker_image=worker_image,
             telemetry_url=telemetry_url,
             ecr_region=self._config.region,
+            netgent_use_local=netgent_use_local or "false",
+            netgent_namespace=netgent_namespace or "ns1",
         )
 
         run_kwargs: dict[str, Any] = {
@@ -547,10 +575,30 @@ class AWSBackend(ConnectivityBackend):
         """Poll until instance is running and has a public IP. Returns the IP."""
         deadline = time.monotonic() + timeout
         poll_interval = 5
+        last_error = ""
 
         while time.monotonic() < deadline:
-            resp = self._ec2.describe_instances(InstanceIds=[instance_id])
-            instance = resp["Reservations"][0]["Instances"][0]
+            try:
+                resp = self._ec2.describe_instances(InstanceIds=[instance_id])
+                reservations = resp.get("Reservations", [])
+                if not reservations or not reservations[0].get("Instances"):
+                    last_error = "instance not yet visible in describe_instances"
+                    time.sleep(poll_interval)
+                    continue
+                instance = reservations[0]["Instances"][0]
+            except Exception as exc:
+                # EC2 can be eventually consistent right after run_instances and
+                # transiently return InvalidInstanceID.NotFound for a valid ID.
+                msg = str(exc)
+                if "InvalidInstanceID.NotFound" in msg:
+                    last_error = msg
+                    logger.debug(
+                        "Instance %s not yet visible to EC2 DescribeInstances; retrying",
+                        instance_id,
+                    )
+                    time.sleep(poll_interval)
+                    continue
+                raise
             state = instance["State"]["Name"]
 
             if state == "terminated" or state == "shutting-down":
@@ -570,7 +618,7 @@ class AWSBackend(ConnectivityBackend):
 
         raise TimeoutError(
             f"Instance {instance_id} did not reach running state with a "
-            f"public IP within {timeout}s"
+            f"public IP within {timeout}s (last error: {last_error})"
         )
 
     def _wait_for_health(self, endpoint: str, timeout: int) -> None:

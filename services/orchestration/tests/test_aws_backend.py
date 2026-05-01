@@ -118,6 +118,27 @@ class TestAWSConfig:
         with pytest.raises(ValueError, match="AWS_SUBSTRATE_SECURITY_GROUP"):
             cfg.validate()
 
+    def test_region_falls_back_to_aws_default_region(self, monkeypatch):
+        monkeypatch.delenv("AWS_REGION", raising=False)
+        monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
+
+        from app.engine.aws_config import AWSConfig
+
+        cfg = AWSConfig()
+        assert cfg.region == "us-east-1"
+
+    def test_region_uses_aws_cli_config_when_env_missing(self, monkeypatch):
+        monkeypatch.delenv("AWS_REGION", raising=False)
+        monkeypatch.delenv("AWS_DEFAULT_REGION", raising=False)
+
+        from app.engine import aws_config
+
+        with patch("app.engine.aws_config.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="us-east-1\n")
+            cfg = aws_config.AWSConfig()
+
+        assert cfg.region == "us-east-1"
+
 
 # ---------------------------------------------------------------------------
 # AWSBackend tests

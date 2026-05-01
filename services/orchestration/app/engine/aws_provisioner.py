@@ -37,6 +37,8 @@ from typing import Any
 
 import httpx
 
+from .aws_config import resolve_aws_region
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -171,7 +173,7 @@ class AWSProvisioner:
     _INSTANCE_PROFILE_NAME = "agentic-substrate-worker-profile"
 
     def __init__(self, region: str | None = None) -> None:
-        self._region = region or os.getenv("AWS_REGION", "us-west-2")
+        self._region = region or resolve_aws_region()
 
         try:
             import boto3
@@ -746,7 +748,7 @@ def main() -> None:
         print("  teardown  Destroy all provisioned resources")
         sys.exit(1)
 
-    region = os.getenv("AWS_REGION", "us-west-2")
+    region = resolve_aws_region()
     provisioner = AWSProvisioner(region=region)
 
     if sys.argv[1] == "setup":

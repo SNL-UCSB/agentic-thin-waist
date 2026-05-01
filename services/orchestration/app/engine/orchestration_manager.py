@@ -814,19 +814,29 @@ class OrchestrationManager:
             }
         finally:
             if worker is not None:
-                try:
+                keep_worker = (
+                    os.getenv("ORCH_KEEP_WORKER", "").strip().lower()
+                    in {"1", "true", "yes", "on"}
+                )
+                if keep_worker:
                     print(
-                        f"[DISPATCH spec[{idx}]] Destroying worker {worker.worker_id} …"
+                        f"[DISPATCH spec[{idx}]] Keeping worker {worker.worker_id} for debug "
+                        f"(ORCH_KEEP_WORKER enabled) endpoint={worker.endpoint}"
                     )
-                    self.manager.destroy_worker(worker.worker_id)
-                    logger.info("Destroyed worker %s", worker.worker_id)
-                    print(
-                        f"[DISPATCH spec[{idx}]] Worker {worker.worker_id} destroyed OK"
-                    )
-                except Exception as exc:
-                    logger.warning(
-                        "Failed to destroy worker %s: %s", worker.worker_id, exc
-                    )
-                    print(
-                        f"[DISPATCH spec[{idx}]] WARNING: destroy worker failed: {exc}"
-                    )
+                else:
+                    try:
+                        print(
+                            f"[DISPATCH spec[{idx}]] Destroying worker {worker.worker_id} …"
+                        )
+                        self.manager.destroy_worker(worker.worker_id)
+                        logger.info("Destroyed worker %s", worker.worker_id)
+                        print(
+                            f"[DISPATCH spec[{idx}]] Worker {worker.worker_id} destroyed OK"
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            "Failed to destroy worker %s: %s", worker.worker_id, exc
+                        )
+                        print(
+                            f"[DISPATCH spec[{idx}]] WARNING: destroy worker failed: {exc}"
+                        )
