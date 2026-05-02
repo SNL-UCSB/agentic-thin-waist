@@ -355,9 +355,10 @@ def _detect_wan_iface() -> Optional[str]:
         res = subprocess.run(cmd, shell=True, capture_output=True, text=True)
         iface = (res.stdout or "").strip()
         if iface:
-            exists = subprocess.run(
-                f"test -d /sys/class/net/{iface}", shell=True
-            ).returncode == 0
+            exists = (
+                subprocess.run(f"test -d /sys/class/net/{iface}", shell=True).returncode
+                == 0
+            )
             if exists:
                 return iface
     return None

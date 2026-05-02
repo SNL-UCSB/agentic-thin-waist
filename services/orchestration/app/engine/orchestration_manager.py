@@ -814,10 +814,12 @@ class OrchestrationManager:
             }
         finally:
             if worker is not None:
-                keep_worker = (
-                    os.getenv("ORCH_KEEP_WORKER", "").strip().lower()
-                    in {"1", "true", "yes", "on"}
-                )
+                keep_worker = os.getenv("ORCH_KEEP_WORKER", "").strip().lower() in {
+                    "1",
+                    "true",
+                    "yes",
+                    "on",
+                }
                 if keep_worker:
                     print(
                         f"[DISPATCH spec[{idx}]] Keeping worker {worker.worker_id} for debug "
