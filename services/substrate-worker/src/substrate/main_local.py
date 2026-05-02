@@ -1,4 +1,3 @@
-# Profile: LOCAL baseline (pre-fix behavior from git history).
 import os
 import subprocess
 import time
