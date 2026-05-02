@@ -306,6 +306,9 @@ def _build_user_data(
     env_parts: list[str] = []
     if telemetry_url:
         env_parts.append(f"-e TELEMETRY_SERVICE_URL={telemetry_url}")
+    # Used by substrate-worker container startup dispatch to choose AWS-specific
+    # setup/runtime files.
+    env_parts.append("-e CONNECTIVITY_BACKEND=aws")
     # Shell workflows (ping, etc.) must run inside the same netns as the shaped
     # veth path (ns1). NetGent defaults NETGENT_USE_LOCAL=true if unset, which
     # bypasses `ip netns exec` — traffic exits the host directly and does not
