@@ -137,6 +137,8 @@ services:
       - "${BROWSERLESS_PORT:-3000}:3000"
     environment:
       - FLASK_ENV=development
+      # local_docker selects substrate local profile at worker startup.
+      - CONNECTIVITY_BACKEND=${CONNECTIVITY_BACKEND:-local_docker}
       - TELEMETRY_SERVICE_URL=http://telemetry-service:8004
       - BROWSER_PROXY_HOST=172.16.1.1
       - BROWSER_PROXY_PORT=8888

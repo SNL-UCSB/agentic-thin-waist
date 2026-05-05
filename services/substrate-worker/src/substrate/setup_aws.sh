@@ -1,6 +1,8 @@
 #!/bin/bash
 set -e
 
+# Profile: AWS baseline (current AWS-compatible behavior).
+
 # SNAT must match the host's real uplink. Docker often uses eth0; EC2 frequently
 # uses ens5, enX0, etc. Wrong interface => MASQUERADE never fires => no return
 # path for ns1/ns2 traffic => ping -c N exits 1 (no replies).
