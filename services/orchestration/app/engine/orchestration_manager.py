@@ -30,7 +30,9 @@ ORCH_CAPTURE_DURATION_SECONDS    Max capture duration in seconds (default: min(s
 ORCH_CAPTURE_TIMEOUT_SECONDS     How long to wait for capture to finish (default: 120)
 ORCH_POLL_INTERVAL_SECONDS       Polling interval for capture status (default: 2)
 SUBSTRATE_REPLAY_PNAT            PNAT rewrite rule for tcpreplay-edit --pnat
-                                 (default: 169.231.0.0/16:172.16.1.1,128.111.0.0/16:172.16.1.1)
+                                 (default: 169.231.0.0/16:172.16.1.20,128.111.0.0/16:172.16.1.20).
+                                 Per-experiment override: spec.replay_pnat_ip (single target IP;
+                                 reuses the standard source subnets above).
 ORCH_PCAP_DOWNLOAD_TIMEOUT_SECONDS   Seconds for GET /capture/.../pcap -> POST /artifacts bridge (default: 600).
                                  Finished PCAPs are streamed to telemetry when
                                  TELEMETRY_SERVICE_URL is set and POST /results returns result_id.
@@ -262,14 +264,26 @@ def _build_capture_payload(exp_id: str, spec: dict[str, Any]) -> dict[str, Any]:
 def _build_replay_payload(ctp_file: str, spec: dict[str, Any]) -> dict[str, Any]:
     """Build the POST /replay request body for one experiment.
 
-    The *pnat* rule rewrites internal CTP source IPs to the worker's internal
-    address so replayed packets traverse the shaped link.  Configurable via
-    SUBSTRATE_REPLAY_PNAT (default matches the test cluster subnets).
+    The *pnat* rule rewrites internal CTP source IPs to a target address on the
+    worker so replayed packets traverse the shaped link. The default target
+    (172.16.1.20) is intentionally distinct from the application IP (172.16.1.1)
+    so captured pcaps can be split between application traffic and replayed
+    cross-traffic by IP.
+
+    Resolution order:
+      1. spec["replay_pnat_ip"] — single target IP, applied to the standard
+         source subnets (169.231.0.0/16 and 128.111.0.0/16).
+      2. SUBSTRATE_REPLAY_PNAT — full rewrite rule (advanced override).
+      3. Built-in default: 169.231.0.0/16:172.16.1.20,128.111.0.0/16:172.16.1.20.
     """
-    pnat = os.getenv(
-        "SUBSTRATE_REPLAY_PNAT",
-        "169.231.0.0/16:172.16.1.1,128.111.0.0/16:172.16.1.1",
-    )
+    pnat_ip = spec.get("replay_pnat_ip")
+    if pnat_ip:
+        pnat = f"169.231.0.0/16:{pnat_ip},128.111.0.0/16:{pnat_ip}"
+    else:
+        pnat = os.getenv(
+            "SUBSTRATE_REPLAY_PNAT",
+            "169.231.0.0/16:172.16.1.20,128.111.0.0/16:172.16.1.20",
+        )
     duration = int(spec.get("duration_seconds", 60))
     return {
         "ctp_file": ctp_file,
