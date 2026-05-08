@@ -34,6 +34,16 @@ class GeneratedExperiment(BaseModel):
     ctp_capacity_range: Optional[Dict[str, float]] = Field(
         default_factory=lambda: {"lower_value": 1.0, "higher_value": 10.0}
     )
+    replay_pnat_ip: Optional[str] = Field(
+        default=None,
+        description=(
+            "Optional target IP for tcpreplay PNAT rewrite (e.g. '172.16.1.20'). "
+            "When set, replayed CTP source IPs are mapped to this address; the "
+            "standard source subnets (169.231.0.0/16, 128.111.0.0/16) are reused. "
+            "Leave unset to use the orchestrator default (172.16.1.20). Must not "
+            "conflict with the application IP."
+        ),
+    )
     reasoning: str = ""
 
 
