@@ -96,7 +96,7 @@ def icmp_rtt_pairs(pkts_or_path) -> list[tuple[float, float]]:
 def tcp_flows(pkts_or_path) -> dict[tuple, dict[str, Any]]:
     """Group TCP packets by direction-normalized 5-tuple. Returns
 
-        {flow_key: {"packets": int, "bytes": int, "first_ts": float, "last_ts": float}}
+    {flow_key: {"packets": int, "bytes": int, "first_ts": float, "last_ts": float}}
     """
     pkts = _as_packets(pkts_or_path)
     out: dict[tuple, dict[str, Any]] = {}
@@ -106,7 +106,12 @@ def tcp_flows(pkts_or_path) -> dict[tuple, dict[str, Any]]:
             continue
         rec = out.setdefault(
             k,
-            {"packets": 0, "bytes": 0, "first_ts": float(p.time), "last_ts": float(p.time)},
+            {
+                "packets": 0,
+                "bytes": 0,
+                "first_ts": float(p.time),
+                "last_ts": float(p.time),
+            },
         )
         rec["packets"] += 1
         rec["bytes"] += len(p)
@@ -145,6 +150,7 @@ def summarize_pcap(pkts_or_path) -> dict[str, Any]:
 # --------------------------------------------------------------------------- #
 # Plotting
 # --------------------------------------------------------------------------- #
+
 
 def _ensure_ax(ax):
     import matplotlib.pyplot as plt

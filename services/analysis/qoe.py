@@ -25,6 +25,7 @@ def _dump_json(obj: Any, indent: int = 2) -> str:
 # Pretty-printers
 # --------------------------------------------------------------------------- #
 
+
 def print_result_summary(result: dict[str, Any]) -> None:
     """One-line-ish summary header followed by all four-layer context."""
     rid = result.get("result_id", "?")
@@ -70,6 +71,7 @@ def print_contextual_tree(tree: dict[str, Any]) -> None:
 # Workflow-specific extractors. Each returns a flat dict of "interesting"
 # fields if the qoe_metrics looks like that workflow, else {}.
 # --------------------------------------------------------------------------- #
+
 
 def _first_present(d: dict[str, Any], keys: Iterable[str]) -> Optional[Any]:
     for k in keys:

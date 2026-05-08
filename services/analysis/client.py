@@ -82,9 +82,7 @@ class TelemetryClient:
         return r.json().get("results", []) or []
 
     def get_result(self, result_id: str) -> dict[str, Any]:
-        r = self._sess.get(
-            f"{self.base_url}/results/{result_id}", timeout=self.timeout
-        )
+        r = self._sess.get(f"{self.base_url}/results/{result_id}", timeout=self.timeout)
         r.raise_for_status()
         return r.json()
 
