@@ -54,7 +54,7 @@ from typing import Any
 from urllib.parse import quote
 
 from app.engine.connectivity import ConnectivityManager, WorkerInfo
-from app.engine.executor import DownstreamClients
+from app.engine.executor import DownstreamClients, TelemetryApis
 from app.engine.experiment_generator import ExperimentGenerator
 from app.engine.telemetry_capture_pull import stream_capture_pcap_to_telemetry
 
@@ -242,6 +242,25 @@ def _wait_until(target_epoch: float) -> None:
     remaining = target_epoch - time.time()
     if remaining > 0:
         time.sleep(remaining)
+
+
+def _make_telemetry_id_taken():
+    """Return a callable that reports whether an experiment_id is already
+    persisted in the telemetry service. Returns None if telemetry is
+    unconfigured, in which case the generator falls back to UUID-only
+    uniqueness.
+    """
+    base_url = os.getenv("TELEMETRY_SERVICE_URL")
+    if not base_url:
+        return None
+    timeout = float(os.getenv("ORCH_TELEMETRY_TIMEOUT_SECONDS", "5"))
+    api = TelemetryApis(base_url, timeout)
+
+    def _taken(experiment_id: str) -> bool:
+        resp = api.query_results({"experiment_id": experiment_id, "limit": 1})
+        return bool(resp.get("results"))
+
+    return _taken
 
 
 def _build_capture_payload(exp_id: str, spec: dict[str, Any]) -> dict[str, Any]:
@@ -679,7 +698,9 @@ class OrchestrationManager:
         # Generate the experiment specs from parsed intent
         print(f"\n{'='*60}")
         print(f"[ORCH] Generating experiment specs from parsed intent …")
-        experiments = ExperimentGenerator().generate(parsed_intent)
+        experiments = ExperimentGenerator().generate(
+            parsed_intent, id_taken=_make_telemetry_id_taken()
+        )
         experiment_specs = [e.model_dump() for e in experiments]
 
         if workflow:
