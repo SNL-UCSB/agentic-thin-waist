@@ -4,23 +4,42 @@ Pure logic: Cartesian product over capacities, latencies,
 and CC algorithms; no API calls or side effects.
 """
 
+import re
+import uuid
 from itertools import product
-from typing import Any, Dict, List
+from typing import Callable, List, Optional
 
 from app.models.schemas import GeneratedExperiment
 
 _DEFAULT_DURATION_SECONDS = 60
+_UUID_LEN = 8
+_MAX_UNIQUENESS_ATTEMPTS = 8
+
+
+def _slugify_app(name: str) -> str:
+    s = re.sub(r"[^a-z0-9]+", "", (name or "").lower())
+    return s or "app"
+
+
+def _fmt_num(x: float) -> str:
+    f = float(x)
+    return str(int(f)) if f.is_integer() else str(f)
 
 
 class ExperimentGenerator:
     def generate(
         self,
         parsed_intent: dict,
+        id_taken: Optional[Callable[[str], bool]] = None,
     ) -> List[GeneratedExperiment]:
         """Generate experiment specs from parsed intent parameters.
 
         Args:
             parsed_intent: Structured output from the intent parser.
+            id_taken: Optional callable that returns True if an experiment_id
+                already exists (e.g. in the telemetry service). Used to ensure
+                global uniqueness; if None, only intra-batch uniqueness is
+                guaranteed via the random UUID suffix.
         """
         capacities = parsed_intent.get("capacities") or [25]
         latencies = parsed_intent.get("latencies") or [50]
@@ -36,11 +55,21 @@ class ExperimentGenerator:
             "higher_value": 10,
         }
 
+        applications = parsed_intent.get("applications") or []
+        app_slug = _slugify_app(applications[0]) if applications else application_type
+
+        used: set[str] = set()
         experiments: List[GeneratedExperiment] = []
-        counter = 1
         for cap, lat, cc in product(capacities, latencies, cc_algorithms):
+            download = _fmt_num(cap)
+            upload = _fmt_num(parsed_intent.get("upload_mbps") or cap)
+            base_lat = _fmt_num(lat)
+            prefix = f"{app_slug}_{download}_{upload}_{base_lat}_{aqm_policy}_{cc}"
+            exp_id = self._mint_unique_id(prefix, used, id_taken)
+            used.add(exp_id)
+
             exp = GeneratedExperiment(
-                experiment_id=f"{application_type}-{cap}mbps-{lat}ms-{cc}-{counter:03d}",
+                experiment_id=exp_id,
                 application_type=application_type,
                 capacity_mbps=float(cap),
                 latency_ms=float(lat),
@@ -53,5 +82,25 @@ class ExperimentGenerator:
                 ctp_capacity_range=ctp_capacity_range,
             )
             experiments.append(exp)
-            counter += 1
         return experiments
+
+    @staticmethod
+    def _mint_unique_id(
+        prefix: str,
+        used: set[str],
+        id_taken: Optional[Callable[[str], bool]],
+    ) -> str:
+        for _ in range(_MAX_UNIQUENESS_ATTEMPTS):
+            candidate = f"{prefix}_{uuid.uuid4().hex[:_UUID_LEN]}"
+            if candidate in used:
+                continue
+            if id_taken is not None:
+                try:
+                    if id_taken(candidate):
+                        continue
+                except Exception:
+                    # Telemetry unreachable: trust the random suffix.
+                    return candidate
+            return candidate
+        # Extremely unlikely — fall back to a longer suffix.
+        return f"{prefix}_{uuid.uuid4().hex}"
