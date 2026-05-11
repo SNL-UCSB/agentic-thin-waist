@@ -31,6 +31,31 @@ def test_research_intent_requires_intent_field():
         raise AssertionError("Expected ValidationError for missing intent")
 
 
+def test_research_intent_workflow_source_defaults():
+    intent = ResearchIntent(intent="Run ndt at 40 Mbps")
+    assert intent.workflow_source == "auto"
+    assert intent.workflow_id is None
+
+
+def test_research_intent_workflow_source_explicit():
+    intent = ResearchIntent(
+        intent="Run ndt at 40 Mbps",
+        workflow_source="library",
+        workflow_id="test_ndt_workflow",
+    )
+    assert intent.workflow_source == "library"
+    assert intent.workflow_id == "test_ndt_workflow"
+
+
+def test_research_intent_workflow_source_rejects_invalid():
+    try:
+        ResearchIntent(intent="x", workflow_source="bogus")  # type: ignore[arg-type]
+    except ValidationError as exc:
+        assert "workflow_source" in str(exc)
+    else:
+        raise AssertionError("Expected ValidationError for invalid workflow_source")
+
+
 def test_generated_experiment_defaults_and_types():
     exp = GeneratedExperiment(
         experiment_id="exp-1",
