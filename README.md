@@ -110,16 +110,28 @@ cp .env.example .env        # then edit .env with your API key + paths
 
 ### 2. Build and start the stack
 ```bash
-make build                  # build all images
-make up                     # start everything; waits on health checks
-make status                 # docker compose ps
-make logs                   # tail logs for everything
-make logs-service SERVICE=orchestration   # tail one service
-make down                   # stop
-make clean                  # stop + remove volumes/caches
+docker compose build                       # build all images
+docker compose up -d                       # start everything (detached)
+docker compose ps                          # service status
+docker compose logs -f                     # tail logs for everything
+docker compose logs -f orchestration       # tail one service
+docker compose down                        # stop
+docker compose down -v                     # stop + remove volumes
 ```
 
-Once `make up` settles, the services are reachable on:
+Equivalent `make` shortcuts are defined in the [Makefile](Makefile):
+
+| Make target | Underlying command | Extras |
+|---|---|---|
+| `make build` | `docker compose build` | — |
+| `make up` | `docker compose up -d` | polls `localhost:8000/health` for up to 30s, then prints service URLs |
+| `make status` | `docker compose ps` | — |
+| `make logs` | `docker compose logs -f` | — |
+| `make logs-service SERVICE=<x>` | `docker compose logs -f <x>` | — |
+| `make down` | `docker compose down` | — |
+| `make clean` | `docker compose down -v` | also removes `__pycache__`, `*.pyc`, `.pytest_cache`, `build/`, `dist/`, `*.egg-info` |
+
+Once the stack is up, the services are reachable on:
 
 ```
 Experiment API     http://localhost:8000
@@ -246,10 +258,18 @@ agentic-thin-waist/
 
 ### Build & test
 ```bash
-make build              # all Docker images
-make up                 # start stack
-make test               # run full suite via docker-compose.test.yml
-make test-local         # repo-level pytest
+docker compose build                       # all Docker images
+docker compose up -d                       # start stack
+
+# Full test suite (runs orchestration-tests container, exits when done)
+docker compose -f docker-compose.yml -f docker-compose.test.yml \
+  up --build --abort-on-container-exit --exit-code-from orchestration-tests \
+  orchestration-tests
+# or: make test
+
+# Repo-level pytest (no containers)
+pytest tests/ -v
+# or: make test-local
 
 # Single-service test runs
 cd services/<name> && pytest tests/ -v

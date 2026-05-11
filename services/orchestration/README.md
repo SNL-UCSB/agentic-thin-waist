@@ -1,11 +1,8 @@
 # Orchestration Service
 
-**Port**: 8005
-**Deliverable**: D5 (Agentic Orchestration — Natural Language Intent → Executed Experiments)
-**Lead**: Haarika | **PI**: Prof. Arpit Gupta
-**Status**: Active — natural-language intent path is end-to-end working against the local Docker stack.
+**Port**: 8005 · **Plane**: Intent (agentic)
 
-The Orchestration Service is the agentic brain of the Agentic Thin Waist. It accepts a natural-language research intent over HTTP, uses an LLM (Claude or Gemini) to extract structured experiment parameters, expands them into a list of concrete experiment specs, and dispatches each one through the Experiment API → CTP Service → Substrate Worker → Telemetry Service pipeline.
+The Orchestration Service is the agentic entry point. It accepts a natural-language research intent over HTTP, uses an LLM (Claude or Gemini) to extract structured experiment parameters, expands them into a list of concrete experiment specs, and dispatches each one through the Experiment API → CTP Service → Substrate Worker → Telemetry Service pipeline.
 
 ---
 
@@ -45,10 +42,10 @@ The graph nodes live in `app/agent/orchestrator/agent.py`. Per-spec execution is
 ### Bring the stack up
 From the repo root:
 ```bash
-make build          # build all images
-make up             # start everything; waits on health checks
-make status         # ps
-make logs-service SERVICE=orchestration   # tail one service
+docker compose build
+docker compose up -d
+docker compose ps
+docker compose logs -f orchestration
 ```
 
 The orchestrator listens on `http://localhost:8005`.
@@ -249,8 +246,9 @@ python scripts/run_integration_pipeline_demo.py --skip-ctp-check     # substrate
 ```
 
 ### Tests
-- Repo root: `make test` (Docker Compose) or `make test-local` (pytest at the repo level).
 - This service: `pytest services/orchestration/tests -v`.
+- Repo-wide pytest: `pytest tests/ -v`.
+- Full suite in containers: `docker compose -f docker-compose.yml -f docker-compose.test.yml up --build --abort-on-container-exit --exit-code-from orchestration-tests orchestration-tests`.
 - Formatter: `black services/orchestration` (CI pins `black==26.3.1`).
 
 ---
@@ -301,16 +299,8 @@ A few knobs that landed recently and may not be familiar:
 
 ---
 
-## Contributing
-
-- Branch naming: `<username>/<area>/<short-description>`.
-- Commit prefix: `orchestration: <what changed>`.
-- Run `black services/orchestration` before committing.
-- Add tests under `services/orchestration/tests/` for any new public behavior.
-
 ## References
 
 - LangGraph: https://langchain-ai.github.io/langgraph/
 - Anthropic Claude API: https://docs.anthropic.com/claude/reference/
 - Google Gemini API: https://ai.google.dev/
-- NetForge (SIGCOMM submission): see top-level `README.md`.

@@ -1,12 +1,8 @@
 # NetGent Service
 
-**Port**: 8003
-**Deliverable**: D2 (Application Workflow Engine)
-**Leads**: Eugene + Jaber
+**Port**: 8003 · **Plane**: Execution (application)
 
-## Purpose
-
-NetGent is the application-side execution service in the thin-waist stack. It accepts a natural-language workflow specification, turns that specification into a persisted workflow definition, and then executes that saved workflow asynchronously.
+NetGent is the application-side execution service. It accepts a natural-language workflow specification, turns it into a persisted workflow definition, and executes that saved workflow asynchronously inside the substrate worker's network namespace.
 
 The service currently supports two workflow types:
 
@@ -249,60 +245,17 @@ Important environment variables:
 - `GOOGLE_API_KEY` when `NETGENT_LLM_PROVIDER=gemini`
 - `ANTHROPIC_API_KEY` or `CLAUDE_API_KEY` when `NETGENT_LLM_PROVIDER=anthropic`
 
-### LLM Provider Switch
+### LLM provider
 
-NetGent now supports both Gemini and Anthropic across its embedded LangChain and browser-use agents.
-
-Use `NETGENT_LLM_PROVIDER` to choose the provider:
+Both LangChain and browser-use paths support Gemini and Anthropic. Pick one via `NETGENT_LLM_PROVIDER` (default `gemini`):
 
 ```bash
-export NETGENT_LLM_PROVIDER="gemini"
+export NETGENT_LLM_PROVIDER=gemini    && export GOOGLE_API_KEY=...
+# or
+export NETGENT_LLM_PROVIDER=anthropic && export ANTHROPIC_API_KEY=...
 ```
 
-or:
-
-```bash
-export NETGENT_LLM_PROVIDER="anthropic"
-```
-
-The default in this repository is `gemini`, which preserves the previous behavior.
-
-### Gemini Configuration
-
-When `NETGENT_LLM_PROVIDER=gemini`, provide `GOOGLE_API_KEY`.
-
-Get a Gemini API key from Google AI Studio:
-
-1. Go to `https://aistudio.google.com/`.
-2. Sign in and press the `Get API Keys` page.
-3. Create a new key, or select an existing project and copy its key.
-
-Set it locally:
-
-```bash
-export GOOGLE_API_KEY="your_api_key_here"
-```
-
-### Anthropic Configuration
-
-When `NETGENT_LLM_PROVIDER=anthropic`, provide either `ANTHROPIC_API_KEY` or `CLAUDE_API_KEY`.
-
-Set it locally:
-
-```bash
-export ANTHROPIC_API_KEY="your_api_key_here"
-```
-
-If you want the settings to persist in `zsh`, add the relevant `export` lines to `~/.zshrc` and reload it with:
-
-```bash
-source ~/.zshrc
-```
-
-Official references:
-
-- `https://ai.google.dev/gemini-api/docs/api-key`
-- `https://docs.anthropic.com/en/api/getting-started`
+References: [Gemini API keys](https://ai.google.dev/gemini-api/docs/api-key), [Anthropic getting started](https://docs.anthropic.com/en/api/getting-started).
 
 ## Recommended Client Flow
 
