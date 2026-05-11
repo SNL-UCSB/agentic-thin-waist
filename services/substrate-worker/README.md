@@ -331,12 +331,12 @@ Start bidirectional CTP background traffic replay. Two `tcpreplay-edit` processe
 {
   "ctp_file": "cluster26_tree10_profile424",
   "duration_seconds": 60,
-  "pnat": "169.231.0.0/16:172.16.1.1,128.111.0.0/16:172.16.1.1"
+  "pnat": "169.231.0.0/16:172.16.1.20,128.111.0.0/16:172.16.1.20"
 }
 ```
 
 - `ctp_file`: base filename (without direction prefix or `.pcap`). Both `CTP_DIR/download/<ctp_file>.pcap` and `CTP_DIR/upload/<ctp_file>.pcap` must exist.
-- `pnat`: required IP rewrite rule mapping internal subnets to the target client IP — passed to `tcpreplay-edit --pnat`
+- `pnat`: **required** IP rewrite rule mapping internal subnets to the target IP — passed to `tcpreplay-edit --pnat`. The orchestrator picks this value; the worker just forwards it. Use an IP **distinct from the application's interface IP** (e.g. `172.16.1.20` while the app runs on `172.16.1.1`) so captured pcaps can be split between application traffic and replayed cross-traffic by IP.
 - `duration_seconds`: auto-stop both directions after N seconds (optional)
 
 **Response** (200 OK):
@@ -345,7 +345,7 @@ Start bidirectional CTP background traffic replay. Two `tcpreplay-edit` processe
   "replay_id": "550e8400-e29b-41d4-a716-446655440001",
   "status": "started",
   "ctp_file": "cluster26_tree10_profile424",
-  "pnat": "169.231.0.0/16:172.16.1.1,128.111.0.0/16:172.16.1.1"
+  "pnat": "169.231.0.0/16:172.16.1.20,128.111.0.0/16:172.16.1.20"
 }
 ```
 
@@ -359,7 +359,7 @@ Start bidirectional CTP background traffic replay. Two `tcpreplay-edit` processe
   "replay_id": "...",
   "status": "running",
   "ctp_file": "cluster26_tree10_profile424",
-  "pnat": "169.231.0.0/16:172.16.1.1,128.111.0.0/16:172.16.1.1",
+  "pnat": "169.231.0.0/16:172.16.1.20,128.111.0.0/16:172.16.1.20",
   "start_time": "2026-03-25T10:00:00"
 }
 ```
@@ -650,7 +650,7 @@ curl -X DELETE http://localhost:8002/capture/{capture_id}
 Launches download (ns2→veth3) and upload (ns1→veth1) simultaneously:
 
 ```bash
-curl -X POST http://localhost:8002/replay -H "Content-Type: application/json" -d '{"ctp_file":"cluster26_tree10_profile424","pnat":"169.231.0.0/16:172.16.1.1,128.111.0.0/16:172.16.1.1","duration_seconds":60}'
+curl -X POST http://localhost:8002/replay -H "Content-Type: application/json" -d '{"ctp_file":"cluster26_tree10_profile424","pnat":"169.231.0.0/16:172.16.1.20,128.111.0.0/16:172.16.1.20","duration_seconds":60}'
 ```
 
 Poll replay status:
