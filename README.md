@@ -111,7 +111,7 @@ cp .env.example .env        # then edit .env with your API key + paths
 ### 2. Build and start the stack
 ```bash
 docker compose build                       # build all images
-docker compose up -d                       # start everything (detached)
+sudo docker compose up -d                       # start everything (detached)
 docker compose ps                          # service status
 docker compose logs -f                     # tail logs for everything
 docker compose logs -f orchestration       # tail one service
