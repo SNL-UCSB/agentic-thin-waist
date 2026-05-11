@@ -6,6 +6,7 @@ OrchestratorAgent which runs:
     parse_intent → generate_experiments → execute_experiments → respond
 """
 
+import os
 import uuid
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 
@@ -142,11 +143,24 @@ def process_intent(orch_id: str, request: ResearchIntent) -> None:
         use_examples = bool(request.preferences.get("use_examples", True))
         max_parallel = int(request.preferences.get("max_parallel_workers", 1))
 
+        default_source = (
+            os.environ.get("ORCH_DEFAULT_WORKFLOW_SOURCE", "auto").strip().lower()
+            or "auto"
+        )
+        if default_source not in {"auto", "library", "generate"}:
+            default_source = "auto"
+        workflow_source = request.workflow_source or default_source
+        workflow_id = request.workflow_id
+
         print(f"\n{'#'*60}")
         print(f"[INTENT {orch_id}] Running LangGraph OrchestratorAgent …")
         print(f"[INTENT {orch_id}]   intent: {request.intent!r}")
         print(f"[INTENT {orch_id}]   use_examples={use_examples}")
         print(f"[INTENT {orch_id}]   max_parallel_workers={max_parallel}")
+        print(
+            f"[INTENT {orch_id}]   workflow_source={workflow_source!r} "
+            f"workflow_id={workflow_id!r}"
+        )
         print(f"{'#'*60}")
 
         workflow = request.context.get("workflow") or {}
@@ -158,6 +172,8 @@ def process_intent(orch_id: str, request: ResearchIntent) -> None:
             workflow,
             use_examples=use_examples,
             max_parallel_workers=max_parallel,
+            workflow_source=workflow_source,
+            workflow_id=workflow_id,
         )
 
         orch_result = result.get("orchestration_result") or {}

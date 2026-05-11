@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import pathlib
 import re
 from typing import TYPE_CHECKING, Any
@@ -35,13 +34,6 @@ _IPV4_RE = re.compile(
 _DOMAIN_RE = re.compile(r"\b(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}\b")
 
 
-def _env_truthy(name: str, default: bool = False) -> bool:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
-
-
 def _build_param_hint(workflow_id: str, param_names: list[str]) -> str:
     schema = _WORKFLOW_SCHEMAS.get(workflow_id, {})
     parts: list[str] = []
@@ -67,24 +59,6 @@ def _load_shell_workflows() -> list[dict[str, Any]]:
         return []
 
 
-def _infer_workflow_id_from_intent(
-    intent: str, available: list[dict[str, Any]]
-) -> str | None:
-    lowered = intent.lower()
-    keyword_to_ids = (
-        ("ndt", ("test_ndt_workflow",)),
-        ("iperf", ("test_iperf_workflow",)),
-        ("ping", ("test_shell_workflow",)),
-    )
-    available_ids = {str(w.get("id")) for w in available}
-    for keyword, candidates in keyword_to_ids:
-        if keyword in lowered:
-            for candidate in candidates:
-                if candidate in available_ids:
-                    return candidate
-    return None
-
-
 def _default_params_for_workflow(workflow_id: str) -> dict[str, Any] | None:
     schema = _WORKFLOW_SCHEMAS.get(workflow_id) or {}
     if not schema:
@@ -100,6 +74,8 @@ class ShellWorkflowGenerationState(MessagesState):
     chosen_workflow: dict[str, Any] | None
     parameters: dict[str, Any] | None
     reasoning: str
+    workflow_source: str
+    workflow_id: str | None
 
 
 class ShellWorkflowContext(BaseModel):
@@ -219,98 +195,168 @@ def _map_workflow_params_with_claude(
     return mapped, result.reasoning
 
 
-def choose_workflow(
-    state: ShellWorkflowGenerationState, runtime: Runtime[ShellWorkflowContext]
+def _pin_shell_workflow(
+    intent: str,
+    selected_id: str,
+    available: list[dict[str, Any]],
+    source_label: str,
 ) -> dict[str, Any]:
-    """Ask Claude to pick an existing NetGent shell workflow that fits the intent."""
-    intent = state["intent"]
-    available = _load_shell_workflows()
-    force_existing = _env_truthy("ORCH_FORCE_EXISTING_WORKFLOW", default=False)
-    forced_workflow_id = (os.getenv("ORCH_FORCE_WORKFLOW_ID") or "").strip() or None
-    print(
-        f"[SHELL WF] forced_mode={force_existing} forced_workflow_id={forced_workflow_id!r}"
-    )
+    """Fetch a library workflow by id, run the parameter mapper, return state delta.
 
-    if force_existing:
-        selected_id = forced_workflow_id or _infer_workflow_id_from_intent(
-            intent, available
-        )
-        source = "env override" if forced_workflow_id else "intent keyword"
-        chosen_entry = next((w for w in available if w.get("id") == selected_id), None)
-        if not selected_id or not chosen_entry:
-            reasoning = (
-                "Forced existing-workflow mode enabled, but no matching shell workflow "
-                f"was found for intent and override={forced_workflow_id!r}."
-            )
-            print(f"[SHELL WF] forced selection failed: {reasoning}")
-            return {
-                "workflow": {},
-                "parameters": None,
-                "reasoning": reasoning,
-                "chosen_workflow": {
-                    "is_valid": False,
-                    "reasoning": reasoning,
-                    "id": selected_id,
-                    "parameters": None,
-                },
-            }
-
-        workflow: dict[str, Any]
-        if chosen_entry.get("link"):
-            try:
-                workflow = requests.get(chosen_entry["link"], timeout=10).json()
-            except Exception:
-                workflow = {"id": selected_id}
-        else:
-            workflow = {"id": selected_id}
-        workflow.setdefault("id", selected_id)
-        schema = _WORKFLOW_SCHEMAS.get(selected_id, {})
-        param_names = list(chosen_entry.get("parameters") or list(schema.keys()))
-        try:
-            parameters, map_reasoning = _map_workflow_params_with_claude(
-                intent=intent,
-                workflow_id=selected_id,
-                param_names=param_names,
-                workflow_schema=schema,
-                workflow_description=str(chosen_entry.get("description", "")),
-            )
-        except Exception as exc:
-            reasoning = (
-                f"Forced existing-workflow mode selected {selected_id!r}, but "
-                f"workflow parameter mapper failed: {exc}"
-            )
-            print(f"[SHELL WF] mapper failure: {reasoning}")
-            return {
-                "workflow": {},
-                "parameters": None,
-                "reasoning": reasoning,
-                "chosen_workflow": {
-                    "is_valid": False,
-                    "reasoning": reasoning,
-                    "id": selected_id,
-                    "parameters": None,
-                    "fail_fast": True,
-                },
-            }
-        print(
-            f"[SHELL WF] forced selection source={source} id={selected_id!r} "
-            f"workflow_param_source=claude_mapper params={parameters}"
-        )
+    `source_label` is included in the reasoning string for trace clarity
+    (e.g. "request workflow_id", "library selection").
+    """
+    chosen_entry = next((w for w in available if w.get("id") == selected_id), None)
+    if not chosen_entry:
         reasoning = (
-            "Forced existing-workflow mode enabled; selected prebuilt shell workflow "
-            f"{selected_id!r} via {source}. Mapper reasoning: {map_reasoning}"
+            f"Requested workflow id {selected_id!r} not present in the shell "
+            f"workflow library."
         )
-        chosen_workflow = {
+        print(f"[SHELL WF] pin failed: {reasoning}")
+        return {
+            "workflow": {},
+            "parameters": None,
+            "reasoning": reasoning,
+            "chosen_workflow": {
+                "is_valid": False,
+                "reasoning": reasoning,
+                "id": selected_id,
+                "parameters": None,
+                "fail_fast": True,
+            },
+        }
+
+    if chosen_entry.get("link"):
+        try:
+            workflow = requests.get(chosen_entry["link"], timeout=10).json()
+        except Exception:
+            workflow = {"id": selected_id}
+    else:
+        workflow = {"id": selected_id}
+    workflow.setdefault("id", selected_id)
+
+    schema = _WORKFLOW_SCHEMAS.get(selected_id, {})
+    param_names = list(chosen_entry.get("parameters") or list(schema.keys()))
+    try:
+        parameters, map_reasoning = _map_workflow_params_with_claude(
+            intent=intent,
+            workflow_id=selected_id,
+            param_names=param_names,
+            workflow_schema=schema,
+            workflow_description=str(chosen_entry.get("description", "")),
+        )
+    except Exception as exc:
+        reasoning = (
+            f"Selected shell workflow {selected_id!r} via {source_label}, "
+            f"but parameter mapper failed: {exc}"
+        )
+        print(f"[SHELL WF] mapper failure: {reasoning}")
+        return {
+            "workflow": {},
+            "parameters": None,
+            "reasoning": reasoning,
+            "chosen_workflow": {
+                "is_valid": False,
+                "reasoning": reasoning,
+                "id": selected_id,
+                "parameters": None,
+                "fail_fast": True,
+            },
+        }
+    print(
+        f"[SHELL WF] pinned id={selected_id!r} source={source_label} "
+        f"workflow_param_source=claude_mapper params={parameters}"
+    )
+    reasoning = (
+        f"Selected shell workflow {selected_id!r} via {source_label}. "
+        f"Mapper reasoning: {map_reasoning}"
+    )
+    return {
+        "workflow": workflow,
+        "parameters": parameters,
+        "reasoning": reasoning,
+        "chosen_workflow": {
             "is_valid": True,
             "reasoning": reasoning,
             "id": selected_id,
             "parameters": parameters,
-        }
+        },
+    }
+
+
+def choose_workflow(
+    state: ShellWorkflowGenerationState, runtime: Runtime[ShellWorkflowContext]
+) -> dict[str, Any]:
+    """Pick a shell workflow per `workflow_source` and `workflow_id`.
+
+    Modes:
+    - `auto` (default): LLM picks from the library; if no match, fall through to
+      generation (the orchestrator graph routes invalid + no-fail_fast → generate).
+    - `library`: LLM picks from the library only; fail loudly on no match.
+    - `generate`: skip the library, route directly to the generate node.
+
+    `workflow_id`, when set, pins selection and bypasses `workflow_source`.
+    """
+    intent = state["intent"]
+    available = _load_shell_workflows()
+
+    workflow_source = (state.get("workflow_source") or "auto").lower()
+    if workflow_source not in {"auto", "library", "generate"}:
+        workflow_source = "auto"
+    pinned_id = (state.get("workflow_id") or "").strip() or None
+    print(
+        f"[SHELL WF] workflow_source={workflow_source!r} "
+        f"pinned_workflow_id={pinned_id!r} "
+        f"library_size={len(available)}"
+    )
+
+    # 1. Explicit id pin wins over workflow_source.
+    if pinned_id:
+        return _pin_shell_workflow(
+            intent=intent,
+            selected_id=pinned_id,
+            available=available,
+            source_label="request workflow_id",
+        )
+
+    # 2. Generate-only: short-circuit to the generate node via is_valid=False
+    #    (no fail_fast → route_valid_workflow falls through to generate).
+    if workflow_source == "generate":
+        reasoning = (
+            "workflow_source=generate — skipping the library and requesting "
+            "workflow generation."
+        )
+        print(f"[SHELL WF] {reasoning}")
         return {
-            "workflow": workflow,
-            "parameters": parameters,
+            "workflow": {},
+            "parameters": None,
             "reasoning": reasoning,
-            "chosen_workflow": chosen_workflow,
+            "chosen_workflow": {
+                "is_valid": False,
+                "reasoning": reasoning,
+                "id": None,
+                "parameters": None,
+            },
+        }
+
+    # 3. auto / library: ask the LLM to pick from the library.
+    if workflow_source == "library" and not available:
+        reasoning = (
+            "workflow_source=library but the shell workflow library is empty "
+            "or unreachable."
+        )
+        print(f"[SHELL WF] {reasoning}")
+        return {
+            "workflow": {},
+            "parameters": None,
+            "reasoning": reasoning,
+            "chosen_workflow": {
+                "is_valid": False,
+                "reasoning": reasoning,
+                "id": None,
+                "parameters": None,
+                "fail_fast": True,
+            },
         }
 
     workflows_block = (
@@ -346,7 +392,8 @@ def choose_workflow(
         prompt
     )
     print(
-        f"[SHELL WF] LLM choose_workflow: is_valid={result.is_valid} id={result.id!r} params={result.parameters}"
+        f"[SHELL WF] LLM choose_workflow: is_valid={result.is_valid} "
+        f"id={result.id!r} params={result.parameters}"
     )
     log_claude_step(
         "shell_choose_workflow",
@@ -354,72 +401,56 @@ def choose_workflow(
         output=result.model_dump(),
     )
 
-    chosen_entry = next((w for w in available if w["id"] == result.id), None)
-    reasoning = result.reasoning
-    netgent_provider = get_netgent_llm_provider()
-    has_creds = netgent_has_llm_credentials(netgent_provider)
-
-    if result.is_valid and chosen_entry and chosen_entry.get("link"):
-        try:
-            workflow = requests.get(chosen_entry["link"], timeout=10).json()
-            workflow.setdefault("id", result.id)
-        except Exception:
-            workflow = {"id": result.id}
-    elif result.is_valid and result.id:
-        workflow = {"id": result.id}
-    else:
-        # is_valid=False: return empty workflow so orchestration ends via fail_no_workflow.
-        workflow = {}
-        if not has_creds:
-            reasoning = (
-                f"{result.reasoning} Workflow not present for this intent or invalid request, "
-                f"and workflow generation is unavailable because {netgent_provider} credentials are not configured."
-            )
-            print(
-                "[SHELL WF] Invalid/no matching workflow and no NetGent LLM creds; failing request"
-            )
-
-    parameters: dict[str, Any] | None = None
-    chosen_payload = result.model_dump()
     if result.is_valid and result.id:
-        schema = _WORKFLOW_SCHEMAS.get(result.id, {})
-        param_names = list(
-            (chosen_entry or {}).get("parameters") or list(schema.keys())
+        return _pin_shell_workflow(
+            intent=intent,
+            selected_id=result.id,
+            available=available,
+            source_label="library selection (LLM)",
         )
-        try:
-            parameters, map_reasoning = _map_workflow_params_with_claude(
-                intent=intent,
-                workflow_id=result.id,
-                param_names=param_names,
-                workflow_schema=schema,
-                workflow_description=str((chosen_entry or {}).get("description", "")),
-            )
-            chosen_payload["parameters"] = parameters
-            print(
-                "[SHELL WF] workflow_param_source=claude_mapper "
-                f"id={result.id!r} params={parameters}"
-            )
-            reasoning = f"{reasoning} Mapper reasoning: {map_reasoning}"
-        except Exception as exc:
-            reasoning = (
-                f"Workflow {result.id!r} selected, but workflow parameter mapper "
-                f"failed: {exc}"
-            )
-            print(f"[SHELL WF] mapper failure: {reasoning}")
-            workflow = {}
-            chosen_payload = {
+
+    # is_valid=False — branch on workflow_source.
+    if workflow_source == "library":
+        reasoning = (
+            f"workflow_source=library and no library entry matched the intent. "
+            f"Picker reasoning: {result.reasoning}"
+        )
+        print(f"[SHELL WF] {reasoning}")
+        return {
+            "workflow": {},
+            "parameters": None,
+            "reasoning": reasoning,
+            "chosen_workflow": {
                 "is_valid": False,
                 "reasoning": reasoning,
-                "id": result.id,
+                "id": None,
                 "parameters": None,
                 "fail_fast": True,
-            }
+            },
+        }
 
+    # workflow_source == "auto" — let route_valid_workflow fall through to generate
+    # (or fail cleanly if NetGent LLM creds are missing).
+    netgent_provider = get_netgent_llm_provider()
+    has_creds = netgent_has_llm_credentials(netgent_provider)
+    reasoning = result.reasoning
+    if not has_creds:
+        reasoning = (
+            f"{result.reasoning} No matching library workflow, and workflow "
+            f"generation is unavailable because {netgent_provider} credentials "
+            "are not configured."
+        )
+        print("[SHELL WF] No library match and no NetGent LLM creds; failing request")
     return {
-        "workflow": workflow,
-        "parameters": parameters,
+        "workflow": {},
+        "parameters": None,
         "reasoning": reasoning,
-        "chosen_workflow": chosen_payload,
+        "chosen_workflow": {
+            "is_valid": False,
+            "reasoning": reasoning,
+            "id": result.id,
+            "parameters": None,
+        },
     }
 
 
