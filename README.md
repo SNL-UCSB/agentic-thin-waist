@@ -151,7 +151,8 @@ curl -X POST http://localhost:8005/intent \
   -d '{
     "intent": "Run iperf3 at 40 Mbps with 100 ms latency under cubic and bbr",
     "context":     { "duration_seconds": 60, "num_trials": 1 },
-    "preferences": {}
+    "preferences": {},
+    "workflow_source": "auto"
   }'
 ```
 
@@ -164,6 +165,16 @@ curl http://localhost:8005/orchestration/<orch_id>/reasoning  # agent reasoning 
 ```
 
 The orchestrator generates one experiment per (capacity × latency × CC) combination, each with an ID like `iperf3_40_40_100_pfifo_cubic_a2d6e73d`.
+
+`workflow_source` controls where the NetGent workflow comes from:
+
+| Value | Meaning |
+|---|---|
+| `auto` (default) | LLM picks a confident match from the workflow library; if none, the LLM generates a fresh workflow. |
+| `library` | Library only — fail if no match. |
+| `generate` | Skip the library, always generate. |
+
+Pin a specific workflow with `"workflow_id": "test_ndt_workflow"` (overrides `workflow_source`). The deployment-wide default for `workflow_source` is `ORCH_DEFAULT_WORKFLOW_SOURCE` (defaults to `auto`).
 
 ### 4. (Optional) Talk to the lower-level services directly
 You can bypass the orchestrator and exercise individual services for debugging or scripted runs:
@@ -214,6 +225,16 @@ Override per experiment: set `replay_pnat_ip` on `GeneratedExperiment` (a single
 Override globally: set `SUBSTRATE_REPLAY_PNAT` to a full rewrite rule.
 
 Details and resolution order: [`services/orchestration/README.md` § CTP Replay & PNAT](services/orchestration/README.md#ctp-replay--pnat).
+
+### Workflow source on the intent request
+The choice between "use the workflow library" and "have the LLM generate a workflow" is now a request property, not a deployment env var. Fields on `ResearchIntent`:
+
+- `workflow_source`: `"auto"` (default — library first, fall back to generation) / `"library"` (fail if no match) / `"generate"` (skip the library).
+- `workflow_id`: explicit pin (e.g. `"test_ndt_workflow"`) — overrides `workflow_source`.
+
+Library selection is LLM-driven against the NetGent workflow index. The previous keyword inference (`iperf` → `test_iperf_workflow`, etc.) and the `ORCH_FORCE_EXISTING_WORKFLOW` / `ORCH_FORCE_WORKFLOW_ID` env vars are gone. Deployments can set `ORCH_DEFAULT_WORKFLOW_SOURCE` to change the default when the request doesn't specify one.
+
+Details: [`services/orchestration/README.md` § Workflow Source](services/orchestration/README.md#workflow-source).
 
 ## Repository Layout
 

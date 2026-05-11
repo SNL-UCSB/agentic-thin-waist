@@ -97,13 +97,56 @@ curl http://localhost:8005/health
 {
   "intent": "Compare iperf3 vs ndt at 25 and 100 Mbps with 50 ms latency",
   "context":     { "num_trials": 1, "duration_seconds": 60 },
-  "preferences": { "desired_cc_algorithms": ["cubic", "bbr"] }
+  "preferences": { "desired_cc_algorithms": ["cubic", "bbr"] },
+  "workflow_source": "auto",
+  "workflow_id": null
 }
 ```
 
 The LLM extracts a `ParsedIntent` (see `app/agent/orchestrator/schemas.py`) with these fields: `applications` (list of names — e.g. `["iperf3"]`, `["youtube"]`), `application_type` (`shell` or `browser`), `capacities`, `latencies`, `cc_algorithms`, `aqm_policy`, `ctp_cluster`, `ctp_capacity_range`, `duration_seconds`, `num_trials`, `workflow_parameters`.
 
 `ExperimentGenerator.generate(parsed_intent)` then expands the Cartesian product over `capacities × latencies × cc_algorithms` and emits one `GeneratedExperiment` per combination.
+
+---
+
+## Workflow Source
+
+The `workflow_source` and `workflow_id` fields on `ResearchIntent` control whether the NetGent workflow comes from the library or is generated fresh. This is a per-request policy — no deployment env-var change required.
+
+| `workflow_source` | Behavior |
+|---|---|
+| `auto` *(default)* | LLM picks a confident match from the workflow library. If no match → falls through to LLM workflow generation. |
+| `library` | LLM picks from the library only. Fail loudly if nothing matches. |
+| `generate` | Skip the library entirely; always have the LLM generate. (Browser workflows do not support `generate` yet.) |
+
+`workflow_id` is an explicit pin — when set, selection is bypassed and that id is used directly (subject to availability and parameter mapping).
+
+Resolution order, per request:
+1. `workflow_id` if set.
+2. `workflow_source` from the request.
+3. `ORCH_DEFAULT_WORKFLOW_SOURCE` env var (deployment-wide default; `auto` if unset).
+
+Examples:
+
+```bash
+# Default: auto — library first, fall back to generation.
+curl -X POST :8005/intent -H 'Content-Type: application/json' -d \
+  '{"intent":"Run a speed test at 40 Mbps with 100 ms latency"}'
+
+# Force library-only (fails if nothing matches).
+curl -X POST :8005/intent -H 'Content-Type: application/json' -d \
+  '{"intent":"Run ndt at 40 Mbps","workflow_source":"library"}'
+
+# Force generation, skip the library.
+curl -X POST :8005/intent -H 'Content-Type: application/json' -d \
+  '{"intent":"Custom shell probe sequence","workflow_source":"generate"}'
+
+# Pin a specific workflow id.
+curl -X POST :8005/intent -H 'Content-Type: application/json' -d \
+  '{"intent":"Run a speed test","workflow_id":"test_ndt_workflow"}'
+```
+
+Selection in `auto` and `library` modes is LLM-driven against the workflow index at `https://raw.githubusercontent.com/SNL-UCSB/netgent-workflow/main/workflows/index.json`. There is no keyword inference — synonyms and paraphrases ("speed test", "throughput benchmark") work as long as the LLM can match them to an entry's name/description.
 
 ---
 
@@ -185,6 +228,8 @@ The orchestrator is configured entirely through env vars. The most relevant ones
 | `ORCHESTRATOR_LLM_PROVIDER` | `anthropic` | `anthropic` or `gemini`. |
 | `ANTHROPIC_API_KEY` / `CLAUDE_API_KEY` | — | Required when provider is `anthropic`. |
 | `GOOGLE_API_KEY` | — | Required when provider is `gemini`. |
+| **Workflow source default** | | |
+| `ORCH_DEFAULT_WORKFLOW_SOURCE` | `auto` | Default `workflow_source` when `POST /intent` doesn't specify one. `auto` / `library` / `generate`. Per-request value always wins. |
 | **Downstream services** | | |
 | `EXPERIMENT_API_URL` | `http://experiment-api:8000` | Experiment API. |
 | `CTP_SERVICE_GLOBAL` | `http://128.111.5.236:8001` | Global CTP service used during selection. |
@@ -293,6 +338,7 @@ services/orchestration/
 
 A few knobs that landed recently and may not be familiar:
 
+- **Workflow source is now per-request** — `workflow_source` (`auto` / `library` / `generate`) and `workflow_id` (explicit pin) on `ResearchIntent` replace the old `ORCH_FORCE_EXISTING_WORKFLOW` / `ORCH_FORCE_WORKFLOW_ID` env vars. Library selection is LLM-driven (no more keyword inference). See *Workflow Source* above.
 - **Per-experiment PNAT override** — set `replay_pnat_ip` on `GeneratedExperiment` (or in the spec dict before it reaches `OrchestrationManager.run`) to control where replayed CTP traffic lands. Default is `172.16.1.20` (separate from app at `172.16.1.1`). See *CTP Replay & PNAT* above.
 - **Experiment IDs are now globally unique** — the old `shell-40mbps-100ms-cubic-001` format was prone to collision when two intents had overlapping params. New format includes app name, download/upload, latency, AQM, CC, and a UUID suffix; uniqueness is double-checked against telemetry when `TELEMETRY_SERVICE_URL` is set. See *Experiment ID Format*.
 - **Skills / direct execution** — `POST /skills/{skill_name}/execute` lets you bypass the LLM entirely and run `parameter_sweep`, `application_comparison`, etc. with a structured payload. Useful for scripted / reproducible runs.
