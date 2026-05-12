@@ -4,7 +4,7 @@
 
 - **notebook_id:** `6f2b2b44-34c0-4918-8a22-aff2b035da53`
 - **title:** survey-agentic-systems-research
-- **sources ingested:** 8 (Glia, AI Scientist v2, AI Scientist v1, Agent Laboratory, POPPER, netUnicorn, NetConfEval*, Confucius)
+- **sources ingested:** 10 (Glia, AI Scientist v2, AI Scientist v1, Agent Laboratory, POPPER, netUnicorn, NetConfEval*, Confucius, NetArena, Learned Cloud Emulators)
 - **NLM binary:** `/Users/arpitgupta/.local/share/uv/tools/notebooklm-mcp-cli/bin/nlm`
 - **Access method:** CLI via Bash (MCP does not work)
 

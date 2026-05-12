@@ -39,13 +39,14 @@
 |--------|----------------------|---------------------|---------------|
 | Design Optimization | Glia, Engram, PolicySmith | Vidur sim, kernel sandbox, trace sims | Domain experts |
 | Evolutionary Search | AlphaEvolve, FunSearch, SkyDiscover | Google harnesses, benchmark functions | Platform teams |
-| Network Operations | Confucius, NIKA | Meta production tools (2+ yrs), curated benchmarks | Decades of infra |
+| Network Operations | Confucius, NIKA, NetArena | Meta production tools (2+ yrs), Mininet/K8s emulators | Decades of infra / emulator teams |
 | Full-Loop Research | AI Scientist, POPPER, Agent Lab | Python/PyTorch/GPUs | Open-source community |
+| Substrate Synthesis | Learned Cloud Emulators | LLM-generated from documentation | Automated (this is new) |
 | **Empirical Infrastructure** | **netUnicorn, NetForge** | **Builds the substrate itself** | **This work** |
 
-**Key observation:** Threads 1-4 *consume* evaluation substrates. Thread 5 *builds* one. Only Thread 5 addresses transferability.
+**Key observation:** Threads 1-4 *consume* evaluation substrates that someone spent months or years building. Thread 5 (Learned Cloud Emulators) recognizes that substrate construction itself must be automated — but does so for a single domain (cloud API mocking). Thread 6 *builds the substrate as a composable, cross-domain service*. The progression from "assume it exists" → "automate building it for one domain" → "build it as a composable horizontal" is the trajectory this paper argues for.
 
-### 2.1b The Vertical Trap
+### 2.1b The Vertical Trap — and Its Automation Frontier
 
 When the infrastructure gap becomes acute, teams build domain-specific testbeds:
 
@@ -54,8 +55,14 @@ When the infrastructure gap becomes acute, teams build domain-specific testbeds:
 | Pantheon | Congestion control | CC algorithm benchmarking | Anything beyond CC evaluation |
 | Puffer | ABR streaming | ABR algorithm comparison | Anything beyond ABR |
 | NetSecBed | Cybersecurity | Attack scenario execution + PCAP generation | No bottleneck control, no traffic shaping, no application QoE, no agentic loop |
+| LocalStack/Moto | Cloud APIs | Mock cloud resource provisioning | Only 32% API coverage after 10 years and 10k+ commits; no network behavior |
+| NetArena | Network agent eval | Dynamic benchmark generation on Mininet/K8s | Treats network environment as given; no bottleneck regime control |
 
-These verticals prove the need — each team independently builds container-native, declarative, reproducible pipelines because the horizontal layer doesn't exist. But they are single-purpose: NetSecBed's 60 attack containers can't measure YouTube QoE under controlled bottleneck regimes; Puffer can't generate labeled cybersecurity datasets. **The composable backend subsumes these verticals by providing the shared infrastructure they each had to build from scratch** — controlled network conditions, automated capture, structured telemetry — as reusable services that any domain-specific experiment can plug into.
+These verticals prove the need — each team independently builds container-native, declarative, reproducible pipelines because the horizontal layer doesn't exist. But they are single-purpose and struggle with coverage even within their own domain: Moto, the most mature cloud emulator (800+ contributors, 10 years), covers only 32% of APIs for a subset of AWS services, with 11% for Network Firewall. NetArena generates unlimited *queries* but evaluates agents on fixed, simplified emulator topologies with no controlled traffic conditions.
+
+Bhatnagar et al. [Learned Cloud Emulators, HotNets '25] recognize this unsustainability and propose automating substrate construction itself — using LLMs to extract state-machine specifications from cloud documentation and synthesize emulation code. This is an important step: it acknowledges that the verification wall is not just a matter of building more verticals but of making substrate construction scalable. However, their solution remains domain-specific (cloud API mocking) and does not address network behavior, performance conditions, or cross-domain composability.
+
+**The composable backend subsumes these verticals by providing the shared infrastructure they each had to build from scratch** — controlled network conditions, automated capture, structured telemetry — as reusable services that any domain-specific experiment can plug into. The thin waist is not another vertical; it is the horizontal layer that makes verticals unnecessary.
 
 ### 2.2 What Happens Without the Substrate
 
@@ -65,9 +72,11 @@ Three failure modes, grounded in quantitative evidence:
 
 2. **The coherence ceiling.** Engram: context degradation over long horizons. Confucius: specific constraints (e.g., "packet loss between 7-8pm") lost as troubleshooting steps grow. Without persistent grounding in empirical data, agents lose track of what they've learned.
 
-3. **Domain locking.** netUnicorn: ML models fail to generalize across network environments because training data is "unrealistic or poor-quality." NetArena: static benchmarks suffer from contamination and high variance. FunSearch: works only when "rich scoring feedback" exists — fails at theorem proving.
+3. **Domain locking and the evaluation fidelity gap.** netUnicorn: ML models fail to generalize across network environments because training data is "unrealistic or poor-quality." FunSearch: works only when "rich scoring feedback" exists — fails at theorem proving. NetArena [Zhou et al., ICLR 2026] quantifies how deep this goes: LLM agents achieve only **13–38% average correctness** on realistic network automation tasks (capacity planning, routing, K8s policy), with the best agent staying below 60%. Worse, small static benchmarks (<200 queries) produce 85% confidence interval overlap between agents — you literally cannot tell which agent is better. And correctness alone hides critical failures: some agents produce correct outputs that violate safety constraints (breaking existing connectivity, issuing unauthorized changes), while others act conservatively but fail to resolve issues within acceptable latency. Without evaluation substrates that measure safety and latency alongside correctness, these tradeoffs remain invisible.
 
-**The punchline:** Barbarians at the Gate (Cheng, Stoica et al.) names this precisely: ADRS "crucially assumes the existence of a reliable verifier." We argue the verifier is the bottleneck, not the agent.
+   The Learned Cloud Emulators paper [Bhatnagar et al., HotNets '25] reveals the same structural problem from the infrastructure side: manually-built cloud emulators cover only 32% of APIs and contain behavioral divergence from real cloud behavior (e.g., DeleteVpc succeeds when it should fail with DependencyViolation). When the evaluation substrate itself is incomplete and buggy, agents trained or evaluated on it learn the emulator's mistakes, not the real system's behavior. The fidelity of the substrate is load-bearing for everything built on top.
+
+**The punchline:** Barbarians at the Gate (Cheng, Stoica et al.) names this precisely: ADRS "crucially assumes the existence of a reliable verifier." We argue the verifier is the bottleneck, not the agent. NetArena shows agents fail when the verifier exists but the environment is simplified. Learned Cloud Emulators shows the verifier itself is incomplete. The thin waist addresses both: it builds a composable verifier whose conditions are controllable and whose fidelity can be systematically improved.
 
 ---
 
@@ -91,6 +100,8 @@ Following Beck's formal theory: a spanning layer "sufficient for necessary appli
 Evidence of convergence:
 - netUnicorn: hourglass model as thin waist for data collection
 - Confucius: three DSLs (TML, ODS, Robotron) as thin waist for network management
+- NetArena: state-action formalism (S, A, E) as thin waist for network benchmark generation — developers only define state space and action space per task; the framework handles query generation, ground truth, and evaluation
+- Learned Cloud Emulators: state machine grammar as thin waist for emulator synthesis — four primitives (read, write, assert, call) suffice to capture cloud resource behavior across services and providers
 - SED-ML: five-component experiment specification as thin waist for computational biology
 - CWL: "reduced set of abstractions used in practice and implemented in many systems"
 
@@ -110,15 +121,17 @@ Layer 3: DOMAIN INSTRUMENTS (tc, tshark, pgbench, EPICS)
 
 The same pattern appears independently:
 
-| Domain | System | Thin Waist |
-|--------|--------|------------|
-| Networking | Agentic Thin Waist | Experiment API |
-| Chemistry | ChemOS 2.0 | Fog computing kernel |
-| Accelerators | Osprey (LBNL) | Plan-first orchestrator |
-| Materials | INTERSECT (ORNL) | Pub-sub message layer |
-| Biology | SED-ML | XML schema |
+| Domain | System | Thin Waist | What It Decouples |
+|--------|--------|------------|-------------------|
+| Networking | Agentic Thin Waist | Experiment API | Research intents ↔ heterogeneous substrates |
+| Network agent eval | NetArena | State-action formalism (S, A, E) | Diverse network tasks ↔ emulator backends |
+| Cloud DevOps | Learned Cloud Emulators | State machine grammar | Cloud documentation ↔ executable emulation code |
+| Chemistry | ChemOS 2.0 | Fog computing kernel | Experiment recipes ↔ robotic hardware |
+| Accelerators | Osprey (LBNL) | Plan-first orchestrator | NL intent ↔ EPICS control system |
+| Materials | INTERSECT (ORNL) | Pub-sub message layer | Steering decisions ↔ instrument drivers |
+| Biology | SED-ML | XML schema | Simulation descriptions ↔ solver implementations |
 
-This convergence suggests the composable empirical backend is not domain-specific but a **fundamental infrastructure requirement** for the agentic era.
+This convergence suggests the composable empirical backend is not domain-specific but a **fundamental infrastructure requirement** for the agentic era. The NetArena and Learned Cloud Emulators entries are particularly instructive: they show the pattern emerging independently even within systems/networking, at different layers of the stack. NetArena's state-action formalism is a thin waist for benchmark generation; the SM grammar is a thin waist for emulator synthesis. Neither addresses the thin waist for experiment execution — the layer this work occupies.
 
 ---
 
@@ -235,6 +248,10 @@ Is there a single "SQL for experiments," or must each domain (networking, accele
 - AlphaEvolve (Novikov et al., 2025) — evolutionary search
 - Engram (Karimi et al., 2026) — coherence ceiling
 
+### Must-cite (evaluation substrate problem — quantitative evidence)
+- NetArena (Zhou et al., ICLR 2026) — 13-38% agent correctness on realistic network tasks; 85% CI overlap on small benchmarks; correctness ≠ safety; dynamic benchmark generation via state-action formalism
+- Learned Cloud Emulators (Bhatnagar et al., HotNets '25) — 32% API coverage after 10 years of manual effort; LLM-driven substrate synthesis via state machine grammar; "cloud gym" as evaluation playground; validates thin-waist pattern from cloud domain
+
 ### Should-cite (evidence and cross-domain)
 - Evaluating AI Scientist (Beel et al., 2025) — 42% failure rate
 - PolicySmith (Dwivedula et al., 2025) — instance-optimal heuristics
@@ -248,7 +265,8 @@ Is there a single "SQL for experiments," or must each domain (networking, accele
 - Pantheon (Yan et al., ATC 2018) — CC benchmarking vertical
 - Puffer (Yan et al., NSDI 2020) — ABR streaming vertical
 - NetSecBed (Bitzki, Kreutz et al., 2026) — cybersecurity dataset generation vertical; shares container-native + declarative specs motivation but no bottleneck control, no agentic loop, no cross-domain composability
+- LocalStack/Moto — cloud emulation vertical; 10 years, 800+ contributors, still 32% coverage
 
 ---
 
-*Outline produced from: full_synthesis.md, design_principles.md, vision.md, deepening_notes.md, and 3 targeted NLM queries (2026-04-06). Updated 2026-04-10 with sharper specification-layer framing, single-bottleneck scoping, and the constraint mapping problem — all surfaced in the KC Claffy collaboration meeting on the same date.*
+*Outline produced from: full_synthesis.md, design_principles.md, vision.md, deepening_notes.md, and 3 targeted NLM queries (2026-04-06). Updated 2026-04-10 with sharper specification-layer framing, single-bottleneck scoping, and the constraint mapping problem — all surfaced in the KC Claffy collaboration meeting on the same date. Updated 2026-05-11 with NetArena (ICLR 2026) and Learned Cloud Emulators (HotNets '25): recalibrated landscape table to include substrate synthesis thread; added quantitative evidence for evaluation fidelity gap (13-38% agent correctness, 32% emulator API coverage); strengthened cross-domain convergence with two new independent thin-waist instances.*
