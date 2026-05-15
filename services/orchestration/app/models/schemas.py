@@ -18,6 +18,23 @@ class ResearchIntent(BaseModel):
     intent: str = Field(..., description="Natural language research goal")
     context: Dict[str, Any] = Field(default_factory=dict)
     preferences: Dict[str, Any] = Field(default_factory=dict)
+    workflow_source: Literal["auto", "library", "generate"] = Field(
+        default="auto",
+        description=(
+            "Where the workflow comes from. "
+            "'auto' (default): LLM picks a match from the library, falls back to "
+            "generation if no match. "
+            "'library': LLM picks from the library only; fail if no match. "
+            "'generate': skip the library, always have the LLM generate."
+        ),
+    )
+    workflow_id: Optional[str] = Field(
+        default=None,
+        description=(
+            "Explicit workflow id to use (e.g. 'test_ndt_workflow'). "
+            "When set, overrides workflow_source."
+        ),
+    )
 
 
 class GeneratedExperiment(BaseModel):
@@ -33,6 +50,16 @@ class GeneratedExperiment(BaseModel):
     ctp_cluster: Optional[str] = None
     ctp_capacity_range: Optional[Dict[str, float]] = Field(
         default_factory=lambda: {"lower_value": 1.0, "higher_value": 10.0}
+    )
+    replay_pnat_ip: Optional[str] = Field(
+        default=None,
+        description=(
+            "Optional target IP for tcpreplay PNAT rewrite (e.g. '172.16.1.20'). "
+            "When set, replayed CTP source IPs are mapped to this address; the "
+            "standard source subnets (169.231.0.0/16, 128.111.0.0/16) are reused. "
+            "Leave unset to use the orchestrator default (172.16.1.20). Must not "
+            "conflict with the application IP."
+        ),
     )
     reasoning: str = ""
 

@@ -51,7 +51,7 @@ RUN uv sync --python /usr/bin/python3 --no-install-project
 COPY services/substrate-worker/ .
 COPY shared/ /shared/
 
-RUN chmod +x src/browser/wrap-playwright-chrome.sh src/substrate/setup.sh \
+RUN chmod +x src/browser/wrap-playwright-chrome.sh src/substrate/setup.sh src/substrate/setup_local.sh src/substrate/setup_aws.sh \
     && ./src/browser/wrap-playwright-chrome.sh
 
 ENV PATH="/opt/substrate-worker-venv/bin:$PATH"
@@ -66,4 +66,4 @@ EXPOSE 3000
 EXPOSE 8002
 
 ENTRYPOINT []
-CMD ["bash", "-lc", "./src/substrate/setup.sh && (cd /usr/src/app && ./scripts/start.sh) & browserless_pid=$! && sleep 2 && kill -0 \"$browserless_pid\" && exec uv run --no-sync python -m substrate.main"]
+CMD ["bash", "-lc", "if [ \"${CONNECTIVITY_BACKEND:-local_docker}\" = \"aws\" ]; then SETUP_SCRIPT=./src/substrate/setup_aws.sh; MAIN_MODULE=substrate.main_aws; else SETUP_SCRIPT=./src/substrate/setup_local.sh; MAIN_MODULE=substrate.main_local; fi; echo \"Starting substrate profile: ${CONNECTIVITY_BACKEND:-local_docker} setup=${SETUP_SCRIPT} module=${MAIN_MODULE}\"; \"$SETUP_SCRIPT\" && (cd /usr/src/app && ./scripts/start.sh) & browserless_pid=$! && sleep 2 && kill -0 \"$browserless_pid\" && exec uv run --no-sync python -m \"$MAIN_MODULE\""]

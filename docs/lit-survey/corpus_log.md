@@ -32,7 +32,7 @@ Last updated: 2026-04-06
 | 18 | Evaluating AI Scientist | Beel et al. | 2025 | arXiv:2502.14297 | NLM ✅ | — |
 | 19 | Credibility Crisis in Networking | Willinger, Gupta et al. | 2025 | SIGCOMM CCR | pending | — |
 | 20 | Strategic Data Collection for Model Generalization | Hoffman et al. (ETH) | 2025 | SIGCOMM Posters | pending | — |
-| 21 | NetPress/NetArena: Dynamic LLM Benchmarks for Networking | — | 2025 | arXiv:2506.03231 | NLM ✅ | — |
+| 21 | NetArena: Dynamic Benchmarks for AI Agents in Network Automation | Zhou et al. (Maryland/Microsoft/UIUC) | 2026 | ICLR 2026 | PDF ✅ Pass 1 ✅ NLM ✅ | 1 |
 | 22 | LLM-based Accessible Network Control | Lin et al. (Meta) | 2025 | arXiv:2509.20600 | NLM ✅ | — |
 | 23 | ReAct: Reasoning + Acting in LLMs | Yao et al. | 2023 | ICLR 2023 | NLM ✅ | — |
 | 24 | Voyager: Open-Ended Embodied Agent | Wang et al. (NVIDIA) | 2023 | NeurIPS 2023 | pending | — |
@@ -101,12 +101,13 @@ Last updated: 2026-04-06
 | 77 | PROV-AGENT: Unified Provenance for AI Agent Workflows | — | 2025 | arXiv:2508.02866 | NLM ✅ | provenance |
 | 78 | LLM Optimizers via Agent-System Interfaces | — | 2024 | arXiv:2410.15625 | NLM ✅ | agent interfaces |
 | 79 | NetSecBed: Container-Native Testbed for Reproducible Cybersecurity Experimentation | Bitzki, Kreutz et al. | 2026 | arXiv:2604.04121 | NLM ✅ | composable testbed vertical; evidence for pattern but not agentic; no bottleneck control |
+| 80 | A Case for Learned Cloud Emulators | Bhatnagar et al. (Michigan/HKU/Berkeley) | 2025 | HotNets '25 | PDF ✅ Pass 1 ✅ NLM ✅ | 1 |
 
 ## Corpus Statistics
 
-- **Total papers tracked:** 79
-- **In NLM notebook:** 39 good sources (12 wrong arXiv resolutions waste slots; 51 total)
-- **PDFs downloaded:** 8
-- **Pass 1 complete:** 7 (Glia, Confucius, AI Scientist v2, SkyDiscover, Osprey, Academy, Flowcept)
+- **Total papers tracked:** 80
+- **In NLM notebook:** 41 good sources (12 wrong arXiv resolutions waste slots; 53 total)
+- **PDFs downloaded:** 10
+- **Pass 1 complete:** 9 (Glia, Confucius, AI Scientist v2, SkyDiscover, Osprey, Academy, Flowcept, NetArena, Learned Cloud Emulators)
 - **Still truly pending (not in NLM):** 13 (#19 Credibility Crisis, #20 Strategic Data Collection, #24 Voyager, #25 Holistic Incident Mgmt, #26 MetaEase, #29 LLM Network Mgmt Survey, #30 MeshAgent, #31 BiAn, #36 Deep Research Survey, #39 Kgent, #46 gpCAM, #47 Colmena, #48 INTERSECT)
-- **Archetype budget:** Examiner (80-150 papers) — currently at 79, on track
+- **Archetype budget:** Examiner (80-150 papers) — currently at 80, on track

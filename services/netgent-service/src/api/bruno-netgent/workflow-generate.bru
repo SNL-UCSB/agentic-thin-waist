@@ -1,0 +1,28 @@
+meta {
+  name: workflow-generate
+  type: http
+  seq: 2
+}
+
+post {
+  url: http://localhost:8003/workflows/generate
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "query": "Watch YouTube for 60 seconds, measuring startup time and rebuffer events",
+    "parameters": {
+      "video_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      "watch_duration": "60",
+      "metrics_focus": "startup_time,rebuffer_events"
+    },
+    "timeout": 120,
+    "application": "youtube"
+  }
+}

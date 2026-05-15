@@ -30,7 +30,9 @@ ORCH_CAPTURE_DURATION_SECONDS    Max capture duration in seconds (default: min(s
 ORCH_CAPTURE_TIMEOUT_SECONDS     How long to wait for capture to finish (default: 120)
 ORCH_POLL_INTERVAL_SECONDS       Polling interval for capture status (default: 2)
 SUBSTRATE_REPLAY_PNAT            PNAT rewrite rule for tcpreplay-edit --pnat
-                                 (default: 169.231.0.0/16:172.16.1.1,128.111.0.0/16:172.16.1.1)
+                                 (default: 169.231.0.0/16:172.16.1.20,128.111.0.0/16:172.16.1.20).
+                                 Per-experiment override: spec.replay_pnat_ip (single target IP;
+                                 reuses the standard source subnets above).
 ORCH_PCAP_DOWNLOAD_TIMEOUT_SECONDS   Seconds for GET /capture/.../pcap -> POST /artifacts bridge (default: 600).
                                  Finished PCAPs are streamed to telemetry when
                                  TELEMETRY_SERVICE_URL is set and POST /results returns result_id.
@@ -52,7 +54,7 @@ from typing import Any
 from urllib.parse import quote
 
 from app.engine.connectivity import ConnectivityManager, WorkerInfo
-from app.engine.executor import DownstreamClients
+from app.engine.executor import DownstreamClients, TelemetryApis
 from app.engine.experiment_generator import ExperimentGenerator
 from app.engine.telemetry_capture_pull import stream_capture_pcap_to_telemetry
 
@@ -242,6 +244,25 @@ def _wait_until(target_epoch: float) -> None:
         time.sleep(remaining)
 
 
+def _make_telemetry_id_taken():
+    """Return a callable that reports whether an experiment_id is already
+    persisted in the telemetry service. Returns None if telemetry is
+    unconfigured, in which case the generator falls back to UUID-only
+    uniqueness.
+    """
+    base_url = os.getenv("TELEMETRY_SERVICE_URL")
+    if not base_url:
+        return None
+    timeout = float(os.getenv("ORCH_TELEMETRY_TIMEOUT_SECONDS", "5"))
+    api = TelemetryApis(base_url, timeout)
+
+    def _taken(experiment_id: str) -> bool:
+        resp = api.query_results({"experiment_id": experiment_id, "limit": 1})
+        return bool(resp.get("results"))
+
+    return _taken
+
+
 def _build_capture_payload(exp_id: str, spec: dict[str, Any]) -> dict[str, Any]:
     """Build the POST /capture request body for one experiment."""
     iface = os.getenv("SUBSTRATE_CAPTURE_IFACE", "veth2")
@@ -262,14 +283,26 @@ def _build_capture_payload(exp_id: str, spec: dict[str, Any]) -> dict[str, Any]:
 def _build_replay_payload(ctp_file: str, spec: dict[str, Any]) -> dict[str, Any]:
     """Build the POST /replay request body for one experiment.
 
-    The *pnat* rule rewrites internal CTP source IPs to the worker's internal
-    address so replayed packets traverse the shaped link.  Configurable via
-    SUBSTRATE_REPLAY_PNAT (default matches the test cluster subnets).
+    The *pnat* rule rewrites internal CTP source IPs to a target address on the
+    worker so replayed packets traverse the shaped link. The default target
+    (172.16.1.20) is intentionally distinct from the application IP (172.16.1.1)
+    so captured pcaps can be split between application traffic and replayed
+    cross-traffic by IP.
+
+    Resolution order:
+      1. spec["replay_pnat_ip"] — single target IP, applied to the standard
+         source subnets (169.231.0.0/16 and 128.111.0.0/16).
+      2. SUBSTRATE_REPLAY_PNAT — full rewrite rule (advanced override).
+      3. Built-in default: 169.231.0.0/16:172.16.1.20,128.111.0.0/16:172.16.1.20.
     """
-    pnat = os.getenv(
-        "SUBSTRATE_REPLAY_PNAT",
-        "169.231.0.0/16:172.16.1.1,128.111.0.0/16:172.16.1.1",
-    )
+    pnat_ip = spec.get("replay_pnat_ip")
+    if pnat_ip:
+        pnat = f"169.231.0.0/16:{pnat_ip},128.111.0.0/16:{pnat_ip}"
+    else:
+        pnat = os.getenv(
+            "SUBSTRATE_REPLAY_PNAT",
+            "169.231.0.0/16:172.16.1.20,128.111.0.0/16:172.16.1.20",
+        )
     duration = int(spec.get("duration_seconds", 60))
     return {
         "ctp_file": ctp_file,
@@ -665,7 +698,9 @@ class OrchestrationManager:
         # Generate the experiment specs from parsed intent
         print(f"\n{'='*60}")
         print(f"[ORCH] Generating experiment specs from parsed intent …")
-        experiments = ExperimentGenerator().generate(parsed_intent)
+        experiments = ExperimentGenerator().generate(
+            parsed_intent, id_taken=_make_telemetry_id_taken()
+        )
         experiment_specs = [e.model_dump() for e in experiments]
 
         if workflow:
@@ -814,19 +849,31 @@ class OrchestrationManager:
             }
         finally:
             if worker is not None:
-                try:
+                keep_worker = os.getenv("ORCH_KEEP_WORKER", "").strip().lower() in {
+                    "1",
+                    "true",
+                    "yes",
+                    "on",
+                }
+                if keep_worker:
                     print(
-                        f"[DISPATCH spec[{idx}]] Destroying worker {worker.worker_id} …"
+                        f"[DISPATCH spec[{idx}]] Keeping worker {worker.worker_id} for debug "
+                        f"(ORCH_KEEP_WORKER enabled) endpoint={worker.endpoint}"
                     )
-                    self.manager.destroy_worker(worker.worker_id)
-                    logger.info("Destroyed worker %s", worker.worker_id)
-                    print(
-                        f"[DISPATCH spec[{idx}]] Worker {worker.worker_id} destroyed OK"
-                    )
-                except Exception as exc:
-                    logger.warning(
-                        "Failed to destroy worker %s: %s", worker.worker_id, exc
-                    )
-                    print(
-                        f"[DISPATCH spec[{idx}]] WARNING: destroy worker failed: {exc}"
-                    )
+                else:
+                    try:
+                        print(
+                            f"[DISPATCH spec[{idx}]] Destroying worker {worker.worker_id} …"
+                        )
+                        self.manager.destroy_worker(worker.worker_id)
+                        logger.info("Destroyed worker %s", worker.worker_id)
+                        print(
+                            f"[DISPATCH spec[{idx}]] Worker {worker.worker_id} destroyed OK"
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            "Failed to destroy worker %s: %s", worker.worker_id, exc
+                        )
+                        print(
+                            f"[DISPATCH spec[{idx}]] WARNING: destroy worker failed: {exc}"
+                        )

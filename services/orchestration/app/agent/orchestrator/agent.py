@@ -42,6 +42,8 @@ class OrchestratorState(MessagesState):
     workflow: dict[str, Any]
     workflow_parameters: dict[str, Any] | None
     workflow_reasoning: str | None
+    workflow_source: str
+    workflow_id: str | None
     use_examples: bool
     max_parallel_workers: int
     parsed_intent: dict[str, Any] | None
@@ -190,6 +192,8 @@ def shell_workflow(state: OrchestratorState) -> dict[str, Any]:
             "parameters": None,
             "reasoning": "",
             "messages": [],
+            "workflow_source": state.get("workflow_source") or "auto",
+            "workflow_id": state.get("workflow_id"),
         },
         context=ShellWorkflowContext(
             netgent=NetGent(
@@ -228,6 +232,8 @@ def browser_workflow(state: OrchestratorState) -> dict[str, Any]:
             "parameters": None,
             "reasoning": "",
             "messages": [],
+            "workflow_source": state.get("workflow_source") or "auto",
+            "workflow_id": state.get("workflow_id"),
         },
         context=BrowserWorkflowContext(
             netgent=NetGent(
@@ -467,6 +473,8 @@ class OrchestratorAgent:
         *,
         use_examples: bool = True,
         max_parallel_workers: int = 1,
+        workflow_source: str = "auto",
+        workflow_id: str | None = None,
     ) -> dict[str, Any]:
         """Run the full orchestration pipeline for a given intent.
 
@@ -488,6 +496,8 @@ class OrchestratorAgent:
                 "workflow": workflow,
                 "workflow_parameters": None,
                 "workflow_reasoning": None,
+                "workflow_source": workflow_source,
+                "workflow_id": workflow_id,
                 "use_examples": use_examples,
                 "max_parallel_workers": max_parallel_workers,
                 "messages": [HumanMessage(content=intent)],

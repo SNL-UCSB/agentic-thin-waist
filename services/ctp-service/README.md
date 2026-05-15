@@ -1,288 +1,80 @@
 # CTP Service
 
-**Port**: 8001
-**Deliverable**: D1 (Network Virtualization Substrate - Representation Plane)
-**Lead**: Jaber | **Supporting**: Satyam, Snithik
-**PI**: Prof. Arpit Gupta
-**Priority**: CRITICAL
-**Status**: Active Development
+**Port**: 8001 · **Plane**: Representation
 
----
+The CTP (Cross-Traffic Profile) Service turns raw gateway PCAPs into reusable, composable representations of dynamic congestion pressure. A CTP encodes the temporal structure of aggregate demand (intensity, burstiness, heterogeneity, temporal correlation) without binding to the path, applications, or users that produced it. Substrate Worker replays CTPs via `tcpreplay`; CTP Service never touches the kernel.
 
-## Purpose
+## Operations
 
-The CTP (Cross-Traffic Profile) Service is the **Representation Plane** of the bottleneck in the Agentic Thin Waist architecture. It transforms passive packet traces from production networks into reusable, composable representations of dynamic congestion pressure—enabling systematic experimentation with realistic traffic conditions without binding to specific paths, applications, or users.
+| Operation | Purpose |
+|---|---|
+| `extract` | Ingest gateway PCAPs and produce a CTP corpus stored in PostgreSQL. |
+| `select` | Query the corpus by statistical descriptors (intensity, burstiness, temporal, structure). |
+| `transform` | Rescale a CTP to a target capacity via burst trimming (timing preserved). |
+| `merge` | Combine `/32` leaf CTPs under a parent subnet across a window range. |
+| `replay-data` | Export replay-ready PCAP paths for the Substrate Worker. |
 
-A CTP is a reusable representation of dynamic congestion pressure applied at a bottleneck, encoding temporal structure of aggregate demand (intensity, burstiness, heterogeneity, temporal correlations) without binding to particular paths, applications, or users that produced it.
+## Extract pipeline
 
----
+Five steps, all driven by `POST /ctps/extract`:
 
-## Architecture
+1. **Split by internal IP** — `app/operations/pcap_split.py`: classifies packets into `users/<ip>/{upload,download}/`.
+2. **Split by time window** — `app/operations/window_split.py`: default 30 s windows.
+3. **Build timeseries** — `app/operations/extract.py` + `metrics.py`: uses `ip.len` (header, not capture length); default 100 ms bins → 300 bins/window.
+4. **Build prefix-hierarchical trees** — `app/trees.py`: leaves are `/32` nodes, parents sum children up to `/16` (`/0`).
+5. **Store in PostgreSQL** — `app/database/postgres.py` + `schema.sql`: timeseries as `FLOAT8[]`, descriptors as `JSONB` (GIN indexed).
 
-```
-┌────────────────────────────────────┐
-│   Experiment Controller (Port 8000) │
-│   or External Research Client       │
-└────────────┬────────────────────────┘
-             │
-             ▼
-┌────────────────────────────────────┐
-│   CTP SERVICE (Port 8001)           │
-│  ┌──────────────────────────────┐  │
-│  │ CTP Operations Engine        │  │
-│  │ • extract() — traces → CTPs  │  │
-│  │ • select() — query by attrs  │  │
-│  │ • transform() — adapt CTP    │  │
-│  │ • merge() — compose CTPs     │  │
-│  └──────────────────────────────┘  │
-│  ┌──────────────────────────────┐  │
-│  │ CTP Index & Storage          │  │
-│  │ PostgreSQL — ctp_nodes table │  │
-│  └──────────────────────────────┘  │
-└────────────┬────────────────────────┘
-             │ Replay-ready PCAP
-             ▼
-        ┌────────────────────┐
-        │ Substrate Worker   │
-        │ :8002 (tcpreplay)  │
-        └────────────────────┘
-```
+## Statistical descriptors
 
----
+`app/operations/metrics.py` computes:
 
-## Directory Structure
+| Category | Fields |
+|---|---|
+| Intensity | `mean_bps`, `mean_pps`, `peak_bps` |
+| Burstiness | `peak_to_mean_ratio` (PMR), `coefficient_of_variation` (CoV), `percentile_95_to_mean`, `on_periods`, `off_periods` |
+| Temporal | `lag_1`, `lag_5`, `lag_10`, `lag_60` (Pearson autocorrelation) |
+| Structure | `contributor_count`, `upload_download_ratio`, `prefix_diversity` (normalized Shannon entropy of `/24` distribution) |
 
-```
-services/ctp-service/
-├── Dockerfile
-├── requirements.txt
-├── README.md
-├── app/
-│   ├── __init__.py
-│   ├── main.py                     # FastAPI app + lifespan
-│   ├── config.py                   # Pydantic-settings configuration
-│   ├── pipeline.py                 # CLI entry point (extract + legacy modes)
-│   ├── pcap_utils.py               # PCAP merge/reorder/pad/trim utilities
-│   ├── time_series_modules.py      # PCAP → TimeSeries conversion
-│   ├── tree_node.py                # TreeNode data structure + metrics
-│   ├── trees.py                    # Subnet tree construction + serialisation
-│   ├── models/
-│   │   ├── __init__.py
-│   │   ├── ctp.py                  # CTP dataclasses
-│   │   └── descriptors.py          # Pydantic request/response models
-│   ├── database/
-│   │   ├── __init__.py
-│   │   ├── postgres.py             # PostgreSQL connection pool + data access
-│   │   └── schema.sql              # CREATE TABLE + indexes DDL
-│   ├── operations/
-│   │   ├── __init__.py
-│   │   ├── pcap_split.py           # Step 1: split by internal IP
-│   │   ├── window_split.py         # Step 2: split by time windows
-│   │   ├── metrics.py              # Statistical descriptor computation
-│   │   ├── extract.py              # Steps 1–5 orchestrator
-│   │   ├── select.py               # Select operation
-│   │   ├── transform.py            # Transform operation
-│   │   ├── merge.py                # Merge operation
-│   │   └── export.py               # Export replay-ready PCAPs
-│   ├── api/
-│   │   ├── __init__.py
-│   │   └── routes.py               # FastAPI endpoint handlers
-│   └── utils/
-│       ├── __init__.py
-│       └── logging.py              # Structured logging setup
-└── tests/
-    ├── __init__.py
-    ├── conftest.py                 # pytest fixtures; stubs heavy deps (numpy, scapy, psycopg2)
-    ├── test_placeholder.py         # Placeholder test
-    └── test_routes.py              # Unit tests for all API endpoints (mocked DB + operations)
-```
+## API
 
----
+Interactive docs: `http://localhost:8001/docs`.
 
-## Extract Pipeline (Steps 1–5)
-
-The **Extract** operation converts raw gateway PCAP files into the CTP corpus stored in PostgreSQL.
-
-### Step 1 — Split PCAPs by Internal IP
-
-`app/operations/pcap_split.py`
-
-- Input: gateway PCAP file(s) or directory
-- Streams packets; classifies by source/destination IP against `internal_subnets`
-- **Upload** = internal source IP → `users/<ip>/upload/<stem>.pcap`
-- **Download** = internal destination IP → `users/<ip>/download/<stem>.pcap`
-- Parallel processing across multiple input PCAPs
-
-### Step 2 — Split by Time Windows
-
-`app/operations/window_split.py`
-
-- Input: per-user upload/download PCAPs
-- Default window: 30 seconds (configurable)
-- Output: `window_0001.pcap`, `window_0002.pcap`, … under `windows/` subdirectory
-- Boundary determined by first-packet timestamp
-
-### Step 3 — Build Timeseries
-
-`app/operations/extract.py` + `app/operations/metrics.py`
-
-- Input: per-window PCAPs
-- **Uses `ip.len` from IP header** (not captured payload length)
-- Default bin width: 100 ms → 300 bins per 30-second window
-- Output: `numpy.ndarray` of byte counts per bin
-
-### Step 4 — Build Prefix-Hierarchical Trees
-
-`app/trees.py` + `app/tree_node.py`
-
-- Leaf nodes: /32 per-user nodes
-- Hierarchy: /32 → /31 → /30 → … → /16 → /0
-- Parent timeseries = element-wise sum of children
-- Metrics computed at every node: burstiness, throughput, asymmetry, median
-
-### Step 5 — Store in PostgreSQL
-
-`app/database/postgres.py` + `app/database/schema.sql`
-
-- Primary key: `ctp_id`
-- Timeseries stored as `FLOAT8[]` native arrays
-- Statistical descriptors stored as `JSONB`
-- B-tree indexes on `mean_mbps`, `pmr`, `cov`, `lag_1`, `contributor_count`, `(dataset_name, window_index)`
-- GIN indexes on `intensity` and `structure` JSONB columns for arbitrary queries
-- `datasets` table stores capture-level metadata (window duration, bin width, gateway subnet, totals)
-
----
-
-## Statistical Descriptors
-
-`app/operations/metrics.py`
-
-| Category | Metric | Description |
-|----------|--------|-------------|
-| Intensity | `mean_bps` | Mean bit rate (bits/s) |
-| Intensity | `mean_pps` | Estimated mean packet rate |
-| Intensity | `peak_bps` | Peak bit rate |
-| Burstiness | `peak_to_mean_ratio` (PMR) | max / mean |
-| Burstiness | `coefficient_of_variation` (CoV) | std / mean |
-| Burstiness | `percentile_95_to_mean` | P95 / mean |
-| Burstiness | `on_periods` / `off_periods` | Contiguous active/idle runs |
-| Temporal | `lag_1`, `lag_5`, `lag_10`, `lag_60` | Pearson autocorrelation |
-| Structure | `contributor_count` | Number of /32 leaf users |
-| Structure | `upload_download_ratio` | Upload bytes / download bytes |
-| Structure | `prefix_diversity` | Normalised Shannon entropy of /24 distribution |
-
----
-
-## API Endpoints
-
-Interactive API docs: `http://localhost:8001/docs`
-
-| Endpoint | Method | Purpose |
-|----------|--------|---------|
-| `/health` | GET | Service health + PostgreSQL connectivity |
-| `/ctps` | GET | Paginated corpus listing |
-| `/ctps/{id}` | GET | Full CTP details |
-| `/ctps/extract` | POST | Run full extract pipeline |
-| `/ctps/select` | POST | Query corpus by statistical descriptors |
-| `/ctps/transform` | POST | Rescale CTP to target capacity |
-| `/ctps/merge` | POST | Compose CTPs by window concat + weighted sum |
-| `/ctps/{id}/replay-data` | GET | Export replay-ready PCAP for Substrate Worker |
-
----
-
-### `GET /health`
-
-Returns service health and PostgreSQL connectivity.
-
-**Returns**
-```json
-{
-  "status": "healthy",
-  "postgresql_connected": true,
-  "service_version": "1.0.0",
-  "python_version": "...",
-  "platform": "..."
-}
-```
-`status` is `"degraded"` if the database is unreachable.
-
----
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/health` | Service + DB connectivity. |
+| `GET` | `/ctps` | Paginated corpus listing. |
+| `GET` | `/ctps/{ctp_id}` | Full CTP record. |
+| `POST` | `/ctps/extract` | Run the full extract pipeline. |
+| `POST` | `/ctps/select` | Query by statistical descriptors. |
+| `POST` | `/ctps/transform` | Rescale a CTP to a target capacity. |
+| `POST` | `/ctps/merge` | Merge leaf CTPs under a parent subnet across a window range. |
+| `GET` | `/ctps/{ctp_id}/replay-data` | Resolve/build replay-ready PCAP paths. |
 
 ### `GET /ctps`
 
-Paginated listing of all CTPs in the corpus.
+Query params: `limit` (1–10000, default 50), `offset` (default 0), `order_by` (`intensity` | `burstiness` | `contributor_count` | `window_index`, default `intensity`).
 
-**Query parameters**
-
-| Parameter | Default | Description |
-|---|---|---|
-| `limit` | `50` | Max results (1–10 000) |
-| `offset` | `0` | Pagination offset |
-| `order_by` | `intensity` | Sort field: `intensity` \| `burstiness` \| `contributor_count` \| `window_index` |
-
-**Returns**
-```json
-{
-  "total": 1200,
-  "returned": 50,
-  "ctps": [ { "ctp_id": "...", "subnet": "...", ... } ]
-}
-```
-
----
-
-### `GET /ctps/{ctp_id}`
-
-Full details and all statistical descriptors for a single CTP.
-
-**Path parameter**: `ctp_id` — unique identifier assigned during extraction.
-
-**Returns** a single CTP object (see [CTP Object Schema](#ctp-object-schema)).
-
-**Errors**: `404` if not found.
-
----
+Returns `{total, returned, ctps: [...]}`.
 
 ### `POST /ctps/extract`
 
-Ingests raw PCAP traces and runs the full five-step extraction pipeline to produce CTPs stored in PostgreSQL.
-
-**Steps**: split by IP → split by time window → build timeseries → build prefix tree → store in DB.
-
-**Request body**
-
-| Field | Required | Description |
-|---|---|---|
-| `pcap_input` | yes | Absolute path to a PCAP file or directory of PCAPs |
-| `output_dir` | yes | Root directory for intermediate per-user PCAP files |
-| `dataset_name` | yes | Human-readable label for this dataset |
-| `window_duration_sec` | no | Override default window size (seconds) |
-| `burst_interval_ms` | no | Override default bin width (ms) |
-| `internal_subnets` | no | Override default internal IP prefixes |
-| `workers` | no | Override default parallel worker count |
-| `start_time_epoch` | no | Unix timestamp of the first packet |
-
-**Returns**
 ```json
 {
+  "pcap_input": "/data/gateway-trace.pcap",
+  "output_dir": "/data/ctp-working",
   "dataset_name": "campus-2024-01",
-  "ctp_count": 840,
-  "window_count": 30,
-  "user_count": 28,
-  "extraction_status": "success",
-  "notes": null
+  "window_duration_sec": 30,          // optional
+  "burst_interval_ms": 100,           // optional
+  "internal_subnets": ["169.231.0.0/16"], // optional
+  "workers": 8,                        // optional
+  "start_time_epoch": 1700000000       // optional
 }
 ```
 
-**Errors**: `500` on pipeline failure with a detail message.
-
----
+Returns `{dataset_name, ctp_count, window_count, user_count, extraction_status, notes}`. `500` on pipeline failure.
 
 ### `POST /ctps/select`
 
-Queries the corpus using multi-dimensional statistical filter criteria. All filter fields are optional.
-
-**Request body**
 ```json
 {
   "query": {
@@ -303,415 +95,144 @@ Queries the corpus using multi-dimensional statistical filter criteria. All filt
 }
 ```
 
-**Returns**
-```json
-{
-  "query_matched": 143,
-  "results_returned": 50,
-  "ctps": [ { "ctp_id": "...", ... } ]
-}
-```
-
----
+Returns `{query_matched, results_returned, ctps: [...]}`. All `query` fields are optional.
 
 ### `POST /ctps/transform`
 
-Rescales a CTP to a target bottleneck capacity by applying a hard throughput threshold (burst trimming). Burst timing, temporal correlation, and contributor structure are preserved. The resulting CTP is saved to the corpus.
-
-**Request body**
-
-| Field | Required | Description |
-|---|---|---|
-| `ctp_id` | yes | ID of the CTP to transform |
-| `output_dir` | yes | Root directory for output PCAP files (`<output_dir>/<dataset>_transformed/`) |
-| `users_root` | yes | Root of the per-user PCAP directory from extraction |
-| `throughput_threshold_mbps` | yes | Hard cap in Mbps; packets in intervals exceeding this rate are randomly dropped |
-| `preserve_structure` | no | Always `true`; structure is never modified |
-
-**Returns**
 ```json
 {
-  "original_ctp_id": "ctp-campus-169.231.10.1_32-5",
-  "transformed_ctp_id": "ctp-transform-ctp-campus-169.231.10.1_32-5-10mbps",
-  "throughput_threshold_mbps": 10.0,
-  "download_pcap": "/data/output/campus_transformed/downlink/ctp-campus-169.231.10.1_32-5_10mbps_download.pcap",
-  "upload_pcap": "/data/output/campus_transformed/uplink/ctp-campus-169.231.10.1_32-5_10mbps_upload.pcap",
-  "notes": "Trimming Done; temporal structure and asymmetry preserved."
+  "ctp_id": "ctp-campus-169.231.10.1_32-5",
+  "output_dir": "/data/output",
+  "users_root": "/data/output/users",
+  "throughput_threshold_mbps": 10.0
 }
 ```
 
-**Errors**: `404` if `ctp_id` not found; `500` on processing failure.
-
----
+Caps each interval that exceeds `throughput_threshold_mbps` by randomly dropping packets; preserves burst timing, temporal correlation, and contributor structure. Returns the new CTP id plus output `download_pcap` / `upload_pcap` paths. `404` if `ctp_id` is unknown.
 
 ### `POST /ctps/merge`
 
-Merges all `/32` leaf CTPs under a parent subnet across a range of window indices. Timeseries are summed per window and concatenated across windows; underlying PCAPs are merged with `joincap`. The resulting CTP is stored in the corpus.
-
-Output PCAPs are written to:
-```
-<output_dir>/<dataset_name>_merged/downlink/<ctp_id>_download.pcap
-<output_dir>/<dataset_name>_merged/uplink/<ctp_id>_upload.pcap
-```
-
-**Request body**
-
-| Field | Required | Description |
-|---|---|---|
-| `dataset_name` | yes | Dataset label |
-| `subnet` | yes | Parent CIDR subnet whose `/32` leaf nodes will be merged |
-| `start_index` | yes | First window index (inclusive, ≥ 0) |
-| `end_index` | yes | Last window index (inclusive, must be ≥ `start_index`) |
-| `output_dir` | yes | Root directory for merged PCAP output |
-| `users_root` | yes | Root of the per-user PCAP directory tree from extraction |
-
-**Returns**
 ```json
 {
-  "merged_ctp_id": "ctp-merged-campus-2024-01-169-231-0-0_16-0-29",
   "dataset_name": "campus-2024-01",
   "subnet": "169.231.0.0/16",
   "start_index": 0,
   "end_index": 29,
-  "leaf_count": 28,
-  "merged_intensity_mbps": 312.4,
-  "merged_contributor_count": 28,
-  "download_pcap": "/data/output/campus-2024-01_merged/downlink/ctp-merged-campus-2024-01-..._download.pcap",
-  "upload_pcap": "/data/output/campus-2024-01_merged/uplink/ctp-merged-campus-2024-01-..._upload.pcap",
-  "notes": "Merged 28 leaf IP(s) across windows 0–29."
+  "output_dir": "/data/output",
+  "users_root": "/data/output/users"
 }
 ```
 
-**Errors**: `400` if no matching leaf CTPs are found; `500` on processing failure.
-
----
+Sums leaf timeseries per window and concatenates across windows; merges underlying PCAPs with `joincap`. Returns `{merged_ctp_id, leaf_count, merged_intensity_mbps, download_pcap, upload_pcap, ...}`. `400` if no matching leaves.
 
 ### `GET /ctps/{ctp_id}/replay-data`
 
-Exports a CTP as a replay-ready PCAP file for the Substrate Worker. Locates or generates the merged PCAP and returns it as a binary file download.
+Query params: `replay_dir` (required), `users_root` (required), `direction` (`download` default, or `upload`).
 
-**Path parameter**: `ctp_id` — CTP identifier.
+Returns `{download_pcap, upload_pcap}` paths suitable for Substrate Worker. `404` if the CTP or its leaf PCAPs don't exist.
 
-**Query parameters**
+## CTP object schema
 
-| Parameter | Required | Description |
+| Field | Type | Notes |
 |---|---|---|
-| `replay_dir` | yes | Root directory for replay PCAP output |
-| `users_root` | yes | Root of the per-user PCAP directory from extraction |
-| `direction` | no | `download` (default) or `upload` |
-
-**Returns**
-```json
-{
-  "download_pcap": "/data/replay/<dataset>_replay/downlink/<ctp_id>_download.pcap",
-  "upload_pcap": "/data/replay/<dataset>_replay/uplink/<ctp_id>_upload.pcap"
-}
-```
-
-**Errors**: `404` if the CTP does not exist or no leaf PCAPs are found.
-
----
-
-## CTP Object Schema
-
-Every CTP object returned by the API contains:
-
-| Field | Type | Description |
-|---|---|---|
-| `ctp_id` | string | Unique identifier (e.g. `ctp-campus-169.231.10.1/32-5`) |
+| `ctp_id` | string | e.g. `ctp-campus-169.231.10.1/32-5` |
 | `dataset_name` | string | Source dataset label |
-| `subnet` | string | CIDR subnet (e.g. `169.231.10.1/32`) |
-| `window_index` | int | Zero-based time-window index |
+| `subnet` | string | CIDR (e.g. `169.231.10.1/32`) |
+| `window_index` | int | Zero-based window |
 | `extracted_from` | string | Source PCAP filename(s) |
-| `start_time` | datetime \| null | Wall-clock window start |
-| `duration_seconds` | int | Window length in seconds |
-| `upload_timeseries` | float[] | Per-bin byte counts for outbound traffic |
-| `download_timeseries` | float[] | Per-bin byte counts for inbound traffic |
+| `start_time` | datetime\|null | Wall-clock window start |
+| `duration_seconds` | int | Window length |
+| `upload_timeseries`, `download_timeseries` | float[] | Per-bin byte counts |
 | `intensity` | object | `mean_pps`, `mean_bps`, `mean_mbps`, `peak_pps`, `peak_bps` |
 | `burstiness` | object | `peak_to_mean_ratio`, `coefficient_of_variation`, `percentile_95_to_mean`, `on_periods`, `off_periods` |
-| `temporal_correlation` | object | Autocorrelation at `lag_1`, `lag_5`, `lag_10`, `lag_60` |
+| `temporal_correlation` | object | `lag_1`, `lag_5`, `lag_10`, `lag_60` |
 | `structure` | object | `contributor_count`, `unique_source_ips`, `unique_dest_ips`, `upload_download_ratio`, `prefix_diversity` |
-| `is_transformed` | bool | `true` if produced by `/ctps/transform` |
-| `throughput_threshold_mbps` | float \| null | Threshold used during transform |
-| `is_merged` | bool | `true` if produced by `/ctps/merge` |
-| `merge_start_index` | int \| null | First window index in merge range |
-| `merge_end_index` | int \| null | Last window index in merge range |
-| `download_pcap` | string \| null | Path to download PCAP |
-| `upload_pcap` | string \| null | Path to upload PCAP |
-
----
+| `is_transformed`, `throughput_threshold_mbps` | bool / float\|null | Set if produced by `/transform` |
+| `is_merged`, `merge_start_index`, `merge_end_index` | bool / int\|null | Set if produced by `/merge` |
+| `download_pcap`, `upload_pcap` | string\|null | Paths to underlying PCAPs |
 
 ## Configuration
 
-All settings are controlled by environment variables prefixed `CTP_`.
+All settings come from `CTP_`-prefixed environment variables.
 
 | Variable | Default | Description |
-|----------|---------|-------------|
-| `CTP_DATABASE_URL` | `postgresql://ctp_user:ctp_pass@localhost:5432/ctp_corpus` | PostgreSQL connection URL |
-| `CTP_HOST` | `0.0.0.0` | Bind address |
-| `CTP_PORT` | `8001` | TCP port |
-| `CTP_LOG_LEVEL` | `INFO` | Logging level (`DEBUG`/`INFO`/`WARNING`/`ERROR`/`CRITICAL`) |
+|---|---|---|
+| `CTP_DATABASE_URL` | `postgresql://ctp_user:ctp_pass@localhost:5432/ctp_corpus` | PostgreSQL DSN |
+| `CTP_HOST` / `CTP_PORT` | `0.0.0.0` / `8001` | Bind |
+| `CTP_LOG_LEVEL` | `INFO` | |
 | `CTP_WORKERS` | `4` | Parallel worker count |
-| `CTP_DB_POOL_MIN` | `2` | Minimum DB connections in pool |
-| `CTP_DB_POOL_MAX` | `10` | Maximum DB connections in pool |
-| `CTP_WINDOW_DURATION_SEC` | `30` | Time-window length (seconds) |
-| `CTP_BURST_INTERVAL_MS` | `100` | Timeseries bin width (ms) |
-| `CTP_START_OFFSET_SEC` | `0` | Leading traffic to discard at capture start (seconds) |
-| `CTP_PCAP_BATCH_SIZE` | `30` | Max PCAPs joined per `joincap` call |
-| `CTP_TOP_PREFIX_LEN` | `16` | Shortest prefix length in the subnet hierarchy (`/16` = gateway) |
-| `CTP_INTERNAL_SUBNETS` | UCSB defaults | Internal IP prefix list (JSON array) |
+| `CTP_DB_POOL_MIN` / `CTP_DB_POOL_MAX` | `2` / `10` | Connection pool sizes |
+| `CTP_WINDOW_DURATION_SEC` | `30` | Window length |
+| `CTP_BURST_INTERVAL_MS` | `100` | Bin width |
+| `CTP_START_OFFSET_SEC` | `0` | Leading traffic to discard |
+| `CTP_PCAP_BATCH_SIZE` | `30` | Max PCAPs per `joincap` call |
+| `CTP_TOP_PREFIX_LEN` | `16` | Shortest prefix in subnet hierarchy |
+| `CTP_INTERNAL_SUBNETS` | UCSB defaults | Internal IP prefixes (JSON array) |
 | `CTP_GATEWAY_SUBNET` | `169.231.0.0/16` | Top-level gateway subnet |
 
----
+`docker-compose.yml` also expects:
+
+| Variable | Purpose |
+|---|---|
+| `CTP_DIR` | Host PCAP input directory (mounted read-only) |
+| `CTP_OUTPUT_DIR` | Host output directory (mounted read-write) |
+
+## System dependencies
+
+| Tool | Used for |
+|---|---|
+| `tshark` | Packet metadata extraction (legacy mode) |
+| `joincap` | Merging PCAPs ([releases](https://github.com/assafmo/joincap/releases)) |
+| `reordercap` | Reordering packets by timestamp |
+| `tcprewrite` | Padding small frames |
+
+Debian/Ubuntu: `apt-get install tshark wireshark-common tcpreplay`.
 
 ## Running
 
-### Start the service
-
 ```bash
-# Development
+# Local dev
 uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
 
-# Production (via Docker Compose — builds image, starts postgres, then ctp-service)
-sudo docker compose up --build ctp-service
+# Via Docker Compose (boots postgres first, then this service)
+docker compose up --build ctp-service
+
+# Apply schema manually if needed
+psql "$CTP_DATABASE_URL" -f app/database/schema.sql
 ```
 
-### Run the CLI pipeline (Extract)
+CLI pipeline:
 
 ```bash
-# Full extract: gateway PCAP → PostgreSQL
 python -m app.pipeline \
     --mode extract \
-    --pcap-input /data/gateway-trace.pcap \
-    --output-dir /data/ctp-working \
+    --pcap-input  /data/gateway-trace.pcap \
+    --output-dir  /data/ctp-working \
     --dataset-name ucsb-2026-03-04 \
-    --database-url postgresql://user:pass@localhost:5432/ctp_corpus \
-    --workers 8 \
-    --window-duration-sec 30 \
-    --burst-interval-ms 100
-
-# Legacy mode: pre-split user PCAPs → JSON trees
-python -m app.pipeline \
-    --mode legacy \
-    --pcap-dir /data/pcaps \
-    --ts-dir /data/timeseries \
-    --tree-dir /data/trees \
-    --mask 169.231 \
-    --time-limit 15
+    --database-url "$CTP_DATABASE_URL" \
+    --workers 8 --window-duration-sec 30 --burst-interval-ms 100
 ```
 
-### Apply the database schema
-
-```bash
-psql $CTP_DATABASE_URL -f app/database/schema.sql
-```
-
-### Select CTPs
-
-```bash
-curl -X POST http://localhost:8001/ctps/select \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query": {
-      "intensity_range_mbps": [100, 3000],
-      "burstiness_pmr_range": [2.0, 5.0],
-      "temporal_correlation_min": 0.3,
-      "contributor_count_min": 10
-    },
-    "limit": 20,
-    "order_by": "intensity"
-  }'
-```
-
-### Extract CTPs from a PCAP
-
-```bash
-curl -X POST http://localhost:8001/ctps/extract \
-  -H "Content-Type: application/json" \
-  -d '{
-    "pcap_input": "/home/netreplica/config/ctp/out_70_profile8.pcap",
-    "output_dir": "/home/netreplica/output_test",
-    "dataset_name": "test_dataset"
-  }'
-```
-
-### Transform a CTP
-
-```bash
-curl -X POST http://localhost:8001/ctps/transform \
-  -H "Content-Type: application/json" \
-  -d '{
-    "ctp_id": "ctp-test_dataset-169.231.162.180_30-w0001",
-    "throughput_threshold_mbps": 4,
-    "output_dir": "/home/netreplica/output_test",
-    "users_root": "/home/netreplica/output_test/users"
-  }'
-```
-
-### Merge CTPs across a window range
-
-```bash
-curl -X POST http://localhost:8001/ctps/merge \
-  -H "Content-Type: application/json" \
-  -d '{
-    "dataset_name": "test_dataset",
-    "subnet": "169.231.180.0/30",
-    "start_index": 1,
-    "end_index": 2,
-    "output_dir": "/home/netreplica/output_test",
-    "users_root": "/home/netreplica/output_test/users"
-  }'
-```
-
-### Export replay-ready PCAP paths
-
-```bash
-curl -X GET \
-  "http://localhost:8001/ctps/ctp-test_dataset-169.231.162.176_28-w0001/replay-data?replay_dir=/home/netreplica/output_test&users_root=/home/netreplica/output_test/users&direction=download"
-```
-
----
-
-## System Dependencies
-
-| Tool | Purpose |
-|------|---------|
-| `tshark` | Packet metadata extraction (legacy mode) |
-| `joincap` | PCAP merging |
-| `reordercap` | Packet reordering |
-| `tcprewrite` | Packet padding |
-
-Install on Debian/Ubuntu:
-```bash
-apt-get install tshark wireshark-common tcpreplay
-# joincap: see https://github.com/assafmo/joincap/releases
-```
-
----
-
-## Testing
+## Tests
 
 ```bash
 pytest services/ctp-service/tests/ -v
 ```
 
----
+## Layout
 
----
-
-## Docker Setup and Usage
-
-### Step 1 — Configure Environment
-
-In the root `.env` file, set the paths for PCAP input and output directories:
-
-```ini
-CTP_DIR=/path/to/pcap/input
-CTP_OUTPUT_DIR=/path/to/output/dir
 ```
-
-All other CTP settings (`CTP_DATABASE_URL`, `CTP_PORT`, etc.) should also be present in the root `.env`. Example values:
-
-```ini
-CTP_DATABASE_URL=postgresql://admin:admin123@postgres:5432/telemetry
-CTP_PORT=8001
-CTP_LOG_LEVEL=INFO
-CTP_WORKERS=4
-CTP_WINDOW_DURATION_SEC=30
-CTP_BURST_INTERVAL_MS=100
-CTP_GATEWAY_SUBNET=169.231.0.0/16
+services/ctp-service/
+├── app/
+│   ├── main.py                      # FastAPI app + lifespan
+│   ├── config.py                    # CTP_* settings
+│   ├── pipeline.py                  # CLI entry
+│   ├── pcap_utils.py                # merge/reorder/pad/trim
+│   ├── time_series_modules.py       # PCAP → timeseries
+│   ├── tree_node.py / trees.py      # subnet hierarchy
+│   ├── api/routes.py                # endpoint handlers
+│   ├── database/{postgres.py,schema.sql}
+│   ├── models/{ctp.py,descriptors.py}
+│   └── operations/{pcap_split,window_split,extract,select,transform,merge,export,metrics}.py
+└── tests/
 ```
-
-### Step 2 — Start the CTP Service
-
-From the repo root, run:
-
-```bash
-sudo docker compose up --build ctp-service
-```
-
-This will automatically build the image, start PostgreSQL (waiting for it to be healthy), and launch the CTP service. The PCAP input directory is mounted read-only; the output directory is mounted read-write.
-
-### Step 5 — API Usage Examples
-
-#### Health check
-
-```bash
-curl http://localhost:8001/health
-```
-
-#### List all CTPs
-
-```bash
-curl http://localhost:8001/ctps
-```
-
-#### Extract
-
-```bash
-curl -X POST http://localhost:8001/ctps/extract \
-  -H "Content-Type: application/json" \
-  -d '{
-    "pcap_input": "/path/to/pcap/input/your-trace.pcap",
-    "output_dir": "/path/to/output/dir",
-    "dataset_name": "your-dataset-name"
-  }'
-```
-
-#### Select
-
-```bash
-curl -X POST http://localhost:8001/ctps/select \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query": {
-      "dataset_name": "your-dataset-name",
-      "intensity_range_mbps": [3.5, 4.5]
-    },
-    "limit": 20,
-    "order_by": "contributor_count"
-  }'
-```
-
-#### Transform
-
-```bash
-curl -X POST http://localhost:8001/ctps/transform \
-  -H "Content-Type: application/json" \
-  -d '{
-    "ctp_id": "ctp-your-dataset-name-169.231.162.180_30-w0001",
-    "throughput_threshold_mbps": 1,
-    "output_dir": "/path/to/output/dir",
-    "users_root": "/path/to/output/dir/users"
-  }'
-```
-
-#### Merge
-
-```bash
-curl -X POST http://localhost:8001/ctps/merge \
-  -H "Content-Type: application/json" \
-  -d '{
-    "dataset_name": "your-dataset-name",
-    "subnet": "169.231.162.180/30",
-    "start_index": 1,
-    "end_index": 2,
-    "output_dir": "/path/to/output/dir",
-    "users_root": "/path/to/output/dir/users"
-  }'
-```
-
-#### Replay Data
-
-```bash
-curl -X GET \
-  "http://localhost:8001/ctps/ctp-your-dataset-name-169.231.162.180_30-w0001/replay-data?replay_dir=/path/to/output/dir&users_root=/path/to/output/dir/users&direction=download"
-```
-
----
-
-**Last Updated**: 2026-03-25
-**Status**: Active Development
-**Team Lead**: Jaber
-**PI**: Prof. Arpit Gupta
-**Repository**: agentic-thin-waist/services/ctp-service

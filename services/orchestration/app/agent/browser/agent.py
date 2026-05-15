@@ -20,6 +20,8 @@ class BrowserWorkflowGenerationState(MessagesState):
     workflow: dict[str, Any]
     parameters: dict[str, Any] | None = None
     reasoning: str
+    workflow_source: str
+    workflow_id: str | None
 
 
 class BrowserWorkflowContext(BaseModel):
@@ -37,8 +39,18 @@ class ChooseWorkflow(BaseModel):
 def choose_workflow(
     state: BrowserWorkflowGenerationState, runtime: Runtime[BrowserWorkflowContext]
 ) -> dict[str, Any]:
-    """Ask Claude to pick an existing NetGent workflow that fits the intent."""
+    """Pick a browser workflow per workflow_source / workflow_id.
+
+    Modes mirror the shell agent. There is currently no generate fallback for
+    browser workflows, so `auto` and `library` behave the same when no library
+    entry matches: the orchestrator routes to fail_no_workflow.
+    """
     intent = state["intent"]
+    workflow_source = (state.get("workflow_source") or "auto").lower()
+    if workflow_source not in {"auto", "library", "generate"}:
+        workflow_source = "auto"
+    pinned_id = (state.get("workflow_id") or "").strip() or None
+
     WORKFLOW_INDEX_URL = "https://raw.githubusercontent.com/SNL-UCSB/netgent-workflow/main/workflows/index.json"
     try:
         available = [
@@ -48,6 +60,49 @@ def choose_workflow(
         ]
     except Exception:
         available = []
+    print(
+        f"[BROWSER WF] workflow_source={workflow_source!r} "
+        f"pinned_workflow_id={pinned_id!r} library_size={len(available)}"
+    )
+
+    if workflow_source == "generate":
+        reasoning = (
+            "workflow_source=generate is not supported for browser workflows yet. "
+            "Submit with workflow_source=auto or workflow_source=library."
+        )
+        print(f"[BROWSER WF] {reasoning}")
+        return {
+            "workflow": {},
+            "parameters": None,
+            "reasoning": reasoning,
+        }
+
+    if pinned_id:
+        chosen_entry = next((w for w in available if w.get("id") == pinned_id), None)
+        if chosen_entry is None:
+            reasoning = (
+                f"Requested workflow id {pinned_id!r} not present in the browser "
+                "workflow library."
+            )
+            print(f"[BROWSER WF] {reasoning}")
+            return {
+                "workflow": {},
+                "parameters": None,
+                "reasoning": reasoning,
+            }
+        if chosen_entry.get("link"):
+            try:
+                workflow = requests.get(chosen_entry["link"], timeout=10).json()
+            except Exception:
+                workflow = {"id": pinned_id}
+        else:
+            workflow = {"id": pinned_id}
+        workflow.setdefault("id", pinned_id)
+        return {
+            "workflow": workflow,
+            "parameters": None,
+            "reasoning": f"Pinned browser workflow {pinned_id!r} via request workflow_id.",
+        }
 
     workflows_block = (
         "\n".join(

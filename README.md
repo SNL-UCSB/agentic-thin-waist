@@ -1,10 +1,10 @@
 # Agentic Thin Waist
 
-A service-oriented platform for bottleneck-centric network data generation, enabling researchers to specify experimental intents in natural language and execute reproducible, large-scale experiments across diverse infrastructure.
+A service-oriented platform for bottleneck-centric network data generation. Researchers describe an experiment in natural language, and the platform decomposes it into reproducible runs against shaped, instrumented infrastructure — with cross-traffic, traffic capture, and telemetry storage handled end-to-end.
 
 ## Vision
 
-Progress in networking research depends on access to data that captures how applications and protocols respond to diverse, time-varying bottleneck regimes. Yet generating such data systematically remains hard: bottleneck dynamics are simultaneously behavior-defining and execution-dependent, making them difficult to replicate, vary, or reuse across environments.
+Progress in networking research depends on data that captures how applications and protocols respond to diverse, time-varying bottleneck regimes. Generating such data systematically is hard: bottleneck dynamics are simultaneously behavior-defining and execution-dependent, making them hard to replicate, vary, or reuse across environments.
 
 This platform applies the **hourglass design** from netUnicorn to network data generation. The "thin waist" is a composable set of services that bridges diverse research intents (top) with diverse infrastructure (bottom):
 
@@ -18,13 +18,13 @@ This platform applies the **hourglass design** from netUnicorn to network data g
             ────────────────────────────────────────────
             |           AGENTIC THIN WAIST             |
             |                                          |
-            |  Orchestration    (Claude + OpenClaw)     |
-            |  NetForge Service                         |
-            |    ├─ Intent: Link(), Bottleneck()        |
-            |    ├─ Representation: CrossTraffic(), CTPs|
-            |    └─ Execution: tc, tshark, tcpreplay    |
-            |  NetGent Service  (application workflows) |
-            |  Telemetry Service  (telemetry + results)   |
+            |  Orchestration   (LLM + LangGraph)       |
+            |  Experiment API + CTP + Substrate Worker |
+            |     ├─ Intent          (Link/Bottleneck) |
+            |     ├─ Representation  (CTPs)            |
+            |     └─ Execution       (tc, tshark, …)   |
+            |  NetGent Service  (application workflows)|
+            |  Telemetry Service                       |
             |                                          |
             ────────────────────────────────────────────
            /                                            \
@@ -38,276 +38,326 @@ Researchers specify intents at the top. Agents orchestrate execution through the
 
 ## Progressive Disaggregation
 
-The architecture is guided by the principle of **progressive disaggregation**, developed across our prior systems. Each system addresses a specific form of disaggregation:
+The architecture is guided by **progressive disaggregation**, developed across our prior systems:
 
-**netUnicorn** established two foundational capabilities for network data collection: (1) decoupling data-collection intents from mechanisms — expressing *what* to collect separately from *how* to realize it — and (2) disaggregating intents into independent, reusable tasks. Its service-oriented architecture (client, core/mediation, deployment services, execution services, datastore) demonstrated that this disaggregation enables portability across heterogeneous infrastructure.
+- **netUnicorn** — separates *what* to collect from *how* to realize it, and disaggregates intents into reusable tasks.
+- **NetForge / NetReplica** — disaggregates bottleneck-centric data generation along three dimensions: intent vs. execution, static vs. dynamic attributes, and trace vs. context (via Cross-Traffic Profiles).
+- **BQT+** — disaggregates workflow specification from execution for web-based measurement, modeling consumer-facing interfaces as nondeterministic finite automata.
+- **NetGent** — extends BQT+'s NFA abstraction to general application workflows (YouTube, Netflix, Zoom, …), compiling natural-language workflow specs into executable state machines.
 
-**NetForge/NetReplica** applies progressive disaggregation to bottleneck-centric data generation along three dimensions:
-
-1. **Intent–execution disaggregation**: Separates *what* bottleneck behavior to exercise from *where* and *how* it is realized. NetForge introduces a first-class *bottleneck-regime specification* — a declarative description independent of any particular testbed, cloud platform, deployment, or trace.
-
-2. **Static–dynamic attribute disaggregation**: Separates a bottleneck regime into two independently controllable components: *static bottleneck attributes* (capacity, base latency, buffering, queue management) that define the structural envelope, and *dynamic congestion pressure* that drives time-varying contention against that structure.
-
-3. **Trace–context disaggregation**: Disaggregates observed traffic dynamics from their original trace context via *Cross-Traffic Profiles (CTPs)*. CTPs encode the temporal structure of aggregate demand at a bottleneck — intensity, burstiness, heterogeneity, and temporal correlations — without binding to the particular path, applications, or users that produced it.
-
-**BQT+** addresses the disaggregation of workflow specification from execution for web-based measurement. It models ISP consumer-facing interfaces as interaction state spaces, formalized as a nondeterministic finite automaton (NFA), where states correspond to observable interface conditions and transitions encode permissible user interactions. This separates querying intent from execution and enables robust, extensible operation across hundreds of heterogeneous providers.
-
-**NetGent** extends BQT+'s NFA-based abstraction to general application workflows (YouTube, Netflix, Zoom, etc.), compiling natural-language workflow specifications into executable state machines.
-
-Together, these systems form the building blocks of the thin waist platform.
+Together, these systems form the building blocks of the thin-waist platform.
 
 ## Architecture
 
-### Service Structure
-
-The platform is organized around a **NetForge Service** that maps directly to the three logical planes from the NetForge paper, plus supporting services for application execution, storage, and orchestration.
-
 ```
-  CONTROL PLANE                          DATA PLANE
-  (researcher's machine or SNL server)   (wherever experiments run)
- ┌──────────────────────────────┐       ┌──────────────────────────┐
- │                              │       │                          │
- │  Orchestration (Claude +     │ specs │  Substrate Workers       │
- │    OpenClaw)                 │──────→│  (tc, tshark, tcpreplay) │
- │                              │       │                          │
- │  NetForge Service            │       │  NetGent Browser Workers │
- │  ├─ Experiment API :8000     │       │  (app workflows)         │
- │  │  (intent plane)           │       │                          │
- │  ├─ CTP Service :8001        │results│  Telemetry Collectors    │
- │  │  (representation plane)   │←──────│  (pcap, tcp-info)        │
- │  └─ Substrate Worker :8002   │       │                          │
- │     (execution plane)        │       └──────────────────────────┘
- │                              │
- │  NetGent Service :8003       │
- │  Telemetry Service :8004       │
- └──────────────────────────────┘
+  CONTROL PLANE                              DATA PLANE
+  (researcher / SNL server)                  (wherever experiments run)
+ ┌──────────────────────────────────┐       ┌──────────────────────────┐
+ │                                  │       │                          │
+ │  Orchestration  :8005            │ specs │  Substrate Workers :8002 │
+ │  (LLM + LangGraph + OpenClaw)    │──────►│  (tc, tshark, tcpreplay) │
+ │                                  │       │                          │
+ │  Experiment API :8000            │       │  Browserless +           │
+ │  (intent plane)                  │       │  NetGent worker          │
+ │                                  │       │  (app workflows)         │
+ │  CTP Service    :8001            │       │                          │
+ │  (representation plane)          │results│                          │
+ │                                  │◄──────│                          │
+ │  NetGent Service:8003            │       │                          │
+ │  Telemetry      :8004            │       │                          │
+ └──────────────────────────────────┘       └──────────────────────────┘
+                                            (PCAPs, tcp-info, metrics)
 ```
 
-The **Control Plane** runs on the researcher's machine or an SNL server — it orchestrates experiments and aggregates results. The **Data Plane** runs on infrastructure where experiments execute (can be the same machine or remote hosts).
+The **Control Plane** runs on the researcher's machine or an SNL server. The **Data Plane** runs wherever experiments execute — locally via Docker, on AWS EC2 in hybrid mode, or in future on remote campus hosts.
 
-### NetForge Service
+### Core Services
 
-The NetForge Service is the core of the platform, implementing NetForge's three-plane disaggregation:
+| Service | Port | Plane | Purpose |
+|---|---|---|---|
+| **Experiment API** | 8000 | Intent | Receives experiment specs, coordinates CTP + Substrate, persists status. |
+| **CTP Service** | 8001 | Representation | Stores Cross-Traffic Profiles. Supports `extract`, `select`, `transform`, `merge`, `replay`. |
+| **Substrate Worker** | 8002 | Execution | Applies tc qdisc/netem, runs tshark capture, replays CTP via tcpreplay. Sole owner of all kernel-level network operations. |
+| **NetGent Service** | 8003 | Application | Browser/shell workflow engine (NFA-based). Async job API. |
+| **Telemetry Service** | 8004 | Storage | Stores results + artifacts (PCAPs, JSON), exposes filtered queries. |
+| **Orchestration** | 8005 | Agentic | NL intent → ParsedIntent → Cartesian product of experiments → end-to-end execution. |
 
-**Intent Plane (Experiment API, port 8000)**: Accepts bottleneck-regime specifications via `Link()` and `Bottleneck()` objects that define static attributes (capacity, base latency, buffering/AQM) independently of any execution context. Orchestrates the CTP Service and Substrate Worker.
+### How a Single Experiment Runs
 
-**Representation Plane (CTP Service, port 8001)**: Manages Cross-Traffic Profiles — reusable representations of dynamic congestion pressure extracted from production packet traces. Supports CTP operations: `extract()`, `select()`, `transform()`, `merge()`, `replay()`. Stores and indexes CTPs by statistical descriptors (intensity, burstiness, heterogeneity).
-
-**Execution Plane (Substrate Worker, port 8002)**: Instantiates bottleneck-regime specifications on concrete infrastructure using Linux traffic control (`tc`), `tshark` for capture, and `tcpreplay` for CTP replay. Verifies that configured shaping matches intended specification.
-
-### Supporting Services
-
-**NetGent Service (port 8003)**: Application workflow service for browser and shell tasks. It persists natural-language workflow specs, generates executable workflows asynchronously, and runs them via job-based `generate -> execute -> result` APIs.
-
-**Telemetry Service (port 8004)**: Telemetry storage and results query interface. Tags measurements with contextual metadata (static config, dynamic CTP, application, transport) to enable rich queries across experimental dimensions.
-
-**Orchestration (port 8005)**: Claude + OpenClaw integration for natural-language intent interpretation. Translates researcher goals into experiment specifications, coordinates multi-step experimental campaigns, and supports the hypothesis → experimentation → analysis → refinement loop.
-
-### Service Directory
-
-| Service | Port | Deliverable | NetForge Plane | Lead |
-|---------|------|-------------|----------------|------|
-| Experiment API | 8000 | D1 | Intent | Jaber, Satyam, Snithik |
-| CTP Service | 8001 | D1 | Representation | Jaber, Satyam, Snithik |
-| Substrate Worker | 8002 | D1 | Execution | Jaber, Satyam, Snithik |
-| NetGent Service | 8003 | D2 | Application | Eugene + Jaber |
-| Telemetry Service | 8004 | D3 | Data Persistence | Manni |
-| Orchestration | 8005 | D5 | Agentic | Haarika |
-
-## Deliverables
-
-### D1: NetForge Service — NetReplica as SOA (PRIORITY: CRITICAL)
-**Lead**: Jaber | **Supporting**: Satyam, Snithik | **Start**: `services/experiment-api/README.md`
-
-Refactor NetReplica's monolithic `controller.py` into three services mapping to NetForge's three planes. The Experiment API orchestrates CTP Service and Substrate Worker. An experiment can be created, executed on a local machine with bottleneck emulation via `docker compose up`, and telemetry collected — all from a single API call.
-
-**Key constraint**: Jaber pursues two parallel tracks. Track A (research priority): refactor the monolith with clean dataclasses, typed interfaces, and structured output. Track B (engineering): scaffold the three-service SOA from the same dataclass contracts. The contracts are identical — convergence is mechanical.
-
-### D2: NetGent Programmatic API (PRIORITY: HIGH)
-**Lead**: Eugene + Jaber | **Start**: `services/netgent-service/README.md`
-
-Expose NetGent's workflow engine as a programmatic API that agents can call. The current service contract is asynchronous and job-based: create a workflow with `POST /workflows/generate`, run it with `POST /workflows/execute`, and poll `GET /workflows/result/{job_id}` for both phases.
-
-### D3: Telemetry and Storage Pipeline (PRIORITY: HIGH)
-**Lead**: Manni | **Start**: `services/telemetry-service/README.md`
-
-Build the data backbone: collect, tag, store, query. Every experiment result is tagged with its full context (static bottleneck config, dynamic CTP, application, transport protocol). Enables queries like: "Show me YouTube QoE under all CUBIC flows across capacity 10–50 Mbps."
-
-### D4: Evaluation Pipeline (PRIORITY: STRETCH)
-Automated evaluation of generated datasets against production baselines. Stretch goal that ramps up after D1–D3 integration.
-
-### D5: Agentic Orchestration — OpenClaw + Claude (PRIORITY: VERY CRITICAL)
-**Lead**: Haarika | **Start**: `services/orchestration/README.md`
-
-The agentic interface is what makes the thin waist actually usable. Natural-language experiment specification, tool/skill declarations for all services, multi-step reasoning about network conditions and applications. Ramps up after NSDI camera-ready.
-
-## Development Timeline (4 Weeks)
-
-Three independent tracks running in parallel. Phase 1 (weeks 1–2) is independent work against mocked interfaces. Phase 2 (weeks 3–4) is integration. No one should be blocked by anyone else for the first two weeks.
-
-### Weeks 1–2: Independent Development
-
-| Track | Owner | Work |
-|-------|-------|------|
-| **NetForge Service** | Jaber, Satyam, Snithik | Track A: dataclasses, typed interfaces, `run_experiment()`. Track B: three-service SOA scaffold with mocked CTP and substrate |
-| **NetGent API** | Eugene + Jaber | Job-based workflow API, browser/shell execution integration, TOOLS.md for OpenClaw |
-| **Telemetry + Storage** | Manni | Schema design, contextual tree tagging, query API with mock data |
-| **Orchestration** | Haarika | OpenClaw integration, tool declarations, intent → experiment mapping (after NSDI camera-ready) |
-| **Architecture + CI** | Sylee | Service boundary review, Docker Compose, CI/CD, testing infrastructure |
-
-### Weeks 3–4: Integration and Demo
-
-| Track | Work |
-|-------|------|
-| **Service integration** | Connect NetForge Service → Telemetry Service → Orchestration |
-| **End-to-end demo** | "Compare YouTube vs Zoom at 10, 25, 50 Mbps" generates experiments, executes, stores results |
-| **Testing** | Integration tests across service boundaries, bottleneck state verification |
-| **Documentation** | API reference, deployment guide, tutorials |
-
-### Coordination
-- Weekly Friday demo (show working software)
-- Async Slack updates
-- Max 1hr/week overhead — no daily standups
+1. Orchestrator parses the NL intent (LLM call) into `ParsedIntent`.
+2. `ExperimentGenerator` expands it into one `GeneratedExperiment` per (capacity × latency × CC) combination, each with a globally-unique ID (see *Experiment IDs* below).
+3. For each spec, the orchestrator:
+   - Provisions an ephemeral substrate worker (local Docker by default).
+   - Picks a CTP from the CTP Service that matches the intensity range.
+   - Tells the worker to fetch the CTP PCAPs.
+   - Synchronizes three actions on the next whole-minute boundary: start tshark capture, start `tcpreplay-edit` background traffic, and start the application workflow.
+   - Stops replay, drains capture, streams the resulting PCAP to telemetry.
+   - Destroys the worker.
 
 ## Quick Start
 
 ### Prerequisites
+- Docker + Docker Compose (24+).
+- Python 3.10+ (for local development).
+- An LLM API key — `ANTHROPIC_API_KEY` (default) or `GOOGLE_API_KEY` (if you switch the orchestrator to Gemini).
 
-- Docker and Docker Compose (tested on Docker 24+)
-- Python 3.10+
-- Git
-
-### 1. Clone and Build
-
+### 1. Clone and configure
 ```bash
 git clone git@github.com:SNL-UCSB/agentic-thin-waist.git
 cd agentic-thin-waist
-cp .env.example .env
-make build
+cp .env.example .env        # then edit .env with your API key + paths
 ```
 
-### 2. Start Services
+### 2. Build and start the stack
+```bash
+docker compose build                       # build all images
+sudo docker compose up -d                       # start everything (detached)
+docker compose ps                          # service status
+docker compose logs -f                     # tail logs for everything
+docker compose logs -f orchestration       # tail one service
+docker compose down                        # stop
+docker compose down -v                     # stop + remove volumes
+```
+
+Equivalent `make` shortcuts are defined in the [Makefile](Makefile):
+
+| Make target | Underlying command | Extras |
+|---|---|---|
+| `make build` | `docker compose build` | — |
+| `make up` | `docker compose up -d` | polls `localhost:8000/health` for up to 30s, then prints service URLs |
+| `make status` | `docker compose ps` | — |
+| `make logs` | `docker compose logs -f` | — |
+| `make logs-service SERVICE=<x>` | `docker compose logs -f <x>` | — |
+| `make down` | `docker compose down` | — |
+| `make clean` | `docker compose down -v` | also removes `__pycache__`, `*.pyc`, `.pytest_cache`, `build/`, `dist/`, `*.egg-info` |
+
+Once the stack is up, the services are reachable on:
+
+```
+Experiment API     http://localhost:8000
+CTP Service        http://localhost:8001
+Substrate Worker   http://localhost:8002
+NetGent Service    http://localhost:8003
+Telemetry          http://localhost:8004
+Orchestration      http://localhost:8005
+```
+
+### 3. Submit a research intent
+The recommended entry point is the orchestrator's `POST /intent`:
 
 ```bash
-make up
+curl -X POST http://localhost:8005/intent \
+  -H "Content-Type: application/json" \
+  -d '{
+    "intent": "Run iperf3 at 40 Mbps with 100 ms latency under cubic and bbr",
+    "context":     { "duration_seconds": 60, "num_trials": 1 },
+    "preferences": {},
+    "workflow_source": "auto"
+  }'
 ```
 
-This starts the NetForge Service (Experiment API, CTP Service, Substrate Worker), NetGent, Telemetry, and Orchestration via Docker Compose.
+The response is `202 Accepted` with an `orchestration_id`. Track progress and pull results:
 
-### 3. Run Your First Experiment
-
-```python
-from shared.clients import ExperimentAPIClient
-
-client = ExperimentAPIClient("http://localhost:8000")
-
-# Specify a bottleneck regime:
-# Static attributes: 10 Mbps capacity, 50ms base latency, pFIFO queue
-# Dynamic attributes: select a bursty CTP from the corpus
-result = client.create_experiment({
-    "static": {
-        "capacity_mbps": 10,
-        "base_latency_ms": 50,
-        "qdisc": "pfifo"
-    },
-    "dynamic": {
-        "ctp_query": {"min_intensity": 3.0, "burstiness": "high"}
-    },
-    "application": "ndt",
-    "duration_seconds": 30
-})
-
-print(result.status)  # "success"
-print(result.metrics)  # throughput, RTT, loss measurements
+```bash
+curl http://localhost:8005/orchestration/<orch_id>            # status + per-experiment progress
+curl http://localhost:8005/orchestration/<orch_id>/results    # aggregated results
+curl http://localhost:8005/orchestration/<orch_id>/reasoning  # agent reasoning trace
 ```
 
-## Directory Structure
+The orchestrator generates one experiment per (capacity × latency × CC) combination, each with an ID like `iperf3_40_40_100_pfifo_cubic_a2d6e73d`.
+
+`workflow_source` controls where the NetGent workflow comes from:
+
+| Value | Meaning |
+|---|---|
+| `auto` (default) | LLM picks a confident match from the workflow library; if none, the LLM generates a fresh workflow. |
+| `library` | Library only — fail if no match. |
+| `generate` | Skip the library, always generate. |
+
+Pin a specific workflow with `"workflow_id": "test_ndt_workflow"` (overrides `workflow_source`). The deployment-wide default for `workflow_source` is `ORCH_DEFAULT_WORKFLOW_SOURCE` (defaults to `auto`).
+
+### 4. (Optional) Talk to the lower-level services directly
+You can bypass the orchestrator and exercise individual services for debugging or scripted runs:
+
+```bash
+# CTP selection
+curl -X POST http://localhost:8001/ctps/select -H 'Content-Type: application/json' \
+  -d '{"intensity_range_mbps":[1,10]}'
+
+# Apply traffic shaping on a substrate worker
+curl -X POST http://localhost:8002/shape -H 'Content-Type: application/json' \
+  -d '{"download_mbps":40,"upload_mbps":40,"latency_ms":100,"qdisc":"pfifo"}'
+
+# Start replay (note PNAT default — see below)
+curl -X POST http://localhost:8002/replay -H 'Content-Type: application/json' \
+  -d '{"ctp_file":"cluster26_tree10_profile424",
+       "pnat":"169.231.0.0/16:172.16.1.20,128.111.0.0/16:172.16.1.20",
+       "duration_seconds":60}'
+```
+
+Each service's README documents its full HTTP surface:
+- [services/experiment-api/README.md](services/experiment-api/README.md)
+- [services/ctp-service/README.md](services/ctp-service/README.md)
+- [services/substrate-worker/README.md](services/substrate-worker/README.md)
+- [services/netgent-service/README.md](services/netgent-service/README.md)
+- [services/telemetry-service/README.md](services/telemetry-service/README.md)
+- [services/orchestration/README.md](services/orchestration/README.md)
+
+## Recently-Changed Surface Area
+
+A few knobs landed recently that may not be documented elsewhere:
+
+### Experiment ID format
+Each generated experiment gets a globally-unique, descriptive ID:
+
+```
+{app}_{download_mbps}_{upload_mbps}_{latency_ms}_{aqm}_{cc}_{uuid8}
+# e.g. iperf3_40_40_100_pfifo_cubic_a2d6e73d
+#      youtube_25_25_50_fq_codel_bbr_77856217
+```
+
+`app` is taken from the first entry of `parsed_intent.applications` (slugified to lowercase alphanumerics), falling back to `application_type` (`shell` / `browser`). When `TELEMETRY_SERVICE_URL` is configured, each candidate ID is also checked against `GET /results?experiment_id=<id>&limit=1` so it can't collide with anything already persisted. Implementation: [`services/orchestration/app/engine/experiment_generator.py`](services/orchestration/app/engine/experiment_generator.py).
+
+### CTP replay PNAT
+Background cross-traffic is replayed by the substrate worker via `tcpreplay-edit --pnat=…`. The default rule sends replayed packets to **`172.16.1.20`** — distinct from the application's interface IP (`172.16.1.1`) — so a captured PCAP can be split between application traffic and replayed cross-traffic by IP.
+
+Override per experiment: set `replay_pnat_ip` on `GeneratedExperiment` (a single target IP; the standard source subnets `169.231.0.0/16` and `128.111.0.0/16` are reused).
+Override globally: set `SUBSTRATE_REPLAY_PNAT` to a full rewrite rule.
+
+Details and resolution order: [`services/orchestration/README.md` § CTP Replay & PNAT](services/orchestration/README.md#ctp-replay--pnat).
+
+### Workflow source on the intent request
+The choice between "use the workflow library" and "have the LLM generate a workflow" is now a request property, not a deployment env var. Fields on `ResearchIntent`:
+
+- `workflow_source`: `"auto"` (default — library first, fall back to generation) / `"library"` (fail if no match) / `"generate"` (skip the library).
+- `workflow_id`: explicit pin (e.g. `"test_ndt_workflow"`) — overrides `workflow_source`.
+
+Library selection is LLM-driven against the NetGent workflow index. The previous keyword inference (`iperf` → `test_iperf_workflow`, etc.) and the `ORCH_FORCE_EXISTING_WORKFLOW` / `ORCH_FORCE_WORKFLOW_ID` env vars are gone. Deployments can set `ORCH_DEFAULT_WORKFLOW_SOURCE` to change the default when the request doesn't specify one.
+
+Details: [`services/orchestration/README.md` § Workflow Source](services/orchestration/README.md#workflow-source).
+
+## Repository Layout
 
 ```
 agentic-thin-waist/
-├── README.md                          # This file
-├── docker-compose.yml                 # Development deployment
-├── docker-compose.cloud.yml           # Cloud deployment (AWS scale-out)
-├── Makefile                           # Common tasks
-├── .gitignore
+├── README.md                   # this file
+├── docker-compose.yml          # local dev stack
+├── docker-compose.cloud.yml    # AWS hybrid mode
+├── docker-compose.test.yml     # CI test stack
+├── Makefile                    # common tasks
+├── .env.example                # template — copy to .env and fill in
 │
-├── services/                          # All services
-│   ├── README.md                      # Service overview and contracts
-│   ├── experiment-api/                # Intent plane (D1)
-│   ├── ctp-service/                   # Representation plane (D1)
-│   ├── substrate-worker/              # Execution plane (D1)
-│   ├── netgent-service/               # Application workflows (D2)
-│   ├── telemetry-service/             # Telemetry + results (D3)
-│   └── orchestration/                 # Claude + OpenClaw (D5)
+├── services/
+│   ├── experiment-api/                   # Intent plane (port 8000)
+│   ├── ctp-service/                      # Representation plane (port 8001)
+│   ├── substrate-worker/                 # Execution plane (port 8002)
+│   ├── browserless-substrate-worker/     # Headless browser pool, shares ns w/ substrate-worker
+│   ├── netgent-service/                  # App workflow engine (port 8003)
+│   ├── telemetry-service/                # Results + artifact storage (port 8004)
+│   ├── orchestration/                    # NL intent → experiments (port 8005)
+│   ├── netforge-setup/                   # Substrate provisioning helpers
+│   └── analysis/                         # Result-analysis package + notebooks
 │
-├── shared/                            # Shared code and contracts
-│   ├── README.md
-│   ├── models/                        # Dataclass definitions
-│   └── clients/                       # Service client libraries
+├── shared/
+│   ├── models/                           # Dataclass contracts shared across services
+│   ├── clients/                          # Service client libraries
+│   ├── db/                               # Shared DB utilities
+│   ├── s3/                               # MinIO/S3 helpers
+│   └── tests/
 │
-├── docs/                              # Documentation
-│   ├── README.md
-│   ├── QUICKSTART.md
-│   ├── ARCHITECTURE.md
-│   ├── API_REFERENCE.md
-│   └── DEPLOYMENT.md
+├── docs/
+│   ├── vision.md
+│   ├── thin_waist_one_pager.md
+│   ├── demo_plan_april_2026.md
+│   ├── lit-survey/
+│   └── user_study/
 │
-└── tests/                             # Integration tests
-    └── README.md
+└── tests/                                # Cross-service integration tests
 ```
 
-## Existing Repositories
+## Development
 
-This platform builds on and refactors code from existing SNL-UCSB projects:
+### Build & test
+```bash
+docker compose build                       # all Docker images
+docker compose up -d                       # start stack
 
-- **NetReplica** (private SNL-UCSB) — Bottleneck emulation substrate. Key file: `controller.py` (being refactored into the Bottleneck Service).
+# Full test suite (runs orchestration-tests container, exits when done)
+docker compose -f docker-compose.yml -f docker-compose.test.yml \
+  up --build --abort-on-container-exit --exit-code-from orchestration-tests \
+  orchestration-tests
+# or: make test
 
-- **NetGent** ([github.com/SNL-UCSB/NetGent](https://github.com/SNL-UCSB/NetGent)) — NFA-based browser automation with ~100 pre-built application workflows. Being wrapped with a programmatic API for D2.
+# Repo-level pytest (no containers)
+pytest tests/ -v
+# or: make test-local
+
+# Single-service test runs
+cd services/<name> && pytest tests/ -v
+cd services/<name> && pytest tests/ -v --cov=app --cov-report=term-missing
+cd shared && pytest tests/ -v
+```
+
+### Formatting
+Black is the only enforced formatter. CI pins `black==26.3.1` and only checks changed `.py` files on PRs.
+
+```bash
+black services/ shared/ tests/
+black --check services/ shared/ tests/
+```
+
+### Branch & commit conventions
+- Branch naming: `<username>/<area>/<short-description>` (e.g. `jaber/orchestration/fix-replay`).
+- Commit prefix: the service or area being touched, e.g. `orchestration: …`, `substrate-worker: …`, `shared: …`.
+- One logical change per PR.
+
+### CI pipeline
+GitHub Actions runs per-service on PRs touching that service's path or `shared/`. Each service workflow builds the image, runs `pytest` inside it, then starts the service via Compose to verify it comes up healthy. `black.yml` checks formatting on changed files; `shared-tests.yml` runs the shared library tests when `shared/` changes.
+
+## Deliverables
+
+| ID | Lead | Service(s) | Status |
+|---|---|---|---|
+| **D1** — NetForge Service (Intent / Representation / Execution) | Jaber, Satyam, Snithik | experiment-api, ctp-service, substrate-worker | Active |
+| **D2** — NetGent Programmatic API | Eugene + Jaber | netgent-service | Active |
+| **D3** — Telemetry & Storage Pipeline | Manni | telemetry-service | Active |
+| **D4** — Evaluation Pipeline | — | analysis | Stretch |
+| **D5** — Agentic Orchestration | Haarika | orchestration | Active — NL intent end-to-end working |
 
 ## Key Concepts
 
-### Bottleneck Regime
+### Bottleneck regime
+A bottleneck regime comprises (i) a **static envelope** — capacity, base latency, buffering, and queue management — and (ii) a **time-varying congestion-pressure process** that drives contention within that envelope. NetForge makes this explicit by disaggregating static and dynamic attributes into independently controllable specs.
 
-A *bottleneck regime* comprises (i) a static envelope — capacity, base latency, buffering, and queue management policy — and (ii) a time-varying congestion-pressure process that drives contention within that envelope. NetForge makes this explicit by disaggregating static and dynamic attributes into independently controllable specifications.
+### Cross-Traffic Profile (CTP)
+A reusable representation of dynamic congestion pressure applied at a bottleneck. CTPs encode the temporal structure of aggregate demand — intensity, burstiness, heterogeneity, temporal correlations — without binding to the path, applications, or users that produced it. Operations: `extract`, `select`, `transform`, `merge`, `replay`.
 
-### Cross-Traffic Profiles (CTPs)
+### Experiment lifecycle
+1. **Intent** — researcher expresses goal in natural language (or a structured spec).
+2. **Decomposition** — orchestration parses intent and generates one experiment per parameter combination.
+3. **Static spec** — capacity, latency, buffer, AQM applied via tc.
+4. **Dynamic spec** — CTP selected from the corpus.
+5. **Execution** — Substrate Worker applies shaping, runs CTP replay, runs the application workflow.
+6. **Collection** — tshark captures upstream and downstream PCAPs.
+7. **Storage** — results + PCAPs persisted to Telemetry Service, tagged with full context.
 
-A *Cross-Traffic Profile* is a reusable representation of dynamic congestion pressure applied at a bottleneck. CTPs encode the temporal structure of aggregate demand — intensity, burstiness, heterogeneity, and temporal correlations — without binding to the particular path, applications, or users that produced it. CTPs are extracted from production packet traces via `extract()`, indexed by statistical descriptors, and applied at bottlenecks via `replay()`. Additional operations — `select()`, `transform()`, `merge()` — enable controlled reuse and composition across different static configurations.
-
-### Experiment Lifecycle
-
-1. **Intent**: Researcher expresses goal in natural language (or structured specification)
-2. **Decomposition**: Orchestration maps intent to one or more bottleneck-regime specifications
-3. **Static specification**: Each experiment defines Link() + Bottleneck() — capacity, latency, buffer, AQM
-4. **Dynamic specification**: CTP selection — choose cross-traffic profile matching desired congestion characteristics
-5. **Execution**: Substrate Worker configures tc/tshark, CTP replay drives background traffic, application runs closed-loop
-6. **Collection**: Telemetry captured at multiple vantage points (upstream, downstream)
-7. **Storage**: Results tagged with full context and persisted for querying
-
-### Four Requirements (from NetForge)
-
-The platform must simultaneously satisfy: **controllability** (independent knobs for intent, static structure, and dynamic pressure), **composability** (mix-and-match intent, structure, and pressure; select/adapt/compose), **replicability** (same specifications re-instantiate comparable regimes across runs and environments), and **fidelity** (preserve realistic queueing signals and closed-loop application–bottleneck interaction).
+### Four requirements (from NetForge)
+**Controllability** (independent knobs for intent, static structure, and dynamic pressure), **composability** (mix-and-match), **replicability** (same specs re-instantiate comparable regimes across runs), and **fidelity** (preserve realistic queueing signals and closed-loop application–bottleneck interaction).
 
 ## References
 
-- netUnicorn (CCS '23): Data-collection platform with hourglass design and service-oriented architecture
-- NetForge (SIGCOMM submission #1035): Programmable substrate for bottleneck-centric data generation via progressive disaggregation
-- BQT+ (SIGCOMM '26 submission): Robust broadband plan measurement via NFA-based interaction state spaces
-- BQT (SIGCOMM '23): Broadband plan querying tool
-- NetReplica: Private SNL-UCSB repository
-- Linux Traffic Control (tc): [man7.org/linux/man-pages/man8/tc.8.html](https://man7.org/linux/man-pages/man8/tc.8.html)
+- netUnicorn (CCS '23) — Data-collection platform with hourglass design and SOA.
+- NetForge (SIGCOMM submission #1035) — Programmable substrate for bottleneck-centric data generation.
+- BQT+ (SIGCOMM '26 submission) — NFA-based broadband plan measurement.
+- NetReplica — private SNL-UCSB repo.
+- Linux Traffic Control: https://man7.org/linux/man-pages/man8/tc.8.html
 
 ## Team
 
 - **PI**: Prof. Arpit Gupta (SNL-UCSB)
-- **Organization**: [SNL-UCSB](https://github.com/SNL-UCSB)
+- **Org**: [SNL-UCSB](https://github.com/SNL-UCSB)
 - **Repository**: [github.com/SNL-UCSB/agentic-thin-waist](https://github.com/SNL-UCSB/agentic-thin-waist) (private)
 
 ## License
 
 Proprietary — SNL-UCSB. All rights reserved.
-
----
-
-**Last Updated**: 2026-03-04
-**Status**: Architecture Phase — Sprint Kickoff

@@ -137,6 +137,8 @@ services:
       - "${BROWSERLESS_PORT:-3000}:3000"
     environment:
       - FLASK_ENV=development
+      # local_docker selects substrate local profile at worker startup.
+      - CONNECTIVITY_BACKEND=${CONNECTIVITY_BACKEND:-local_docker}
       - TELEMETRY_SERVICE_URL=http://telemetry-service:8004
       - BROWSER_PROXY_HOST=172.16.1.1
       - BROWSER_PROXY_PORT=8888
@@ -336,7 +338,7 @@ services:
       - CTP_SERVICE_URL=${CTP_SERVICE_URL:-http://ctp-service:8001}
       - CTP_SERVICE_GLOBAL=${CTP_SERVICE_GLOBAL:-http://128.111.5.236:8001}
       - ORCH_CTP_INTENSITY_DIRECTION=${ORCH_CTP_INTENSITY_DIRECTION:-}
-      - ORCH_FORCE_EXISTING_WORKFLOW=${ORCH_FORCE_EXISTING_WORKFLOW:-false}
+      - ORCH_DEFAULT_WORKFLOW_SOURCE=${ORCH_DEFAULT_WORKFLOW_SOURCE:-auto}
       - ORCHESTRATOR_LLM_PROVIDER=${ORCHESTRATOR_LLM_PROVIDER:-anthropic}
       - NETGENT_LLM_PROVIDER=${NETGENT_LLM_PROVIDER:-gemini}
       - CLAUDE_API_KEY=${CLAUDE_API_KEY:-}

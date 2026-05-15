@@ -1,6 +1,34 @@
 #!/bin/bash
 set -e
 
+# SNAT must match the host's real uplink. Docker often uses eth0; EC2 frequently
+# uses ens5, enX0, etc. Wrong interface => MASQUERADE never fires => no return
+# path for ns1/ns2 traffic => ping -c N exits 1 (no replies).
+detect_wan_if() {
+  local iface=""
+  iface="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '/dev/ {for (i=1;i<=NF;i++) if ($i=="dev") {print $(i+1); exit}}')"
+  if [ -z "$iface" ]; then
+    iface="$(ip -4 route show default 2>/dev/null | awk '{print $5; exit}')"
+  fi
+  echo "$iface"
+}
+
+WAN_IF="${SUBSTRATE_WAN_IF:-}"
+if [ -z "$WAN_IF" ]; then
+  # On some boots routing can appear a few seconds after cloud-init starts.
+  for _ in 1 2 3 4 5; do
+    WAN_IF="$(detect_wan_if)"
+    if [ -n "$WAN_IF" ] && [ -d "/sys/class/net/$WAN_IF" ]; then
+      break
+    fi
+    sleep 2
+  done
+fi
+if [ -z "$WAN_IF" ] || [ ! -d "/sys/class/net/$WAN_IF" ]; then
+  WAN_IF="eth0"
+fi
+echo "substrate setup: SNAT/MASQUERADE on ${WAN_IF} (set SUBSTRATE_WAN_IF to override)"
+
 NS1="ns1"
 NS2="ns2"
 NUM_QUEUE=4
@@ -26,7 +54,10 @@ ip netns exec $NS1 ip link set lo up
 ip netns exec $NS1 ip link set veth1 up
 ip netns exec $NS1 ip route add default via 172.16.1.2
 
-iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+# ns1 traffic is SNATed in ns2 onto 172.16.3.0/30 before entering root netns,
+# so WAN MASQUERADE must include that transit subnet as well.
+iptables -t nat -A POSTROUTING -s 172.16.1.0/30 -o "$WAN_IF" -j MASQUERADE
+iptables -t nat -A POSTROUTING -s 172.16.3.0/30 -o "$WAN_IF" -j MASQUERADE
 ip netns exec $NS1 sh -c 'echo "nameserver 8.8.8.8" > /etc/resolv.conf'
 
 ######################
@@ -51,9 +82,12 @@ ip netns exec $NS2 ip addr add 172.16.3.1/30 dev veth5
 ip netns exec $NS2 ip link set lo up
 ip netns exec $NS2 ip link set veth3 up
 ip netns exec $NS2 ip link set veth5 up
+# ns2 is the transit router between ns1 and WAN; forwarding must be enabled
+# in this namespace (root sysctl does not apply inside ns2).
+ip netns exec $NS2 sysctl -w net.ipv4.ip_forward=1
 ip netns exec $NS2 ip route add default via 172.16.3.2
 
-iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+iptables -t nat -A POSTROUTING -s 172.16.2.0/30 -o "$WAN_IF" -j MASQUERADE
 ip netns exec $NS2 iptables -t nat -A POSTROUTING -o veth5 -j MASQUERADE
 ip netns exec $NS2 sh -c 'echo "nameserver 8.8.8.8" > /etc/resolv.conf'
 
@@ -61,11 +95,17 @@ ip netns exec $NS2 sh -c 'echo "nameserver 8.8.8.8" > /etc/resolv.conf'
 # Routing adjustments  #
 ########################
 
-ip netns exec $NS1 ip route change default dev veth1
-ip netns exec $NS1 ip route change default via 172.16.3.1 dev veth1
+# Keep ns1 default gateway on its directly connected peer (veth2 in root).
+# Routing ns1 default to 172.16.3.1 is invalid from ns1 and causes total packet loss.
+ip netns exec $NS1 ip route replace default via 172.16.1.2 dev veth1
 
 ip netns exec $NS2 ip route add 172.16.1.0/30 dev veth3
 ip netns exec $NS2 ip route change default via 172.16.3.2 dev veth5
+
+# Some hardened images default FORWARD policy to DROP. Make namespace <-> WAN
+# forwarding explicit so ICMP and workflow traffic can return correctly.
+iptables -A FORWARD -i "$WAN_IF" -o veth6 -m state --state RELATED,ESTABLISHED -j ACCEPT
+iptables -A FORWARD -i veth6 -o "$WAN_IF" -j ACCEPT
 
 ################
 # Bridge setup #
@@ -74,7 +114,16 @@ ip netns exec $NS2 ip route change default via 172.16.3.2 dev veth5
 ip link add $BR type bridge
 ip link set dev veth2 master $BR
 ip link set dev veth4 master $BR
+ip addr del 172.16.1.2/30 dev veth2
+ip addr del 172.16.2.2/30 dev veth4
+ip addr add 172.16.1.2/30 dev $BR
+ip addr add 172.16.2.2/30 dev $BR
 ip link set dev $BR up
+
+# Once veth2/veth4 are bridge ports, L3 is on the bridge device itself.
+# Allow routed traffic between the bridge domain and WAN.
+iptables -A FORWARD -i "$WAN_IF" -o "$BR" -m state --state RELATED,ESTABLISHED -j ACCEPT
+iptables -A FORWARD -i "$BR" -o "$WAN_IF" -j ACCEPT
 
 ########################
 # Namespace anchors    #

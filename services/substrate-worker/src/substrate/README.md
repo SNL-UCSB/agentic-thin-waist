@@ -2,6 +2,17 @@
 
 ---
 
+## Runtime profile selection
+
+The substrate worker now supports two runtime profiles selected by
+`CONNECTIVITY_BACKEND` at container startup:
+
+- `local_docker` (default): runs `setup_local.sh` and `substrate.main_local`
+  (pre-fix local baseline behavior).
+- `aws`: runs `setup_aws.sh` and `substrate.main_aws` (current AWS-compatible behavior).
+
+---
+
 ## POST `/shape`
 
 **What it does:**
