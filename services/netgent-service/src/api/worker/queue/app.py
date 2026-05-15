@@ -17,7 +17,7 @@ from api.utils import (
 )
 from api.worker import get_queue_app
 from api.worker.constants import WORKFLOW_EXECUTE_QUEUE, WORKFLOW_GENERATE_QUEUE
-from clients.netgent import NetGent
+from main import NetGent
 
 logger = logging.getLogger(__name__)
 

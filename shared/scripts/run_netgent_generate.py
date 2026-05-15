@@ -1,7 +1,7 @@
 import asyncio
 import json
 
-from clients.netgent.src.main import NetGent
+from main import NetGent
 
 
 async def main():

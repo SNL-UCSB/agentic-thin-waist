@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict
 from app.agent.utils import get_model, log_claude_step, with_structured_output
 
 if TYPE_CHECKING:
-    from clients.netgent.src.main import NetGent
+    from main import NetGent
 
 
 class BrowserWorkflowGenerationState(MessagesState):

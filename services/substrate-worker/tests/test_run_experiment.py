@@ -145,7 +145,7 @@ class TestRunWorkflow:
         def mock_run(self_client, wf, *, parameters=None, type=None):
             return mock_result
 
-        with mock.patch("clients.netgent.src.main.NetGent.run_workflow", mock_run):
+        with mock.patch("main.NetGent.run_workflow", mock_run):
             run_experiment.run_workflow(workflow_path, "shell", parameters)
 
         assert os.environ.get("NETGENT_USE_LOCAL") == "false"
@@ -175,7 +175,7 @@ class TestRunWorkflow:
             captured_kwargs["parameters"] = parameters
             return []
 
-        with mock.patch("clients.netgent.src.main.NetGent.run_workflow", mock_run):
+        with mock.patch("main.NetGent.run_workflow", mock_run):
             run_experiment.run_workflow(
                 workflow_path, "browser", {"url": "https://test.com"}
             )
@@ -195,7 +195,7 @@ class TestRunWorkflow:
             captured_kwargs["parameters"] = parameters
             return []
 
-        with mock.patch("clients.netgent.src.main.NetGent.run_workflow", mock_run):
+        with mock.patch("main.NetGent.run_workflow", mock_run):
             run_experiment.run_workflow(workflow_path, "shell", {})
 
         assert captured_kwargs["parameters"] == {}
@@ -286,7 +286,7 @@ class TestWorkflowFiles:
             captured["type"] = type
             return [{"success": True, "output": []}]
 
-        with mock.patch("clients.netgent.src.main.NetGent.run_workflow", mock_run):
+        with mock.patch("main.NetGent.run_workflow", mock_run):
             run_experiment.run_workflow(workflow_path, "shell", params)
 
         wf = captured["workflow"]
@@ -309,7 +309,7 @@ class TestWorkflowFiles:
             captured["type"] = type
             return [{"success": True, "output": []}]
 
-        with mock.patch("clients.netgent.src.main.NetGent.run_workflow", mock_run):
+        with mock.patch("main.NetGent.run_workflow", mock_run):
             run_experiment.run_workflow(workflow_path, "shell", params)
 
         wf = captured["workflow"]
@@ -331,7 +331,7 @@ class TestWorkflowFiles:
             captured["type"] = type
             return [{"success": True, "output": []}]
 
-        with mock.patch("clients.netgent.src.main.NetGent.run_workflow", mock_run):
+        with mock.patch("main.NetGent.run_workflow", mock_run):
             run_experiment.run_workflow(workflow_path, "shell", params)
 
         wf = captured["workflow"]
@@ -362,7 +362,7 @@ class TestWorkflowFiles:
             captured["type"] = type
             return [{"success": True, "output": []}]
 
-        with mock.patch("clients.netgent.src.main.NetGent.run_workflow", mock_run):
+        with mock.patch("main.NetGent.run_workflow", mock_run):
             run_experiment.run_workflow(workflow_path, "browser", params)
 
         wf = captured["workflow"]
@@ -391,7 +391,7 @@ class TestWorkflowFiles:
 
         with (
             mock.patch("urllib.request.urlopen", side_effect=responses),
-            mock.patch("clients.netgent.src.main.NetGent.run_workflow", mock_run),
+            mock.patch("main.NetGent.run_workflow", mock_run),
             mock.patch(
                 "sys.argv",
                 [

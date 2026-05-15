@@ -1,4 +1,4 @@
-FROM python:3.10-slim
+FROM python:3.12-slim
 
 WORKDIR /app
 
@@ -10,7 +10,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY services/orchestration/ .
 COPY shared/ shared/
 
-# /app/app is added so that `netgent.src.*` absolute imports resolve correctly
-ENV PYTHONPATH="/app/app:/app/shared:${PYTHONPATH:-}"
+# /app/app is added so app.* absolute imports resolve; the netgent submodule's
+# src/ is on PYTHONPATH so its modules (engine, agents, registry, main, ...) are top-level.
+ENV PYTHONPATH="/app/app:/app/shared:/app/shared/clients/netgent/src:${PYTHONPATH:-}"
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8005"]

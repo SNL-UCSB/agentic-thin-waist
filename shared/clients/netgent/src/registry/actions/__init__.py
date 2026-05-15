@@ -1,1 +1,0 @@
-"""Action registry package."""
