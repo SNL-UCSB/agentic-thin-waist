@@ -81,7 +81,7 @@ def run_workflow(workflow_path, runtime, parameters):
     os.environ["NETGENT_USE_LOCAL"] = "false"
     os.environ["NETGENT_NAMESPACE"] = "ns1"
 
-    from clients.netgent.src.main import NetGent
+    from main import NetGent
 
     client = NetGent(
         cdp_url=os.environ.get("BROWSERLESS_WS_ENDPOINT", "").strip() or None,

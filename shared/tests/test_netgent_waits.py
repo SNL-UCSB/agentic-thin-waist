@@ -6,11 +6,11 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from clients.netgent.src.agent.subagents.browser.generate.generate import (
+from agents.subagents.browser.generate.generate import (
     _convert_action,
 )
-from clients.netgent.src.registry.actions import playwright as playwright_actions
-from clients.netgent.src.registry.actions.base import ActionContext
+from registry.actions import playwright as playwright_actions
+from registry.actions.base import ActionContext
 
 
 def test_convert_action_preserves_string_wait_seconds() -> None:

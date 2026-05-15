@@ -1219,7 +1219,7 @@ def run_experiment(req: RunExperimentRequest) -> RunExperimentResponse:
     set_congestion(CongestionRequest(algorithm=req.cca, namespace=req.cca_namespace))
 
     # 3. Run workflow
-    from clients.netgent.src.main import NetGent
+    from main import NetGent
 
     try:
         client = NetGent(

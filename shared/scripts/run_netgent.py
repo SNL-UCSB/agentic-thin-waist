@@ -17,7 +17,7 @@ import sys
 # Ensure shared packages are importable
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from clients.netgent.src.main import NetGent
+from main import NetGent
 from dotenv import load_dotenv
 
 # Load .env from repo root

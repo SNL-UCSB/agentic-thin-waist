@@ -55,7 +55,7 @@ RUN chmod +x src/browser/wrap-playwright-chrome.sh src/substrate/setup.sh src/su
     && ./src/browser/wrap-playwright-chrome.sh
 
 ENV PATH="/opt/substrate-worker-venv/bin:$PATH"
-ENV PYTHONPATH="/app/src:/shared:${PYTHONPATH:-}"
+ENV PYTHONPATH="/app/src:/shared:/shared/clients/netgent/src:${PYTHONPATH:-}"
 ENV HOST=0.0.0.0
 ENV PORT=3000
 ENV BROWSERLESS_WS_ENDPOINT=ws://127.0.0.1:3000/chromium/playwright

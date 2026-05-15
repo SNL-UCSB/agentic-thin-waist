@@ -13,13 +13,21 @@ from langgraph.runtime import Runtime
 from pydantic import BaseModel, ConfigDict
 
 from app.agent.utils import get_model, log_claude_step, with_structured_output
-from clients.netgent.src.agent.model_factory import (
-    get_llm_provider as get_netgent_llm_provider,
-    has_llm_credentials as netgent_has_llm_credentials,
-)
+from core.config import settings as _netgent_settings
+
+
+def get_netgent_llm_provider() -> str:
+    return _netgent_settings.NETGENT_LLM_PROVIDER
+
+
+def netgent_has_llm_credentials(provider: str) -> bool:
+    if provider == "anthropic":
+        return bool(_netgent_settings.ANTHROPIC_API_KEY)
+    return bool(_netgent_settings.GOOGLE_API_KEY)
+
 
 if TYPE_CHECKING:
-    from clients.netgent.src.main import NetGent
+    from main import NetGent
 
 WORKFLOW_INDEX_URL = "https://raw.githubusercontent.com/SNL-UCSB/netgent-workflow/main/workflows/index.json"
 _SCHEMAS_PATH = (
@@ -480,14 +488,14 @@ def generate(
     state: ShellWorkflowGenerationState, runtime: Runtime[ShellWorkflowContext]
 ) -> dict[str, Any]:
     """Generate a shell workflow from the intent using the NetGent shell subagent."""
-    from clients.netgent.src.agent.subagents.shell.agent import (
+    from agents.subagents.shell.agent import (
         create_agent as create_shell_netgent_agent,
     )
-    from clients.netgent.src.engine.controller import ProgramController
-    from clients.netgent.src.engine.executor import StateExecutor
-    from clients.netgent.src.engine.runner import WorkflowRunner
-    from clients.netgent.src.registry.actions.network import NETWORK_ACTIONS
-    from clients.netgent.src.registry.triggers.base_action import always_true
+    from engine.controller import ProgramController
+    from engine.executor import StateExecutor
+    from engine.runner import WorkflowRunner
+    from registry.actions.network import NETWORK_ACTIONS
+    from registry.triggers.base_action import always_true
 
     intent = state["intent"]
     runner = WorkflowRunner(
