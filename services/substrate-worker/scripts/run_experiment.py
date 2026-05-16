@@ -166,7 +166,9 @@ def main():
         args.download, args.upload, args.latency, args.qdisc, args.latency_location
     )
     apply_congestion(args.cca)
-    run_workflow(args.workflow, args.runtime, parameters, action_period=args.action_period)
+    run_workflow(
+        args.workflow, args.runtime, parameters, action_period=args.action_period
+    )
 
 
 if __name__ == "__main__":
