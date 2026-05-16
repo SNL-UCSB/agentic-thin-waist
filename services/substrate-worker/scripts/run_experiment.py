@@ -66,7 +66,7 @@ def apply_congestion(algorithm):
         sys.exit(1)
 
 
-def run_workflow(workflow_path, runtime, parameters):
+def run_workflow(workflow_path, runtime, parameters, action_period=None):
     print(f"[*] Running {runtime} workflow: {workflow_path}...")
 
     resolved_path = os.path.abspath(workflow_path)
@@ -87,7 +87,12 @@ def run_workflow(workflow_path, runtime, parameters):
         cdp_url=os.environ.get("BROWSERLESS_WS_ENDPOINT", "").strip() or None,
         headless=True,
     )
-    result = client.run_workflow(workflow, parameters=parameters, type=runtime)
+    result = client.run_workflow(
+        workflow,
+        parameters=parameters,
+        type=runtime,
+        action_period=action_period,
+    )
 
     print("\n[+] Workflow Output:")
     print(json.dumps(result, indent=2, default=str))
@@ -141,6 +146,12 @@ def main():
         metavar="KEY=VALUE",
         help="Workflow parameter as key=value (repeatable)",
     )
+    parser.add_argument(
+        "--action-period",
+        type=float,
+        default=None,
+        help="Seconds slept between actions (NetGent default: 5).",
+    )
 
     args = parser.parse_args()
 
@@ -155,7 +166,9 @@ def main():
         args.download, args.upload, args.latency, args.qdisc, args.latency_location
     )
     apply_congestion(args.cca)
-    run_workflow(args.workflow, args.runtime, parameters)
+    run_workflow(
+        args.workflow, args.runtime, parameters, action_period=args.action_period
+    )
 
 
 if __name__ == "__main__":

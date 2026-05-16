@@ -142,7 +142,9 @@ class TestRunWorkflow:
 
         mock_result = [{"success": True, "output": [{"rtt_avg": 10.5}]}]
 
-        def mock_run(self_client, wf, *, parameters=None, type=None):
+        def mock_run(
+            self_client, wf, *, parameters=None, type=None, action_period=None
+        ):
             return mock_result
 
         with mock.patch("main.NetGent.run_workflow", mock_run):
@@ -170,7 +172,9 @@ class TestRunWorkflow:
 
         captured_kwargs = {}
 
-        def mock_run(self_client, wf, *, parameters=None, type=None):
+        def mock_run(
+            self_client, wf, *, parameters=None, type=None, action_period=None
+        ):
             captured_kwargs["type"] = type
             captured_kwargs["parameters"] = parameters
             return []
@@ -191,7 +195,9 @@ class TestRunWorkflow:
 
         captured_kwargs = {}
 
-        def mock_run(self_client, wf, *, parameters=None, type=None):
+        def mock_run(
+            self_client, wf, *, parameters=None, type=None, action_period=None
+        ):
             captured_kwargs["parameters"] = parameters
             return []
 
@@ -242,7 +248,10 @@ class TestMainCLI:
         mock_shaping.assert_called_once_with(50.0, 100.0, 0.0, "pfifo", "both")
         mock_congestion.assert_called_once_with("bbr")
         mock_run.assert_called_once_with(
-            "/tmp/test.json", "shell", {"host": "8.8.8.8", "count": "5"}
+            "/tmp/test.json",
+            "shell",
+            {"host": "8.8.8.8", "count": "5"},
+            action_period=None,
         )
 
     def test_no_params_passes_empty_dict(self):
@@ -261,7 +270,9 @@ class TestMainCLI:
         ):
             run_experiment.main()
 
-        mock_run.assert_called_once_with("/tmp/test.json", "shell", {})
+        mock_run.assert_called_once_with(
+            "/tmp/test.json", "shell", {}, action_period=None
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -280,7 +291,9 @@ class TestWorkflowFiles:
         params = {"host": "1.1.1.1", "count": "5"}
         captured = {}
 
-        def mock_run(self_client, wf, *, parameters=None, type=None):
+        def mock_run(
+            self_client, wf, *, parameters=None, type=None, action_period=None
+        ):
             captured["workflow"] = wf
             captured["parameters"] = parameters
             captured["type"] = type
@@ -303,7 +316,9 @@ class TestWorkflowFiles:
         params = {"download": "true", "upload": "false"}
         captured = {}
 
-        def mock_run(self_client, wf, *, parameters=None, type=None):
+        def mock_run(
+            self_client, wf, *, parameters=None, type=None, action_period=None
+        ):
             captured["workflow"] = wf
             captured["parameters"] = parameters
             captured["type"] = type
@@ -325,7 +340,9 @@ class TestWorkflowFiles:
         params = {"host": "10.0.0.1", "port": "5201", "duration": "10"}
         captured = {}
 
-        def mock_run(self_client, wf, *, parameters=None, type=None):
+        def mock_run(
+            self_client, wf, *, parameters=None, type=None, action_period=None
+        ):
             captured["workflow"] = wf
             captured["parameters"] = parameters
             captured["type"] = type
@@ -356,7 +373,9 @@ class TestWorkflowFiles:
         params = {"url": "https://google.com"}
         captured = {}
 
-        def mock_run(self_client, wf, *, parameters=None, type=None):
+        def mock_run(
+            self_client, wf, *, parameters=None, type=None, action_period=None
+        ):
             captured["workflow"] = wf
             captured["parameters"] = parameters
             captured["type"] = type
@@ -378,7 +397,9 @@ class TestWorkflowFiles:
         workflow_path = str(WORKFLOWS_DIR / "test_shell_workflow.json")
         captured = {}
 
-        def mock_run(self_client, wf, *, parameters=None, type=None):
+        def mock_run(
+            self_client, wf, *, parameters=None, type=None, action_period=None
+        ):
             captured["workflow"] = wf
             captured["parameters"] = parameters
             captured["type"] = type
