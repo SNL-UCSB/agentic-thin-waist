@@ -103,9 +103,46 @@ curl http://localhost:8005/health
 }
 ```
 
-The LLM extracts a `ParsedIntent` (see `app/agent/orchestrator/schemas.py`) with these fields: `applications` (list of names — e.g. `["iperf3"]`, `["youtube"]`), `application_type` (`shell` or `browser`), `capacities`, `latencies`, `cc_algorithms`, `aqm_policy`, `ctp_cluster`, `ctp_capacity_range`, `duration_seconds`, `num_trials`, `workflow_parameters`.
+The LLM extracts a `ParsedIntent` (see `app/agent/orchestrator/schemas.py`) with these fields: `applications` (list of names — e.g. `["iperf3"]`, `["youtube"]`), `application_type` (`shell` or `browser`), `capacities`, `latencies`, `cc_algorithms`, `aqm_policy`, `buffer_packets`, `qdisc_params`, `ctp_cluster`, `ctp_capacity_range`, `duration_seconds`, `num_trials`, `workflow_parameters`.
 
 `ExperimentGenerator.generate(parsed_intent)` then expands the Cartesian product over `capacities × latencies × cc_algorithms` and emits one `GeneratedExperiment` per combination.
+
+### Deterministic overrides via `context`
+
+The LLM extracts shaping parameters from free-form text, which is convenient but not always reliable for parameter sweeps. Any of these keys placed in `context` **wins over** the LLM-extracted value:
+
+| `context.<key>` | Effect |
+|---|---|
+| `capacities`         | List of link capacities in Mbps (e.g. `[10, 30, 100]`) |
+| `latencies`          | List of one-way latencies in ms |
+| `cc_algorithms`      | List of CC algorithms (`["cubic", "bbr"]`) |
+| `aqm_policy`         | `pfifo`, `fq_codel`, `codel`, `cake`, … |
+| `buffer_packets`     | Bottleneck queue size in **packets** (pfifo / bfifo / sfq) |
+| `qdisc_params`       | Per-qdisc tuning, e.g. `{"limit": "500", "target": "5ms"}` for AQM |
+| `duration_seconds`   | Per-experiment duration |
+| `num_trials`         | Repeated trials |
+
+Example — pin a 30 Mbps / 50 ms / 100-packet queue iperf3 study deterministically:
+```json
+{
+  "intent": "iperf3 single-flow throughput on a small-buffer bottleneck",
+  "context": {
+    "capacities": [30],
+    "latencies": [50],
+    "buffer_packets": 100,
+    "cc_algorithms": ["cubic"],
+    "aqm_policy": "pfifo",
+    "duration_seconds": 30,
+    "num_trials": 1
+  },
+  "workflow_id": "test_iperf_workflow"
+}
+```
+
+For AQM qdiscs (e.g. `fq_codel`), put the queue size in `qdisc_params.limit` rather than `buffer_packets`:
+```json
+"context": { "aqm_policy": "fq_codel", "qdisc_params": {"limit": "500", "target": "5ms"} }
+```
 
 ---
 
@@ -192,6 +229,22 @@ The target IP `172.16.1.20` is **distinct** from the application's interface IP 
 
 Resolution order in `_build_replay_payload`:
 `spec.replay_pnat_ip` → `SUBSTRATE_REPLAY_PNAT` env → built-in default.
+
+---
+
+## Queue-Occupancy Trace (qtrace)
+
+Each experiment automatically fires a queue-occupancy sampler alongside the tshark capture. The sampler polls `tc -s -d qdisc show dev <iface>` on the bottleneck interfaces (`veth2` + `veth4` by default) and writes a JSONL trace that gets uploaded to telemetry as a `queue_trace` artifact next to the pcap.
+
+Use the trace to plot CCAnalyzer-style queue evolution — Reno sawtooth, Cubic $x^3$, BBR probes — from the real qdisc rather than an inferred simulation.
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `ORCH_QTRACE_ENABLED`  | `true` | Set to `false` to skip the qtrace thread entirely. |
+| `ORCH_QTRACE_IFACES`   | `veth2,veth4` | Comma-separated list of interfaces to sample. |
+| `ORCH_QTRACE_INTERVAL_MS` | `5` | Sampling cadence in ms (≥1). |
+
+The trace duration follows `ORCH_CAPTURE_DURATION_SECONDS` (default ≤60). Analyse with `services/analysis/queue_trace.py` or open `services/analysis/analyze_queue.ipynb`.
 
 ---
 

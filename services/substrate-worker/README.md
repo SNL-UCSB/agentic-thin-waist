@@ -33,6 +33,10 @@ The Substrate Worker is the sole owner of all kernel-level network operations: t
 | `POST` | `/replay` | Start bidirectional `tcpreplay-edit` replay of a CTP. |
 | `GET` | `/replay/{replay_id}` | Poll replay status. |
 | `DELETE` | `/replay/{replay_id}` | Stop replay. |
+| `POST` | `/qtrace` | Start a background qdisc-stats sampler (queue occupancy / drops). |
+| `GET` | `/qtrace/{qtrace_id}` | Poll qtrace status (samples_written, running/finished). |
+| `GET` | `/qtrace/{qtrace_id}/trace` | Download the JSONL trace once finished. |
+| `DELETE` | `/qtrace/{qtrace_id}` | Stop the sampler (trace retained). |
 | `POST` | `/ctp/fetch` | Fetch CTP download/upload PCAPs into `CTP_DIR`. |
 
 ### `POST /shape`
@@ -114,6 +118,49 @@ Launches two `tcpreplay-edit` processes simultaneously:
 - `duration_seconds`: optional auto-stop.
 
 Status is `"running"` while either direction is active, `"finished"` when both end.
+
+### `POST /qtrace`
+
+Start a background sampler that polls leaf-qdisc statistics on one or more interfaces and writes one JSON line per sample to `CAPTURE_DIR/<filename>.jsonl`. This is the lightweight tc-polling implementation of CCAnalyzer-style queue-occupancy traces — use it to study TCP's sawtooth / Cubic curve / BBR probes from the *real* bottleneck queue without instrumenting the kernel.
+
+```json
+{
+  "interfaces": ["veth2", "veth4"],
+  "filename": "iperf3_10mbps_qtrace",
+  "interval_ms": 5,
+  "duration_seconds": 30
+}
+```
+
+| Field | Purpose |
+|---|---|
+| `interfaces` | Interfaces to sample. Default `["veth2", "veth4"]` — the two HTB-shaped bottleneck interfaces. |
+| `filename` | Basename of the JSONL output file (no extension). |
+| `interval_ms` | Sampling cadence in ms (1–1000). `5` ≈ 200 samples/s/iface; lower values capture faster transients but cost more CPU. |
+| `duration_seconds` | Optional auto-stop. Omit and use `DELETE /qtrace/{id}` to stop manually. |
+
+Each JSONL record has the schema:
+```json
+{"t": 1716000000.123, "iface": "veth2",
+ "backlog_bytes": 12345, "backlog_pkts": 12,
+ "bytes_sent": 78901234, "pkts_sent": 56789,
+ "drops": 0, "overlimits": 0}
+```
+
+The sampler parses `tc -s -d qdisc show dev <iface>` and picks the leaf qdisc under HTB class `1:10` (the bottleneck). Counters are cumulative kernel counters — diff them to get rates. Drop the trace into `services/analysis/queue_trace.py:load_queue_trace` or open `services/analysis/analyze_queue.ipynb` to plot it.
+
+Response (200):
+```json
+{
+  "qtrace_id": "0c4a1b3e-...",
+  "status": "started",
+  "trace_path": "/home/netreplica/config/captures/iperf3_10mbps_qtrace.jsonl",
+  "interfaces": ["veth2", "veth4"],
+  "interval_ms": 5
+}
+```
+
+`GET /qtrace/{id}` returns `{ status: "running"|"finished", samples_written, ... }`. `GET /qtrace/{id}/trace` returns the JSONL once stopped (returns `409` while still running — call `DELETE /qtrace/{id}` first).
 
 ### `POST /ctp/fetch`
 
