@@ -649,6 +649,10 @@ def _run_experiment_on_worker(
             tel = run_tr.get("telemetry")
             if isinstance(tel, dict) and tel.get("result_id"):
                 telemetry_result_id = str(tel["result_id"])
+        # Surface telemetry_result_id at the top of the result dict so callers
+        # don't have to spelunk into result["run"]["telemetry"]["result_id"]
+        # (the standard analysis path needs this to fetch from /results/<id>).
+        result["telemetry_result_id"] = telemetry_result_id
         if (
             telemetry_result_id
             and capture_id

@@ -23,6 +23,7 @@ from .qoe import (
     extract_speedtest,
     extract_iperf,
     extract_ping,
+    extract_wget,
 )
 from .queue_trace import (
     load_queue_trace,
@@ -49,6 +50,7 @@ __all__ = [
     "extract_speedtest",
     "extract_iperf",
     "extract_ping",
+    "extract_wget",
     "load_queue_trace",
     "summarize_queue_trace",
     "plot_queue_occupancy",
