@@ -354,7 +354,7 @@ services:
       - SUBSTRATE_CAPTURE_DIR=${SUBSTRATE_CAPTURE_DIR:-/tmp/substrate-capture}
       - NETGENT_USE_LOCAL=${NETGENT_USE_LOCAL:-false}
       - NETGENT_NAMESPACE=${NETGENT_NAMESPACE:-ns1}
-      - PYTHONPATH=/app/app:/app:/shared:/shared/clients/netgent/src
+      - PYTHONPATH=/app:/shared:/shared/clients/netgent/src:/app/app
     depends_on:
       - experiment-api
       - ctp-service

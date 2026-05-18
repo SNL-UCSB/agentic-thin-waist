@@ -1,0 +1,31 @@
+[
+  {
+    "id": "test_wget_workflow",
+    "name": "wget Download Test",
+    "description": "Downloads a resource via wget to measure HTTP/HTTPS download performance. Parameter 'url': the URL to fetch. Parameter 'output_file': destination path (use /dev/null to discard). Parameter 'timeout_seconds': per-connection timeout. Parameter 'tries': number of retry attempts.",
+    "specification": "Fetch the resource at 'url' using wget, writing the response body to 'output_file' with a per-connection timeout of 'timeout_seconds' and at most 'tries' retries.",
+    "version": "1.0.0",
+    "type": "shell",
+    "parameters": ["url", "output_file", "timeout_seconds", "tries"],
+    "workflow": {
+      "specification": "Fetch the resource at 'url' using wget, writing the response body to 'output_file' with a per-connection timeout of 'timeout_seconds' and at most 'tries' retries.",
+      "states": [
+        {
+          "checks": [{"type": "always_true", "params": {}}],
+          "actions": [
+            {
+              "type": "wget",
+              "params": {
+                "url": "{{url}}",
+                "output_file": "{{output_file}}",
+                "timeout_seconds": "{{timeout_seconds}}",
+                "tries": "{{tries}}"
+              }
+            }
+          ]
+        }
+      ],
+      "parameters": ["url", "output_file", "timeout_seconds", "tries"]
+    }
+  }
+]

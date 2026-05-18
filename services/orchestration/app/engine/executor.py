@@ -418,6 +418,7 @@ class ToolRouter:
                     "ndt",
                     "ping",
                     "iperf3",
+                    "wget",
                 ]
             }
         if tool_name == "get_available_cc_algorithms":

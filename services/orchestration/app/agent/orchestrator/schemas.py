@@ -9,11 +9,11 @@ class ParsedIntent(BaseModel):
     """Structured output from IntentParser — Claude's extraction of experiment parameters."""
 
     applications: List[str] = Field(
-        ..., description="Application names (e.g. youtube, ndt, ping)"
+        ..., description="Application names (e.g. youtube, ndt, ping, wget)"
     )
     application_type: Literal["shell", "browser"] = Field(
         "shell",
-        description="Runtime type: 'shell' for CLI tools (ndt, iperf, ping, speedtest) or 'browser' for web applications (youtube, zoom, browsing)",
+        description="Runtime type: 'shell' for CLI tools (ndt, iperf, ping, speedtest, wget) or 'browser' for web applications (youtube, zoom, browsing)",
     )
     capacities: Optional[List[float]] = Field(
         None, description="Link capacities in Mbps"
