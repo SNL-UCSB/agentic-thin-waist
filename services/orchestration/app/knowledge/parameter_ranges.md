@@ -39,7 +39,7 @@ Claude SHOULD:
 
 Valid Active Queue Management (AQM) policies:
 
-- fifo
+- pfifo (packet FIFO; `tc` has no qdisc literally named `fifo` — always emit `pfifo`)
 - codel
 - pie
 - fq_codel (default)

@@ -545,6 +545,10 @@ def _run_experiment_on_worker(
     def _fire_workflow() -> None:
         _wait_until(start_at)
         try:
+            # tc has no plain `fifo` qdisc; coerce stale prompts to `pfifo`.
+            qdisc = spec.get("aqm_policy", "pfifo")
+            if qdisc == "fifo":
+                qdisc = "pfifo"
             r = manager.run_experiment(
                 worker_id=worker.worker_id,
                 workflow=workflow_payload,
@@ -552,7 +556,7 @@ def _run_experiment_on_worker(
                 upload_mbps=float(spec.get("upload_mbps") or capacity),
                 latency_ms=float(spec.get("latency_ms", 0)),
                 latency_location=spec.get("latency_location"),
-                qdisc=spec.get("aqm_policy", "pfifo"),
+                qdisc=qdisc,
                 buffer_packets=(
                     int(spec["buffer_packets"])
                     if spec.get("buffer_packets") is not None
