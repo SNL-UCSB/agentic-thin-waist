@@ -65,7 +65,7 @@ TOOLS: list[dict[str, Any]] = [
                 },
                 "aqm_policy": {
                     "type": "string",
-                    "description": "Queue discipline / AQM policy (fifo, codel, pie, fq_codel).",
+                    "description": "Queue discipline / AQM policy (pfifo, codel, pie, fq_codel). Use 'pfifo' for plain drop-tail; 'fifo' is NOT a valid tc qdisc.",
                 },
                 "ctp_cluster": {
                     "type": "string",

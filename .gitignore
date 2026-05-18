@@ -229,3 +229,5 @@ junk/
 # AWS provisioner cache and keys
 .agentic-thin-waist/
 *.pem
+
+docker-compose.override.yml

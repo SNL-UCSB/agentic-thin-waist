@@ -53,7 +53,8 @@ You will see detailed tables in the appended knowledge files. Here is the high-l
   - Allowed values: `cubic` (default), `bbr`, `reno`, `htcp`, `vegas`, `bic`
 - **AQM policies**:
   - Field: `aqm_policy`
-  - Allowed values: `fifo`, `codel`, `pie`, `fq_codel` (default)
+  - Allowed values: `pfifo`, `codel`, `pie`, `fq_codel` (default)
+  - Note: when the user says "fifo" or "drop-tail queue", emit `pfifo` — `tc` has no plain `fifo` qdisc.
 
 If the user does not specify a parameter, you MUST:
 

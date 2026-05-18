@@ -23,7 +23,7 @@ class ParsedIntent(BaseModel):
         None, description="Congestion control algorithms (e.g. cubic, bbr)"
     )
     aqm_policy: Optional[str] = Field(
-        None, description="AQM policy (e.g. fq_codel, fifo)"
+        None, description="AQM policy (e.g. fq_codel, pfifo, codel, pie). NOT 'fifo' — tc has no such qdisc; use 'pfifo' instead."
     )
     buffer_packets: Optional[int] = Field(
         None,
