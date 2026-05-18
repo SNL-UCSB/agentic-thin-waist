@@ -41,6 +41,20 @@ class ExperimentBundle:
                     out.append(a)
         return out
 
+    def qtrace_artifacts(self, result_id: Optional[str] = None) -> list[dict[str, Any]]:
+        """Queue-occupancy trace artifacts (JSONL written by /qtrace)."""
+        target_ids = [result_id] if result_id else list(self.artifacts_by_result.keys())
+        out = []
+        for rid in target_ids:
+            for a in self.artifacts_by_result.get(rid, []):
+                fn = (a.get("filename") or "").lower()
+                if (
+                    (a.get("artifact_type") or "").lower() == "queue_trace"
+                    or fn.endswith(".jsonl")
+                ):
+                    out.append(a)
+        return out
+
 
 class TelemetryClient:
     def __init__(self, base_url: str = DEFAULT_BASE_URL, timeout: float = 30.0):
@@ -141,5 +155,19 @@ class TelemetryClient:
         paths: list[Path] = []
         for art in bundle.pcap_artifacts(result_id=result_id):
             fname = art.get("filename") or f"{art['artifact_id']}.pcap"
+            paths.append(self.download_artifact(art["artifact_id"], out_dir / fname))
+        return paths
+
+    def download_qtraces(
+        self,
+        bundle: ExperimentBundle,
+        out_dir: str | Path,
+        result_id: Optional[str] = None,
+    ) -> list[Path]:
+        """Download every queue_trace artifact in `bundle` into `out_dir`."""
+        out_dir = Path(out_dir)
+        paths: list[Path] = []
+        for art in bundle.qtrace_artifacts(result_id=result_id):
+            fname = art.get("filename") or f"{art['artifact_id']}.jsonl"
             paths.append(self.download_artifact(art["artifact_id"], out_dir / fname))
         return paths

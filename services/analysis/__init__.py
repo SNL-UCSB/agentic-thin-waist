@@ -24,6 +24,12 @@ from .qoe import (
     extract_iperf,
     extract_ping,
 )
+from .queue_trace import (
+    load_queue_trace,
+    summarize_queue_trace,
+    plot_queue_occupancy,
+    plot_drop_rate,
+)
 
 __all__ = [
     "TelemetryClient",
@@ -43,4 +49,8 @@ __all__ = [
     "extract_speedtest",
     "extract_iperf",
     "extract_ping",
+    "load_queue_trace",
+    "summarize_queue_trace",
+    "plot_queue_occupancy",
+    "plot_drop_rate",
 ]

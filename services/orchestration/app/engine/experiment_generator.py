@@ -55,6 +55,9 @@ class ExperimentGenerator:
             "higher_value": 10,
         }
 
+        buffer_packets = parsed_intent.get("buffer_packets")
+        qdisc_params = parsed_intent.get("qdisc_params")
+
         applications = parsed_intent.get("applications") or []
         app_slug = _slugify_app(applications[0]) if applications else application_type
 
@@ -75,6 +78,10 @@ class ExperimentGenerator:
                 latency_ms=float(lat),
                 cc_algorithm=cc,
                 aqm_policy=aqm_policy,
+                buffer_packets=(
+                    int(buffer_packets) if buffer_packets is not None else None
+                ),
+                qdisc_params=qdisc_params if qdisc_params else None,
                 duration_seconds=int(duration),
                 num_trials=int(num_trials),
                 reasoning=reasoning,

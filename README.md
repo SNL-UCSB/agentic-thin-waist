@@ -236,6 +236,20 @@ Library selection is LLM-driven against the NetGent workflow index. The previous
 
 Details: [`services/orchestration/README.md` § Workflow Source](services/orchestration/README.md#workflow-source).
 
+### Queue size + queue-occupancy traces
+Bottleneck queue size is now a first-class experiment parameter. Pass it deterministically in `context`:
+
+```jsonc
+"context": {
+  "buffer_packets": 100,                      // pfifo / bfifo / sfq
+  "qdisc_params": {"limit": "500"}            // AQM qdiscs (fq_codel / codel / cake)
+}
+```
+
+Every experiment also captures a **queue-occupancy trace** via the substrate worker's `/qtrace` endpoint — `tc -s` polled at 5 ms cadence on `veth2` and `veth4`, uploaded to telemetry as a `queue_trace` artifact next to the pcap. Plot it with `services/analysis/analyze_queue.ipynb` (CCAnalyzer-style backlog + drop-rate). Disable globally with `ORCH_QTRACE_ENABLED=false`.
+
+Details: [`services/orchestration/README.md` § Queue-Occupancy Trace](services/orchestration/README.md#queue-occupancy-trace-qtrace) and [`services/substrate-worker/README.md` § POST /qtrace](services/substrate-worker/README.md#post-qtrace).
+
 ## Repository Layout
 
 ```

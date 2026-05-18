@@ -47,6 +47,7 @@ class OrchestratorState(MessagesState):
     use_examples: bool
     max_parallel_workers: int
     parsed_intent: dict[str, Any] | None
+    intent_overrides: dict[str, Any]
     experiments: list[dict[str, Any]]
     orchestration_result: dict[str, Any] | None
     reasoning_steps: list[dict[str, Any]]
@@ -144,6 +145,22 @@ def generate_experiments(
             "messages": [AIMessage(content="No parsed intent available.")],
         }
 
+    # Deterministic overrides from the request take precedence over LLM
+    # extraction — this is how callers pin parameter sweeps or queue-size
+    # studies without trusting the parser to interpret numbers correctly.
+    # IMPORTANT: the merged dict must be written back into state because
+    # the downstream ``execute_experiments`` node re-runs the generator with
+    # ``state["parsed_intent"]`` (the orchestrator manager regenerates specs
+    # rather than reusing the ones returned here). If we only merged locally
+    # the overrides would silently disappear at that re-generation.
+    overrides = state.get("intent_overrides") or {}
+    if overrides:
+        print(
+            f"[AGENT {orchestration_id}] Applying intent_overrides: "
+            f"{sorted(overrides.keys())}"
+        )
+        parsed = {**parsed, **overrides}
+
     generator = runtime.context.generator
     experiments = generator.generate(parsed)
     experiment_dicts = [e.model_dump() for e in experiments]
@@ -157,6 +174,9 @@ def generate_experiments(
 
     return {
         "experiments": experiment_dicts,
+        # Persist the merged dict so ``execute_experiments`` → ``OrchestrationManager.run``
+        # regenerates specs from the override-aware values, not the LLM-only ones.
+        "parsed_intent": parsed,
         "messages": [
             AIMessage(content=f"Generated {len(experiments)} experiment(s)."),
         ],
@@ -475,6 +495,7 @@ class OrchestratorAgent:
         max_parallel_workers: int = 1,
         workflow_source: str = "auto",
         workflow_id: str | None = None,
+        intent_overrides: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Run the full orchestration pipeline for a given intent.
 
@@ -502,6 +523,7 @@ class OrchestratorAgent:
                 "max_parallel_workers": max_parallel_workers,
                 "messages": [HumanMessage(content=intent)],
                 "parsed_intent": None,
+                "intent_overrides": intent_overrides or {},
                 "experiments": [],
                 "orchestration_result": None,
                 "reasoning_steps": [],

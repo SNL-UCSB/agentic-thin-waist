@@ -57,6 +57,7 @@ from app.engine.connectivity import ConnectivityManager, WorkerInfo
 from app.engine.executor import DownstreamClients, TelemetryApis
 from app.engine.experiment_generator import ExperimentGenerator
 from app.engine.telemetry_capture_pull import stream_capture_pcap_to_telemetry
+from app.engine.telemetry_qtrace_pull import stream_qtrace_to_telemetry
 
 logger = logging.getLogger(__name__)
 _SCHEMAS_PATH = (
@@ -280,6 +281,30 @@ def _build_capture_payload(exp_id: str, spec: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _build_qtrace_payload(exp_id: str, spec: dict[str, Any]) -> dict[str, Any]:
+    """Build the POST /qtrace request body for one experiment.
+
+    Polls leaf qdisc backlog on both bottleneck interfaces (downstream + upstream)
+    so the analysis can plot queue occupancy in either direction. Cadence is
+    bounded by ``ORCH_QTRACE_INTERVAL_MS`` (default 5 ms — 200 samples/s/iface).
+    """
+    interfaces = os.getenv("ORCH_QTRACE_IFACES", "veth2,veth4").split(",")
+    interfaces = [s.strip() for s in interfaces if s.strip()]
+    interval_ms = int(os.getenv("ORCH_QTRACE_INTERVAL_MS", "5"))
+    duration = int(
+        os.getenv(
+            "ORCH_CAPTURE_DURATION_SECONDS",
+            str(min(int(spec.get("duration_seconds", 60)), 60)),
+        )
+    )
+    return {
+        "interfaces": interfaces,
+        "filename": f"{exp_id}_qtrace",
+        "interval_ms": interval_ms,
+        "duration_seconds": duration,
+    }
+
+
 def _build_replay_payload(ctp_file: str, spec: dict[str, Any]) -> dict[str, Any]:
     """Build the POST /replay request body for one experiment.
 
@@ -438,6 +463,13 @@ def _run_experiment_on_worker(
     workflow_payload.pop("id", None)
     telemetry_url = os.getenv("TELEMETRY_SERVICE_URL", "http://telemetry-service:8004")
     capture_payload = _build_capture_payload(exp_id, spec)
+    qtrace_enabled = os.getenv("ORCH_QTRACE_ENABLED", "true").strip().lower() not in {
+        "0",
+        "false",
+        "no",
+        "off",
+    }
+    qtrace_payload = _build_qtrace_payload(exp_id, spec) if qtrace_enabled else None
     replay_payload = (
         _build_replay_payload(replay_ctp_file, spec) if replay_ctp_file else None
     )
@@ -476,6 +508,23 @@ def _run_experiment_on_worker(
             thread_errors["capture"] = str(exc)
             print(f"[CAPTURE] FAILED: {exc}")
 
+    def _fire_qtrace() -> None:
+        if qtrace_payload is None:
+            thread_results["qtrace"] = {"skipped": True, "reason": "disabled"}
+            print("[QTRACE] Skipped — disabled (ORCH_QTRACE_ENABLED=false)")
+            return
+        _wait_until(start_at)
+        try:
+            r = worker_client.start_qtrace(qtrace_payload)
+            thread_results["qtrace"] = r
+            print(
+                f"[QTRACE] Started — qtrace_id={r.get('qtrace_id')}  "
+                f"ifaces={r.get('interfaces')}  every {r.get('interval_ms')} ms"
+            )
+        except Exception as exc:
+            thread_errors["qtrace"] = str(exc)
+            print(f"[QTRACE] FAILED: {exc}")
+
     def _fire_replay() -> None:
         if replay_payload is None:
             thread_results["replay"] = {
@@ -504,8 +553,12 @@ def _run_experiment_on_worker(
                 latency_ms=float(spec.get("latency_ms", 0)),
                 latency_location=spec.get("latency_location"),
                 qdisc=spec.get("aqm_policy", "pfifo"),
-                buffer_packets=int(spec.get("buffer_packets", 1000)),
-                qdisc_params=spec.get("qdisc_params"),
+                buffer_packets=(
+                    int(spec["buffer_packets"])
+                    if spec.get("buffer_packets") is not None
+                    else 1000
+                ),
+                qdisc_params=spec.get("qdisc_params") or None,
                 cca=spec.get("cc_algorithm", "cubic"),
                 runtime=spec.get("runtime") or spec.get("application_type", "shell"),
                 parameters=workflow_parameters,
@@ -521,6 +574,7 @@ def _run_experiment_on_worker(
 
     threads = [
         threading.Thread(target=_fire_capture, name="fire-capture", daemon=True),
+        threading.Thread(target=_fire_qtrace, name="fire-qtrace", daemon=True),
         threading.Thread(target=_fire_replay, name="fire-replay", daemon=True),
         threading.Thread(target=_fire_workflow, name="fire-workflow", daemon=True),
     ]
@@ -531,6 +585,9 @@ def _run_experiment_on_worker(
 
     result["capture"] = thread_results.get(
         "capture", {"error": thread_errors.get("capture", "thread_not_run")}
+    )
+    result["qtrace"] = thread_results.get(
+        "qtrace", {"error": thread_errors.get("qtrace", "thread_not_run")}
     )
     result["replay"] = thread_results.get(
         "replay", {"error": thread_errors.get("replay", "thread_not_run")}
@@ -561,6 +618,25 @@ def _run_experiment_on_worker(
         f"[CLEANUP] Capture: status={capture_status.get('status')}  "
         f"pcap_path={capture_status.get('pcap_path', 'N/A')}"
     )
+
+    # Stop qtrace and record the on-worker trace path.
+    qtrace_id: str | None = None
+    qtrace_r = thread_results.get("qtrace")
+    if isinstance(qtrace_r, dict):
+        qtrace_id = qtrace_r.get("qtrace_id")
+    qtrace_status: dict[str, Any] = {}
+    if qtrace_id:
+        try:
+            qtrace_status = worker_client.stop_qtrace(qtrace_id)
+            print(
+                f"[CLEANUP] QTrace stopped — samples_written="
+                f"{qtrace_status.get('samples_written', '?')}  "
+                f"trace_path={qtrace_status.get('trace_path', 'N/A')}"
+            )
+        except Exception as exc:
+            qtrace_status = {"error": str(exc)}
+            print(f"[CLEANUP] Stop qtrace failed (non-fatal): {exc}")
+    result["qtrace_status"] = qtrace_status
 
     if telemetry_url.strip():
         run_tr = thread_results.get("run")
@@ -605,6 +681,38 @@ def _run_experiment_on_worker(
             logger.info(
                 "Skipping PCAP pull to telemetry: no telemetry result_id (telemetry disabled or POST /results failed)"
             )
+
+        # Upload qtrace JSONL as a queue_trace artifact on the same result_id.
+        if telemetry_result_id and qtrace_id:
+            trace_fn = os.path.basename(qtrace_status.get("trace_path") or "") or (
+                f"{exp_id}_qtrace.jsonl"
+            )
+            try:
+                qtrace_upload = stream_qtrace_to_telemetry(
+                    worker_base_url=worker.endpoint,
+                    qtrace_id=qtrace_id,
+                    telemetry_base_url=telemetry_url.strip().rstrip("/"),
+                    result_id=telemetry_result_id,
+                    trace_filename=trace_fn,
+                )
+                result["telemetry_qtrace_artifact"] = qtrace_upload
+                if qtrace_upload.get("status") == "stored":
+                    print(
+                        f"[TELEMETRY] QTrace artifact stored for result_id={telemetry_result_id}"
+                    )
+                else:
+                    print(
+                        f"[TELEMETRY] QTrace upload failed: {qtrace_upload.get('detail', qtrace_upload)}"
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "QTrace pull to telemetry failed: %s", exc, exc_info=True
+                )
+                result["telemetry_qtrace_artifact"] = {
+                    "status": "error",
+                    "detail": str(exc),
+                }
+                print(f"[TELEMETRY] QTrace pull exception: {exc}")
 
     # Keep experiment success criteria aligned with previous behavior:
     # workflow completion determines success/failure, while replay/capture/telemetry

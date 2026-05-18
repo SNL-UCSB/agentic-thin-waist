@@ -1,5 +1,8 @@
+import json
 import os
+import re
 import subprocess
+import threading
 import time
 import uuid
 from datetime import datetime
@@ -19,6 +22,7 @@ CURRENT_BOTTLENECK_STATE = None  # will hold a BottleneckState
 CURRENT_INTERFACES = None  # {"downstream_iface": ..., "upstream_iface": ...}
 ACTIVE_REPLAYS: dict = {}  # replay_id → session dict
 ACTIVE_CAPTURES: dict = {}  # capture_id → session dict
+ACTIVE_QTRACES: dict = {}  # qtrace_id → session dict
 
 CAPTURE_DIR = os.environ.get("CAPTURE_DIR", "/home/netreplica/config/captures")
 CTP_DIR = os.environ.get("CTP_DIR", "/home/netreplica/config/ctp")
@@ -144,6 +148,51 @@ class CaptureStatusResponse(BaseModel):
     capture_filter: str
     start_time: str
     exit_code: Optional[int] = None
+
+
+class QTraceRequest(BaseModel):
+    """Start a background sampler that polls qdisc statistics into a JSONL file.
+
+    Each sample produces one JSON line per interface with epoch timestamp,
+    backlog (bytes + packets), cumulative bytes sent, drops, and overlimits.
+    Sampling cadence is approximate — kernel `tc -s` parsing has ~sub-ms
+    overhead and the loop sleeps for ``interval_ms``.
+    """
+
+    interfaces: List[str] = Field(
+        default_factory=lambda: ["veth2", "veth4"],
+        description="Interfaces to sample (bottleneck egress points).",
+    )
+    filename: str = Field(
+        ..., description="Output JSONL basename (e.g., 'iperf3_10mbps_qtrace')"
+    )
+    interval_ms: int = Field(
+        5,
+        ge=1,
+        le=1000,
+        description="Sampling cadence in milliseconds (≥1; 5 ms is a good default).",
+    )
+    duration_seconds: Optional[int] = Field(
+        None, description="Auto-stop after this many seconds (None = run until DELETE)."
+    )
+
+
+class QTraceResponse(BaseModel):
+    qtrace_id: str
+    status: str
+    trace_path: str
+    interfaces: List[str]
+    interval_ms: int
+
+
+class QTraceStatusResponse(BaseModel):
+    qtrace_id: str
+    status: str  # "running", "finished"
+    trace_path: str
+    interfaces: List[str]
+    interval_ms: int
+    start_time: str
+    samples_written: int
 
 
 class HealthResponse(BaseModel):
@@ -899,6 +948,267 @@ def delete_capture(capture_id: str):
     del ACTIVE_CAPTURES[capture_id]
 
     return {"capture_id": capture_id, "status": "stopped"}
+
+
+# =========================
+# Queue-occupancy trace (qtrace) — Option B: tc -s polling
+# =========================
+
+_QDISC_BACKLOG_RE = re.compile(r"backlog\s+(\d+)b\s+(\d+)p", re.IGNORECASE)
+_QDISC_SENT_RE = re.compile(
+    r"Sent\s+(\d+)\s+bytes\s+(\d+)\s+pkt\s+\(dropped\s+(\d+),\s+overlimits\s+(\d+)\s+requeues\s+(\d+)\)",
+    re.IGNORECASE,
+)
+
+
+def _sample_qdisc(iface: str) -> Dict[str, Optional[int]]:
+    """Snapshot the leaf qdisc stats for one interface.
+
+    Parses ``tc -s -d qdisc show dev <iface>``. The leaf qdisc under the HTB
+    class (e.g., ``fq_codel`` at handle ``10:`` under parent ``1:10``) is the
+    one carrying the bottleneck queue — its `backlog` is what CCAnalyzer-style
+    plots want.
+    """
+    try:
+        out = subprocess.run(
+            ["tc", "-s", "-d", "qdisc", "show", "dev", iface],
+            capture_output=True,
+            text=True,
+            timeout=1,
+        ).stdout
+    except Exception:
+        return {
+            "backlog_bytes": None,
+            "backlog_pkts": None,
+            "bytes_sent": None,
+            "pkts_sent": None,
+            "drops": None,
+            "overlimits": None,
+        }
+
+    # The output has one "qdisc ..." stanza per qdisc on the interface. We
+    # prefer the leaf qdisc that lives under HTB class 1:10 — its line starts
+    # with ``qdisc <name> 10:``. Fall back to the last stanza otherwise.
+    stanzas: List[str] = []
+    current: List[str] = []
+    for line in out.splitlines():
+        if line.startswith("qdisc "):
+            if current:
+                stanzas.append("\n".join(current))
+            current = [line]
+        else:
+            current.append(line)
+    if current:
+        stanzas.append("\n".join(current))
+
+    chosen = None
+    for s in stanzas:
+        first = s.splitlines()[0] if s else ""
+        if re.search(r"qdisc \S+ 10:", first):
+            chosen = s
+            break
+    if chosen is None and stanzas:
+        chosen = stanzas[-1]
+    if chosen is None:
+        return {
+            "backlog_bytes": None,
+            "backlog_pkts": None,
+            "bytes_sent": None,
+            "pkts_sent": None,
+            "drops": None,
+            "overlimits": None,
+        }
+
+    backlog_b = backlog_p = bytes_sent = pkts_sent = drops = overlimits = None
+    m = _QDISC_BACKLOG_RE.search(chosen)
+    if m:
+        backlog_b, backlog_p = int(m.group(1)), int(m.group(2))
+    m = _QDISC_SENT_RE.search(chosen)
+    if m:
+        bytes_sent = int(m.group(1))
+        pkts_sent = int(m.group(2))
+        drops = int(m.group(3))
+        overlimits = int(m.group(4))
+    return {
+        "backlog_bytes": backlog_b,
+        "backlog_pkts": backlog_p,
+        "bytes_sent": bytes_sent,
+        "pkts_sent": pkts_sent,
+        "drops": drops,
+        "overlimits": overlimits,
+    }
+
+
+def _qtrace_loop(
+    qtrace_id: str,
+    interfaces: List[str],
+    interval_ms: int,
+    trace_path: str,
+    duration_seconds: Optional[int],
+    stop_event: threading.Event,
+) -> None:
+    """Background sampler — runs until duration elapses or stop_event is set."""
+    session = ACTIVE_QTRACES.get(qtrace_id)
+    started = time.time()
+    period = max(interval_ms, 1) / 1000.0
+    samples = 0
+    try:
+        with open(trace_path, "a", buffering=1) as f:  # line-buffered
+            while not stop_event.is_set():
+                t = time.time()
+                for iface in interfaces:
+                    snap = _sample_qdisc(iface)
+                    record = {"t": t, "iface": iface, **snap}
+                    f.write(json.dumps(record) + "\n")
+                samples += len(interfaces)
+                if session is not None:
+                    session["samples_written"] = samples
+                if duration_seconds and (time.time() - started) >= duration_seconds:
+                    break
+                # Sleep without oversleeping past the next tick.
+                next_tick = started + (samples // len(interfaces)) * period
+                drift = max(0.0, next_tick - time.time())
+                if drift > 0:
+                    stop_event.wait(drift)
+    finally:
+        if session is not None:
+            session["finished_at"] = datetime.utcnow().isoformat()
+
+
+@app.post("/qtrace", response_model=QTraceResponse)
+def start_qtrace(cfg: QTraceRequest) -> QTraceResponse:
+    """Start a background qdisc-stats sampler.
+
+    Captures backlog (bytes + packets) and cumulative drops/overlimits/sent on
+    every requested interface every ``interval_ms`` milliseconds. The trace is
+    streamed to ``CAPTURE_DIR/<filename>.jsonl`` as one JSON object per line.
+    """
+    if not (CAPTURE_DIR or "").strip():
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "CAPTURE_DIR is empty. Set CAPTURE_DIR to a writable directory."
+            ),
+        )
+    os.makedirs(CAPTURE_DIR, exist_ok=True)
+    safe_name = os.path.basename(cfg.filename).strip()
+    if not safe_name:
+        raise HTTPException(status_code=400, detail="filename must be non-empty")
+
+    available = _get_interfaces()
+    for iface in cfg.interfaces:
+        if iface not in available:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown interface '{iface}'. Available: {available}",
+            )
+
+    trace_path = os.path.join(CAPTURE_DIR, f"{safe_name}.jsonl")
+    qtrace_id = str(uuid.uuid4())
+    stop_event = threading.Event()
+
+    session = {
+        "qtrace_id": qtrace_id,
+        "trace_path": trace_path,
+        "interfaces": list(cfg.interfaces),
+        "interval_ms": cfg.interval_ms,
+        "start_time": datetime.utcnow().isoformat(),
+        "stop_event": stop_event,
+        "samples_written": 0,
+        "duration_seconds": cfg.duration_seconds,
+    }
+    ACTIVE_QTRACES[qtrace_id] = session
+
+    thread = threading.Thread(
+        target=_qtrace_loop,
+        kwargs=dict(
+            qtrace_id=qtrace_id,
+            interfaces=list(cfg.interfaces),
+            interval_ms=cfg.interval_ms,
+            trace_path=trace_path,
+            duration_seconds=cfg.duration_seconds,
+            stop_event=stop_event,
+        ),
+        daemon=True,
+        name=f"qtrace-{qtrace_id[:8]}",
+    )
+    session["thread"] = thread
+    thread.start()
+
+    return QTraceResponse(
+        qtrace_id=qtrace_id,
+        status="started",
+        trace_path=trace_path,
+        interfaces=list(cfg.interfaces),
+        interval_ms=cfg.interval_ms,
+    )
+
+
+@app.get("/qtrace/{qtrace_id}", response_model=QTraceStatusResponse)
+def get_qtrace(qtrace_id: str) -> QTraceStatusResponse:
+    session = ACTIVE_QTRACES.get(qtrace_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail=f"QTrace not found: {qtrace_id}")
+    thread: threading.Thread = session["thread"]
+    status = "running" if thread.is_alive() else "finished"
+    return QTraceStatusResponse(
+        qtrace_id=qtrace_id,
+        status=status,
+        trace_path=session["trace_path"],
+        interfaces=session["interfaces"],
+        interval_ms=session["interval_ms"],
+        start_time=session["start_time"],
+        samples_written=session.get("samples_written", 0),
+    )
+
+
+@app.get("/qtrace/{qtrace_id}/trace")
+def download_qtrace(
+    qtrace_id: str,
+    x_capture_download_token: Annotated[
+        Optional[str], Header(alias="X-Capture-Download-Token")
+    ] = None,
+):
+    """Download the JSONL trace for a finished qtrace session."""
+    _require_capture_download_token(x_capture_download_token)
+    session = ACTIVE_QTRACES.get(qtrace_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail=f"QTrace not found: {qtrace_id}")
+    thread: threading.Thread = session["thread"]
+    if thread.is_alive():
+        raise HTTPException(
+            status_code=409,
+            detail="QTrace still running; stop it (DELETE) before downloading.",
+        )
+    trace_path = session["trace_path"]
+    if not os.path.isfile(trace_path):
+        raise HTTPException(
+            status_code=404, detail=f"Trace file not found at {trace_path}"
+        )
+    return FileResponse(
+        trace_path,
+        media_type="application/x-ndjson",
+        filename=os.path.basename(trace_path),
+    )
+
+
+@app.delete("/qtrace/{qtrace_id}")
+def stop_qtrace(qtrace_id: str):
+    session = ACTIVE_QTRACES.get(qtrace_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail=f"QTrace not found: {qtrace_id}")
+    stop_event: threading.Event = session["stop_event"]
+    thread: threading.Thread = session["thread"]
+    stop_event.set()
+    thread.join(timeout=5)
+    samples = session.get("samples_written", 0)
+    # Keep session metadata around so /qtrace/{id}/trace is still downloadable.
+    return {
+        "qtrace_id": qtrace_id,
+        "status": "stopped",
+        "samples_written": samples,
+        "trace_path": session["trace_path"],
+    }
 
 
 @app.get("/state")
