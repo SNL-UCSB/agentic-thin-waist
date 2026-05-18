@@ -36,6 +36,19 @@ _SCHEMAS_PATH = (
 _WORKFLOW_SCHEMAS: dict[str, dict[str, dict[str, Any]]] = (
     json.loads(_SCHEMAS_PATH.read_text()) if _SCHEMAS_PATH.exists() else {}
 )
+# Local shell workflows bundled with the orchestrator. Each entry follows the
+# same shape as the remote netgent-workflow library plus an optional inline
+# "workflow" field so we don't have to fetch the spec over HTTP.
+_LOCAL_SHELL_WORKFLOWS_PATH = (
+    pathlib.Path(__file__).parent.parent.parent
+    / "config"
+    / "local_shell_workflows.json"
+)
+_LOCAL_SHELL_WORKFLOWS: list[dict[str, Any]] = (
+    json.loads(_LOCAL_SHELL_WORKFLOWS_PATH.read_text())
+    if _LOCAL_SHELL_WORKFLOWS_PATH.exists()
+    else []
+)
 _IPV4_RE = re.compile(
     r"\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b"
 )
@@ -57,14 +70,25 @@ def _build_param_hint(workflow_id: str, param_names: list[str]) -> str:
 
 
 def _load_shell_workflows() -> list[dict[str, Any]]:
+    """Return shell workflows from the remote library, merged with local ones.
+
+    Local entries take precedence over remote ones with the same id so the
+    orchestrator can ship a workflow without round-tripping to GitHub.
+    """
+    remote: list[dict[str, Any]] = []
     try:
-        return [
+        remote = [
             w
             for w in requests.get(WORKFLOW_INDEX_URL, timeout=10).json()
             if w.get("type") == "shell"
         ]
     except Exception:
-        return []
+        remote = []
+
+    local_ids = {w.get("id") for w in _LOCAL_SHELL_WORKFLOWS if w.get("id")}
+    merged = [w for w in remote if w.get("id") not in local_ids]
+    merged.extend(_LOCAL_SHELL_WORKFLOWS)
+    return merged
 
 
 def _default_params_for_workflow(workflow_id: str) -> dict[str, Any] | None:
@@ -234,7 +258,10 @@ def _pin_shell_workflow(
             },
         }
 
-    if chosen_entry.get("link"):
+    inline_workflow = chosen_entry.get("workflow")
+    if isinstance(inline_workflow, dict) and inline_workflow:
+        workflow = dict(inline_workflow)
+    elif chosen_entry.get("link"):
         try:
             workflow = requests.get(chosen_entry["link"], timeout=10).json()
         except Exception:

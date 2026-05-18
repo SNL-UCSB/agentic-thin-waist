@@ -49,7 +49,7 @@ TOOLS: list[dict[str, Any]] = [
                 },
                 "application": {
                     "type": "string",
-                    "description": "Target application workflow (e.g. youtube, ndt, ping, iperf3).",
+                    "description": "Target application workflow (e.g. youtube, ndt, ping, iperf3, wget).",
                 },
                 "duration_seconds": {
                     "type": "integer",
@@ -125,7 +125,7 @@ TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "get_available_applications",
-        "description": "List applications supported by the platform (youtube, netflix, zoom, ndt, ping, iperf3, …).",
+        "description": "List applications supported by the platform (youtube, netflix, zoom, ndt, ping, iperf3, wget, …).",
         "input_schema": {"type": "object", "properties": {}},
     },
     {
@@ -180,6 +180,7 @@ def execute_tool(
                 "ndt",
                 "ping",
                 "iperf3",
+                "wget",
             ]
         }
     if tool_name == "get_available_cc_algorithms":

@@ -46,5 +46,27 @@
       "default": 20,
       "description": "Number of ping packets to send"
     }
+  },
+  "test_wget_workflow": {
+    "url": {
+      "type": "string",
+      "default": "https://speed.cloudflare.com/__down?bytes=10485760",
+      "description": "URL to download via wget (use a stable test endpoint for repeatable runs)"
+    },
+    "output_file": {
+      "type": "string",
+      "default": "/dev/null",
+      "description": "Destination path for the response body; /dev/null discards it"
+    },
+    "timeout_seconds": {
+      "type": "integer",
+      "default": 30,
+      "description": "Per-connection timeout in seconds"
+    },
+    "tries": {
+      "type": "integer",
+      "default": 1,
+      "description": "Maximum number of retry attempts"
+    }
   }
 }

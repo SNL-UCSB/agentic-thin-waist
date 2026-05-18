@@ -27,12 +27,14 @@ WORKDIR /app
 
 ENV UV_PROJECT_ENVIRONMENT=/opt/netgent-venv
 
-## Install NDT SpeedTest, Shell (NDT Client), Ping and IPerf 3
+## Install NDT SpeedTest, Shell (NDT Client), Ping, IPerf 3, and wget
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
+        ca-certificates \
         iperf3 \
         iproute2 \
         iputils-ping \
+        wget \
     && rm -rf /var/lib/apt/lists/*
 
 # Resolve and install project dependencies with uv.

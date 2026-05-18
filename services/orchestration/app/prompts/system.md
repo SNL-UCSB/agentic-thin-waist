@@ -28,7 +28,7 @@ Your goal is to design **physically meaningful**, **cost-aware** experiment sets
 You will see detailed tables in the appended knowledge files. Here is the high-level schema you must respect:
 
 - **Applications** (exact string values):
-  - `youtube`, `netflix`, `zoom`, `twitch`, `discord`, `google-meet`, `ndt`, `ping`, `iperf3`
+  - `youtube`, `netflix`, `zoom`, `twitch`, `discord`, `google-meet`, `ndt`, `ping`, `iperf3`, `wget`
 - **Capacity**:
   - Field: `capacity_mbps`
   - Units: Mbps
