@@ -237,7 +237,11 @@ def _run_experiment(
         "latency_ms": float(experiment_spec["latency_ms"]),
         "latency_location": experiment_spec.get("latency_location", "both"),
         "qdisc": experiment_spec.get("aqm_policy", "fq_codel"),
-        "buffer_packets": int(experiment_spec.get("buffer_packets", 1000)),
+        "buffer_packets": (
+            int(experiment_spec["buffer_packets"])
+            if experiment_spec.get("buffer_packets") is not None
+            else 1000
+        ),
         "qdisc_params": experiment_spec.get(
             "qdisc_params", {"target": "5ms", "interval": "100ms"}
         ),

@@ -47,6 +47,21 @@ class GeneratedExperiment(BaseModel):
     num_trials: int = 1
     cc_algorithm: str = "cubic"
     aqm_policy: str = "pfifo"
+    buffer_packets: Optional[int] = Field(
+        default=None,
+        description=(
+            "Bottleneck queue size in packets for pfifo / bfifo / sfq qdiscs. "
+            "Forwarded as ShapeRequest.buffer_packets. None → substrate-worker "
+            "default (1000)."
+        ),
+    )
+    qdisc_params: Optional[Dict[str, str]] = Field(
+        default=None,
+        description=(
+            "Per-qdisc tuning forwarded as ShapeRequest.qdisc_params "
+            "(e.g. {'limit': '500'} for AQM qdiscs)."
+        ),
+    )
     ctp_cluster: Optional[str] = None
     ctp_capacity_range: Optional[Dict[str, float]] = Field(
         default_factory=lambda: {"lower_value": 1.0, "higher_value": 10.0}

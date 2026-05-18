@@ -25,6 +25,22 @@ class ParsedIntent(BaseModel):
     aqm_policy: Optional[str] = Field(
         None, description="AQM policy (e.g. fq_codel, fifo)"
     )
+    buffer_packets: Optional[int] = Field(
+        None,
+        description=(
+            "Bottleneck queue size in PACKETS for pfifo / bfifo / sfq qdiscs. "
+            "Extract from intent phrases like 'queue size 100 packets' or "
+            "'buffer of 50 packets'. Ignored for AQM qdiscs (use qdisc_params.limit)."
+        ),
+    )
+    qdisc_params: Optional[Dict[str, str]] = Field(
+        None,
+        description=(
+            "Per-qdisc tuning passed to tc (e.g. {'limit': '500', 'target': '5ms', "
+            "'interval': '100ms'} for fq_codel/codel/cake). For AQM qdiscs, 'limit' "
+            "sets the queue size."
+        ),
+    )
     ctp_cluster: Optional[str] = Field(
         None, description="Cross-traffic profile cluster id"
     )

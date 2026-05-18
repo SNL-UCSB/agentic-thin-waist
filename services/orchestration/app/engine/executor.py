@@ -162,6 +162,15 @@ class SubstrateApis:
     def replay_substrate(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._http.post("/replay", payload)
 
+    def start_qtrace(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._http.post("/qtrace", payload)
+
+    def get_qtrace(self, qtrace_id: str) -> dict[str, Any]:
+        return self._http.get(f"/qtrace/{qtrace_id}")
+
+    def stop_qtrace(self, qtrace_id: str) -> dict[str, Any]:
+        return self._http.delete(f"/qtrace/{qtrace_id}")
+
     def fetch_ctp(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._http.post("/ctp/fetch", payload)
 
@@ -306,6 +315,15 @@ class DownstreamClients:
 
     def replay_substrate(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self.substrate_apis.replay_substrate(payload)
+
+    def start_qtrace(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self.substrate_apis.start_qtrace(payload)
+
+    def get_qtrace(self, qtrace_id: str) -> dict[str, Any]:
+        return self.substrate_apis.get_qtrace(qtrace_id)
+
+    def stop_qtrace(self, qtrace_id: str) -> dict[str, Any]:
+        return self.substrate_apis.stop_qtrace(qtrace_id)
 
     def fetch_ctp_substrate(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self.substrate_apis.fetch_ctp(payload)
@@ -462,8 +480,12 @@ class ToolRouter:
             "latency_ms": float(experiment_spec["latency_ms"]),
             "latency_location": experiment_spec.get("latency_location", "both"),
             "qdisc": experiment_spec.get("aqm_policy", "pfifo"),
-            "buffer_packets": int(experiment_spec.get("buffer_packets", 1000)),
-            "qdisc_params": experiment_spec.get("qdisc_params"),
+            "buffer_packets": (
+                int(experiment_spec["buffer_packets"])
+                if experiment_spec.get("buffer_packets") is not None
+                else 1000
+            ),
+            "qdisc_params": experiment_spec.get("qdisc_params") or None,
         }
 
         experiment_result = self.clients.run_experiment(experiment_spec)

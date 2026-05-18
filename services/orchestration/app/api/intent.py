@@ -165,6 +165,23 @@ def process_intent(orch_id: str, request: ResearchIntent) -> None:
 
         workflow = request.context.get("workflow") or {}
 
+        # Deterministic overrides from request.context: these win over whatever
+        # the LLM extracts from the intent text. Use for parameters you want to
+        # set programmatically (parameter sweeps, queue-size studies, ...).
+        intent_overrides: dict = {}
+        for key in (
+            "capacities",
+            "latencies",
+            "cc_algorithms",
+            "aqm_policy",
+            "buffer_packets",
+            "qdisc_params",
+            "duration_seconds",
+            "num_trials",
+        ):
+            if key in request.context and request.context[key] is not None:
+                intent_overrides[key] = request.context[key]
+
         agent = OrchestratorAgent()
         result = agent.run(
             orch_id,
@@ -174,6 +191,7 @@ def process_intent(orch_id: str, request: ResearchIntent) -> None:
             max_parallel_workers=max_parallel,
             workflow_source=workflow_source,
             workflow_id=workflow_id,
+            intent_overrides=intent_overrides,
         )
 
         orch_result = result.get("orchestration_result") or {}
