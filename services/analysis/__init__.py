@@ -14,6 +14,8 @@ from .pcap_analysis import (
     plot_icmp_rtt,
     plot_packet_size,
     summarize_pcap,
+    filter_downlink,
+    filter_uplink,
 )
 from .qoe import (
     print_result_summary,
@@ -43,6 +45,8 @@ __all__ = [
     "plot_icmp_rtt",
     "plot_packet_size",
     "summarize_pcap",
+    "filter_downlink",
+    "filter_uplink",
     "print_result_summary",
     "print_qoe_metrics",
     "print_transport_state",
