@@ -23,17 +23,25 @@ def test_select_ctp_uses_explicit_intensity_range(monkeypatch):
     assert seen["payload"]["query"]["intensity_range_mbps"] == [2.0, 5.0]
 
 
-def test_select_ctp_uses_default_range_when_missing(monkeypatch):
-    seen = {}
+def test_select_ctp_skips_when_range_missing(monkeypatch):
+    """A missing ctp_capacity_range means the intent did not ask for CTP.
+
+    _select_ctp must short-circuit to None without contacting the CTP service
+    so the orchestrator skips /replay and the captured pcap stays free of
+    background traffic (no 172.16.1.20 packets).
+    """
+    called = {"select": False}
 
     class FakeClients:
         def __init__(self, ctp_service_url=None):
             self.ctp_service_url = ctp_service_url
 
         def select_ctps(self, payload):
-            seen["payload"] = payload
+            called["select"] = True
             return {"ctps": []}
 
     monkeypatch.setattr(om, "DownstreamClients", FakeClients)
-    om._select_ctp(None, "exp-2")
-    assert seen["payload"]["query"]["intensity_range_mbps"] == [1.0, 10.0]
+    result = om._select_ctp(None, "exp-2")
+
+    assert result is None
+    assert called["select"] is False
