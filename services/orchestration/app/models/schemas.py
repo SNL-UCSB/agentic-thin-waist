@@ -64,7 +64,11 @@ class GeneratedExperiment(BaseModel):
     )
     ctp_cluster: Optional[str] = None
     ctp_capacity_range: Optional[Dict[str, float]] = Field(
-        default_factory=lambda: {"lower_value": 1.0, "higher_value": 10.0}
+        default=None,
+        description=(
+            "Optional CTP capacity range in Mbps for selecting background "
+            "cross-traffic. None means no CTP replay for this experiment."
+        ),
     )
     replay_pnat_ip: Optional[str] = Field(
         default=None,

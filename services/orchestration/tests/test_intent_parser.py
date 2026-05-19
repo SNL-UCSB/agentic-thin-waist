@@ -38,7 +38,10 @@ def test_intent_parser_extracts_plain_json():
     assert result["applications"] == ["youtube"]
     assert result["capacities"] == [10]
     assert result["design_type"] == ["isolated"]
-    assert result["ctp_capacity_range"] == {"lower_value": 1, "higher_value": 10}
+    # No CTP in intent → no CTP fields populated by default; downstream
+    # orchestrator will skip CTP selection + replay.
+    assert result["ctp_capacity_range"] is None
+    assert result["ctp_cluster"] is None
     assert "YouTube" in result["reasoning"] or "youtube" in result["reasoning"]
 
 
@@ -64,5 +67,6 @@ def test_intent_parser_extracts_json_from_code_block():
     assert result["applications"] == ["zoom"]
     assert result["latencies"] == [500]
     assert result["design_type"] == ["needs_clarification"]
-    assert result["ctp_capacity_range"] == {"lower_value": 1, "higher_value": 10}
+    assert result["ctp_capacity_range"] is None
+    assert result["ctp_cluster"] is None
     assert "Zoom" in result["reasoning"] or "zoom" in result["reasoning"]

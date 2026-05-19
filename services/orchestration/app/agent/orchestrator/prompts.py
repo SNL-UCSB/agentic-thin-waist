@@ -52,19 +52,26 @@ Return ONLY a JSON object containing:
 - application_type
 - capacities
 - latencies
-- cc_algorithms
-- aqm_policy
+- cc_algorithms (e.g. ["cubic"] when the intent says "cubic congestion control")
+- aqm_policy (e.g. "pfifo" when the intent says "pfifo queue" or "drop-tail")
+- buffer_packets (integer; extract from phrases like "queue size of 200 packets"
+  or "buffer of 50 packets". REQUIRED whenever a queue/buffer size is given
+  alongside pfifo/bfifo/sfq. DO NOT also put the same value in
+  qdisc_params.limit — pfifo/bfifo/sfq queue size goes ONLY in buffer_packets.)
+- qdisc_params (per-qdisc tuning for AQM qdiscs ONLY — fq_codel/codel/pie/cake,
+  e.g. {"limit": "500", "target": "5ms"}. Leave null for pfifo/bfifo/sfq.)
 - ctp_cluster
 - ctp_capacity_range (object with lower_value and higher_value, both in Mbps)
-- duration_seconds
+- duration_seconds (integer seconds, e.g. 30 when intent says "30 seconds")
 - workflow_parameters (optional workflow-specific params; for NDT download/upload booleans, infer true/false from intent such as "download only"/"no upload")
-- num_trials
+- num_trials (integer; e.g. 1 when intent says "one trial")
 - clarification_needed
 - design_type
 - reasoning
 
-If the user does not specify ctp_capacity_range, set:
-ctp_capacity_range = {"lower_value": 1, "higher_value": 10}
+If the user does not mention cross-traffic / CTP, set both
+ctp_cluster = null AND ctp_capacity_range = null. Do NOT invent a default
+range — null means "no background CTP traffic for this experiment".
 
 Intent: {{{intent}}}""",
     template_format="mustache",
