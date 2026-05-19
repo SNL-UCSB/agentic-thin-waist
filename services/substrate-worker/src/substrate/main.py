@@ -16,6 +16,30 @@ from starlette.responses import FileResponse
 # Global variables
 # =========================
 
+# Workflows dispatched via POST /run MUST traverse the shaped veth path inside
+# ns1; otherwise the captured pcap on veth2 never sees the application traffic.
+# Force the NetGent shell adapter to always wrap commands with
+# `nsenter -- ip netns exec ns1 <cmd>` regardless of how the container env was
+# set. We pin both the new (NETGENT_*) and legacy (USE_LOCAL / LINUX_NAMESPACE)
+# env names before NetGent's execution module gets loaded, and then patch
+# whatever execution-module instances already live in sys.modules so the
+# override sticks even if something has already imported it.
+os.environ["NETGENT_USE_LOCAL"] = "false"
+os.environ["NETGENT_NAMESPACE"] = "ns1"
+os.environ["USE_LOCAL"] = "false"
+os.environ["LINUX_NAMESPACE"] = "ns1"
+
+import sys as _sys
+
+for _mod_name, _mod in list(_sys.modules.items()):
+    if _mod is None:
+        continue
+    if _mod_name == "utils.execution" or _mod_name.endswith(".utils.execution"):
+        if hasattr(_mod, "USE_LOCAL"):
+            _mod.USE_LOCAL = False
+        if hasattr(_mod, "LINUX_NAMESPACE"):
+            _mod.LINUX_NAMESPACE = "ns1"
+
 app = FastAPI()
 
 CURRENT_BOTTLENECK_STATE = None  # will hold a BottleneckState
