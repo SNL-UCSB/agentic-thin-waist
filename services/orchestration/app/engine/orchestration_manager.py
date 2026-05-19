@@ -580,6 +580,15 @@ def _run_experiment_on_worker(
                 experiment_id=exp_id,
                 application=str(spec.get("application") or "").strip(),
                 telemetry_url=telemetry_url,
+                # Cap the workload at the experiment duration so a slow-but-
+                # progressing download cannot run past the capture window.
+                # On timeout the substrate kills the process but still
+                # returns partial stdout/stderr + flags the result.
+                experiment_max_seconds=(
+                    float(spec["duration_seconds"])
+                    if spec.get("duration_seconds")
+                    else None
+                ),
             )
             thread_results["run"] = r
             print(f"[WORKFLOW] Completed")

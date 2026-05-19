@@ -38,6 +38,80 @@ for _mod_name, _mod in list(_sys.modules.items()):
         if hasattr(_mod, "LINUX_NAMESPACE"):
             _mod.LINUX_NAMESPACE = "ns1"
 
+# ---------------------------------------------------------------------------
+# Per-experiment shell-command deadline
+# ---------------------------------------------------------------------------
+# See main_local.py for the full rationale. We monkey-patch the NetGent
+# shell-execution `run_subprocess` to honor a contextvars-scoped wallclock
+# deadline. On timeout the process is SIGTERMed (2s grace) then SIGKILLed
+# and a (124, partial_stdout, partial_stderr + "[terminated at deadline]")
+# tuple is returned so downstream still gets a usable ProcessOutcome.
+import contextvars as _contextvars
+import importlib as _importlib
+
+_netgent_exec = _importlib.import_module("utils.execution")
+
+_SHELL_DEADLINE_SECONDS: "_contextvars.ContextVar[Optional[float]]" = (
+    _contextvars.ContextVar("substrate_shell_deadline_seconds", default=None)
+)
+# Triggered flag uses a mutable list so the patched runner can signal back
+# across asyncio.run() boundaries — NetGent runs the workflow in a fresh
+# Context, and `.set(True)` inside that Context doesn't propagate up to the
+# sync /run handler. Mutating a shared list does.
+_SHELL_DEADLINE_TRIGGERED: "_contextvars.ContextVar[list]" = _contextvars.ContextVar(
+    "substrate_shell_deadline_triggered", default=[False]
+)
+
+_orig_run_subprocess = _netgent_exec.run_subprocess
+
+
+async def _run_subprocess_with_deadline(command):
+    import asyncio
+
+    deadline = _SHELL_DEADLINE_SECONDS.get()
+    if deadline is None or deadline <= 0:
+        return await _orig_run_subprocess(command)
+
+    proc = await asyncio.create_subprocess_exec(
+        *command,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+
+    # Keep dedicated reader tasks alive across the entire run so partial
+    # stdout/stderr buffered in the pipe is still readable after we kill the
+    # child. `communicate()` with wait_for() cancels its own internal readers
+    # on timeout, which loses the buffered data — that's why we don't use it.
+    stdout_task = asyncio.create_task(proc.stdout.read())
+    stderr_task = asyncio.create_task(proc.stderr.read())
+
+    async def _drain_and_return(returncode, deadline_hit):
+        stdout_b = await stdout_task
+        stderr_b = await stderr_task
+        stderr_text = stderr_b.decode(errors="replace")
+        if deadline_hit:
+            stderr_text += "\n[terminated at experiment-duration deadline]\n"
+        return returncode, stdout_b.decode(errors="replace"), stderr_text
+
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=deadline)
+        rc = proc.returncode if proc.returncode is not None else -1
+        return await _drain_and_return(rc, deadline_hit=False)
+    except asyncio.TimeoutError:
+        # Mutate the shared list in place so the /run handler in the parent
+        # context sees the flag set even though we're in a child asyncio Context.
+        _SHELL_DEADLINE_TRIGGERED.get()[0] = True
+        proc.terminate()
+        try:
+            await asyncio.wait_for(proc.wait(), 2.0)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+        return await _drain_and_return(124, deadline_hit=True)
+
+
+_netgent_exec.run_subprocess = _run_subprocess_with_deadline
+
 app = FastAPI()
 
 CURRENT_BOTTLENECK_STATE = None  # will hold a BottleneckState
@@ -295,12 +369,31 @@ class RunExperimentRequest(BaseModel):
     parameters: Optional[Dict[str, str]] = Field(
         None, description="Workflow parameter substitutions (key=value)"
     )
+    experiment_max_seconds: Optional[float] = Field(
+        None,
+        gt=0,
+        description=(
+            "Wallclock deadline (seconds, from the start of this /run call) for "
+            "any shell command spawned by the workflow. On timeout the process "
+            "is SIGTERMed (2s grace) then SIGKILLed; partial stdout/stderr are "
+            "captured and the run still returns a result with "
+            "terminated_at_deadline=True. Omit to let workflows run to natural "
+            "completion (legacy behavior)."
+        ),
+    )
 
 
 class RunExperimentResponse(BaseModel):
     status: str
     runtime: str
     result: List
+    terminated_at_deadline: bool = Field(
+        False,
+        description=(
+            "True iff any shell command in the workflow was force-terminated "
+            "because it exceeded experiment_max_seconds."
+        ),
+    )
 
 
 # =========================
@@ -1246,6 +1339,16 @@ def run_experiment(req: RunExperimentRequest) -> RunExperimentResponse:
     # 3. Run workflow
     from clients.netgent.src.main import NetGent
 
+    # Use a fresh mutable list so a stale flag from a prior request can't
+    # leak into this one (FastAPI runs sync endpoints in a threadpool —
+    # each thread is reused; ContextVars persist across requests on the
+    # same thread otherwise).
+    triggered_box: list[bool] = [False]
+    triggered_token = _SHELL_DEADLINE_TRIGGERED.set(triggered_box)
+    deadline_token = None
+    if req.experiment_max_seconds:
+        deadline_token = _SHELL_DEADLINE_SECONDS.set(float(req.experiment_max_seconds))
+
     try:
         client = NetGent(
             cdp_url=os.environ.get("BROWSERLESS_WS_ENDPOINT", "").strip() or None,
@@ -1258,12 +1361,18 @@ def run_experiment(req: RunExperimentRequest) -> RunExperimentResponse:
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Workflow failed: {exc}")
+    finally:
+        terminated_at_deadline = bool(triggered_box[0])
+        _SHELL_DEADLINE_TRIGGERED.reset(triggered_token)
+        if deadline_token is not None:
+            _SHELL_DEADLINE_SECONDS.reset(deadline_token)
 
     run_result = result.get("result", result) if isinstance(result, dict) else result
     return RunExperimentResponse(
         status="ok",
         runtime=req.runtime,
         result=run_result if isinstance(run_result, list) else [run_result],
+        terminated_at_deadline=terminated_at_deadline,
     )
 
 

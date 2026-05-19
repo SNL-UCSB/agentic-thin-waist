@@ -911,11 +911,18 @@ class ConnectivityManager:
         *,
         runtime: str = "shell",
         parameters: dict[str, str] | None = None,
+        experiment_max_seconds: float | None = None,
     ) -> dict[str, Any]:
         """Execute a workflow on the worker via ``POST /run``.
 
         Assumes shaping and congestion have already been applied via
         :meth:`apply_shaping` and :meth:`apply_congestion`.
+
+        ``experiment_max_seconds`` is a wallclock deadline (seconds) that the
+        substrate worker applies to any shell command in the workflow. On
+        timeout the process is SIGTERMed/SIGKILLed and the response carries
+        ``terminated_at_deadline=True`` — the run still produces partial
+        stdout/stderr and a usable pcap/qtrace pair.
         """
         info = self._backend.get_worker_info(worker_id)
         payload: dict[str, Any] = {
@@ -924,6 +931,8 @@ class ConnectivityManager:
         }
         if parameters:
             payload["parameters"] = parameters
+        if experiment_max_seconds is not None and experiment_max_seconds > 0:
+            payload["experiment_max_seconds"] = float(experiment_max_seconds)
 
         with httpx.Client(timeout=300) as client:
             resp = client.post(f"{info.endpoint}/run", json=payload)
@@ -955,6 +964,7 @@ class ConnectivityManager:
         experiment_id: str | None = None,
         application: str | None = None,
         telemetry_url: str | None = None,
+        experiment_max_seconds: float | None = None,
     ) -> dict[str, Any]:
         """Shape the network, set congestion control, and run a workflow.
 
@@ -1012,6 +1022,7 @@ class ConnectivityManager:
             workflow,
             runtime=runtime,
             parameters=parameters,
+            experiment_max_seconds=experiment_max_seconds,
         )
 
         # --- Telemetry persistence ---
