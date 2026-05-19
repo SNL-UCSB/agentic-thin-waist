@@ -308,13 +308,35 @@ Each generated experiment gets a globally-unique, descriptive ID:
 
 `app` is taken from the first entry of `parsed_intent.applications` (slugified to lowercase alphanumerics), falling back to `application_type` (`shell` / `browser`). When `TELEMETRY_SERVICE_URL` is configured, each candidate ID is also checked against `GET /results?experiment_id=<id>&limit=1` so it can't collide with anything already persisted. Implementation: [`services/orchestration/app/engine/experiment_generator.py`](services/orchestration/app/engine/experiment_generator.py).
 
+### CTP is opt-in (no default cross-traffic)
+If the intent does not mention cross-traffic, the orchestrator now treats CTP as absent: `ctp_cluster` and `ctp_capacity_range` stay `null`, `_select_ctp` short-circuits to `None`, and `/replay` is skipped on the worker. Previously a silent 1–10 Mbps default was synthesized, which polluted every captured pcap with `172.16.1.20` packets the user hadn't asked for.
+
+To opt in, the intent (or `context`) must populate `ctp_capacity_range` (`{"lower_value": float, "higher_value": float}` in Mbps) or `ctp_cluster`. Implementation: [`services/orchestration/app/engine/orchestration_manager.py`](services/orchestration/app/engine/orchestration_manager.py) (`_select_ctp`) and [`services/orchestration/app/engine/experiment_generator.py`](services/orchestration/app/engine/experiment_generator.py).
+
 ### CTP replay PNAT
-Background cross-traffic is replayed by the substrate worker via `tcpreplay-edit --pnat=…`. The default rule sends replayed packets to **`172.16.1.20`** — distinct from the application's interface IP (`172.16.1.1`) — so a captured PCAP can be split between application traffic and replayed cross-traffic by IP.
+When CTP *is* requested, background cross-traffic is replayed by the substrate worker via `tcpreplay-edit --pnat=…`. The default rule sends replayed packets to **`172.16.1.20`** — distinct from the application's interface IP (`172.16.1.1`) — so a captured PCAP can be split between application traffic and replayed cross-traffic by IP.
 
 Override per experiment: set `replay_pnat_ip` on `GeneratedExperiment` (a single target IP; the standard source subnets `169.231.0.0/16` and `128.111.0.0/16` are reused).
 Override globally: set `SUBSTRATE_REPLAY_PNAT` to a full rewrite rule.
 
 Details and resolution order: [`services/orchestration/README.md` § CTP Replay & PNAT](services/orchestration/README.md#ctp-replay--pnat).
+
+### Workloads always run inside ns1
+The substrate worker now forces every shell workflow dispatched via `POST /run` to execute inside the `ns1` network namespace (via `nsenter -- ip netns exec ns1 <cmd>`), regardless of what `NETGENT_USE_LOCAL` / `NETGENT_NAMESPACE` are set to in the container environment. This is hardcoded at module load in [`services/substrate-worker/src/substrate/main_local.py`](services/substrate-worker/src/substrate/main_local.py) (and the `main.py` / `main_aws.py` siblings).
+
+Why: with the old default, wget/iperf/etc. ran in the worker's root namespace and reached the internet via `eth0`, so the pcap on `veth2` only ever captured the substrate's iperf3 self-test instead of the actual workload. The fix routes the workload through the shaped veth pair so the existing tc rules apply to its packets.
+
+### Shell-command deadline (`experiment_max_seconds`)
+Today's wget / iperf / ping / ndt adapters have no wallclock cap of their own (wget's `--timeout` only fires on stalls), so a slow-but-progressing workload would run past the capture window. The substrate worker now bounds every shell command by a wallclock deadline:
+
+- The orchestrator passes `spec.duration_seconds` as `experiment_max_seconds` on the `/run` payload.
+- The substrate worker monkey-patches NetGent's `run_subprocess` to honor it. On timeout it sends SIGTERM, waits 2 s, then SIGKILL.
+- Partial stdout/stderr written before the kill are preserved and returned with `returncode=124` (coreutils `timeout(1)` convention).
+- The `/run` response carries `terminated_at_deadline: bool`. The pcap, qtrace, and telemetry `POST /results` all proceed as if the workflow completed normally — only the inner action shows a non-zero rc.
+
+So a 50 MiB download on a 10 Mbps / 30 s experiment now terminates cleanly at the deadline with `terminated_at_deadline=true`, ~8 MiB visible in the pcap, and the experiment row marked `success`. Applies to every shell adapter that goes through `run_subprocess` (wget, iperf, ping, ndt); browser/playwright workflows have no deadline yet. Disable by omitting `duration_seconds` (no upper bound applied).
+
+Implementation: top of [`services/substrate-worker/src/substrate/main_local.py`](services/substrate-worker/src/substrate/main_local.py); tests in [`services/substrate-worker/tests/test_shell_deadline.py`](services/substrate-worker/tests/test_shell_deadline.py).
 
 ### Workflow source on the intent request
 The choice between "use the workflow library" and "have the LLM generate a workflow" is now a request property, not a deployment env var. Fields on `ResearchIntent`:
@@ -336,7 +358,9 @@ Bottleneck queue size is now a first-class experiment parameter. Pass it determi
 }
 ```
 
-Every experiment also captures a **queue-occupancy trace** via the substrate worker's `/qtrace` endpoint — `tc -s` polled at 5 ms cadence on `veth2` and `veth4`, uploaded to telemetry as a `queue_trace` artifact next to the pcap. Plot it with `services/analysis/analyze_queue.ipynb` (CCAnalyzer-style backlog + drop-rate). Disable globally with `ORCH_QTRACE_ENABLED=false`.
+Every experiment also captures a **queue-occupancy trace** via the substrate worker's `/qtrace` endpoint — `tc -s` polled at 5 ms cadence on `veth2` and `veth4`, uploaded to telemetry as a `queue_trace` artifact next to the pcap. Plot it with [`services/analysis/analyze_queue.ipynb`](services/analysis/analyze_queue.ipynb) — the notebook now lays out **download throughput** (left), **upload throughput** (right), and per-interface queue occupancy / drop rate on a shared time axis. Disable globally with `ORCH_QTRACE_ENABLED=false`.
+
+The split uses two new pcap helpers re-exported from `services.analysis`: `filter_downlink(pkts)` keeps packets with `ip.dst == 172.16.1.1` and `filter_uplink(pkts)` keeps packets with `ip.src == 172.16.1.1` (the app client lives in `ns1` on `172.16.1.1`). On the queue side, `veth2` is the root↔ns1 leg → download queue, `veth4` is the root↔ns2 leg → upload queue.
 
 Details: [`services/orchestration/README.md` § Queue-Occupancy Trace](services/orchestration/README.md#queue-occupancy-trace-qtrace) and [`services/substrate-worker/README.md` § POST /qtrace](services/substrate-worker/README.md#post-qtrace).
 
