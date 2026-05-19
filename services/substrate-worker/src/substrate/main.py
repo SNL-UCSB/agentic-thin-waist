@@ -1110,9 +1110,7 @@ def start_qtrace(cfg: QTraceRequest) -> QTraceResponse:
     if not (CAPTURE_DIR or "").strip():
         raise HTTPException(
             status_code=422,
-            detail=(
-                "CAPTURE_DIR is empty. Set CAPTURE_DIR to a writable directory."
-            ),
+            detail=("CAPTURE_DIR is empty. Set CAPTURE_DIR to a writable directory."),
         )
     os.makedirs(CAPTURE_DIR, exist_ok=True)
     safe_name = os.path.basename(cfg.filename).strip()
