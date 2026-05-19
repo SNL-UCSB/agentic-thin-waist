@@ -2,6 +2,94 @@
 
 A service-oriented platform for bottleneck-centric network data generation. Researchers describe an experiment in natural language, and the platform decomposes it into reproducible runs against shaped, instrumented infrastructure — with cross-traffic, traffic capture, and telemetry storage handled end-to-end.
 
+## Quick Start
+
+A five-minute walkthrough: bring the stack up, run one shaped wget download, pull its IDs, and open the analysis notebook. Concepts and reference live further down; this is just the happy path.
+
+### Prerequisites
+- macOS or Linux host with **Docker + Docker Compose v2** (Docker Desktop 24+ works).
+- **`sudo`** (only if your user is not in the `docker` group — `docker compose up` needs to write to the docker socket).
+- `curl` and `jq` on the host (used for status polling below).
+- An LLM API key — `ANTHROPIC_API_KEY` *or* `GOOGLE_API_KEY` (set `ORCHESTRATOR_LLM_PROVIDER=gemini` if you use Google).
+- Python 3.10+ with `jupyter` only if you want to run the analysis notebook locally (otherwise open it in the VS Code Jupyter extension).
+
+### 1. Boot the stack
+```bash
+cp .env.example .env            # then edit .env and paste your API key
+make build                      # docker compose build
+make up                         # docker compose up -d, waits for /health, prints URLs
+make status                     # docker compose ps — every service should be (healthy)
+```
+
+> Equivalent raw commands: `docker compose build && docker compose up -d && docker compose ps`.
+
+### 2. Submit the wget intent
+The orchestrator's `POST /intent` is the recommended entry point. The `context` block deterministically pins the queue size, AQM, CC, and duration so the parser does not have to infer them from the prose.
+
+```bash
+ORCH_ID=$(curl -s -X POST http://localhost:8005/intent \
+  -H "Content-Type: application/json" \
+  -d '{
+    "intent": "Run a wget download from https://speed.cloudflare.com/__down?bytes=10485760 over a 10 Mbps bottleneck with 20 ms added latency, pfifo queue, the queue size of 200 packets and cubic congestion control. One trial, 30 seconds",
+    "workflow_source": "library",
+    "context": {
+      "aqm_policy": "pfifo",
+      "buffer_packets": 200,
+      "qdisc_params": {},
+      "cc_algorithms": ["cubic"],
+      "duration_seconds": 30,
+      "num_trials": 1
+    }
+  }' | jq -r .orchestration_id)
+echo "orchestration_id = $ORCH_ID"
+```
+
+### 3. Watch the experiment run
+```bash
+while STATUS=$(curl -s http://localhost:8005/orchestration/$ORCH_ID | jq -r .status); \
+      [ "$STATUS" != "complete" ] && [ "$STATUS" != "failed" ]; do
+  echo "$(date +%T) $STATUS"
+  sleep 5
+done
+echo "final: $STATUS"
+```
+
+Expect ~1.5–2 minutes total: ephemeral worker provisioning, the synchronized capture + run window (30 s shaped wget), then artifact upload to telemetry.
+
+### 4. Pull the experiment + result IDs
+```bash
+EXP=$(curl -s http://localhost:8005/orchestration/$ORCH_ID/results \
+        | jq -r '.results[0].experiment_id')
+RID=$(curl -s "http://localhost:8004/results?experiment_id=$EXP&limit=1" \
+        | jq -r '.results[0].result_id')
+echo "exp=$EXP  rid=$RID"
+```
+
+### 5. Analyze in the notebook
+Open [services/analysis/analyze_queue.ipynb](services/analysis/analyze_queue.ipynb) and paste the printed `$EXP` value into the second code cell:
+
+```python
+EXPERIMENT_ID = os.environ.get('EXPERIMENT_ID', 'PASTE-$EXP-HERE')
+```
+
+Then **Run All**. The notebook will:
+1. Hit `http://localhost:8004` (telemetry) and download the pcap + queue_trace.
+2. Print a contextual-tree summary (you should see `buffer_packets: 200`, `qdisc: pfifo`).
+3. Plot download/upload throughput (from pcap), bottleneck queue occupancy, and drop rate (from `/qtrace`). For a successful run, the download queue (`veth2`, blue) saturates at the 200-packet limit and the drop-rate panel spikes during the bulk transfer.
+
+Tip: skip the manual paste with
+```bash
+EXPERIMENT_ID=$EXP jupyter nbconvert --to notebook --execute --inplace services/analysis/analyze_queue.ipynb
+```
+
+### 6. Tear everything down
+```bash
+make down                       # stop containers, keep volumes (fast restart)
+make clean                      # docker compose down -v + remove pyc/pytest caches
+```
+
+`make clean` deletes telemetry's Postgres + MinIO volumes too, so any previously-stored experiment results are wiped — use `make down` if you want to keep them around.
+
 ## Vision
 
 Progress in networking research depends on data that captures how applications and protocols respond to diverse, time-varying bottleneck regimes. Generating such data systematically is hard: bottleneck dynamics are simultaneously behavior-defining and execution-dependent, making them hard to replicate, vary, or reuse across environments.
@@ -94,7 +182,9 @@ The **Control Plane** runs on the researcher's machine or an SNL server. The **D
    - Stops replay, drains capture, streams the resulting PCAP to telemetry.
    - Destroys the worker.
 
-## Quick Start
+## Detailed Setup & Reference
+
+The Quick Start above covers the happy path. This section is the reference: full prerequisite list, every `make` / `docker compose` target, the generic `/intent` payload (any application, not just wget), and direct calls into the lower-level services for debugging.
 
 ### Prerequisites
 - Docker + Docker Compose (24+).
