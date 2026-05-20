@@ -152,3 +152,77 @@ def extract_ping(result: dict[str, Any]) -> dict[str, Any]:
         "received",
     ]
     return {k: qoe[k] for k in keys if k in qoe and qoe[k] is not None}
+
+
+def _find_subprocess_outcome(
+    qoe: dict[str, Any], binary: str
+) -> Optional[dict[str, Any]]:
+    """Walk the NetGent shell `result` tree looking for an outcome whose
+    `command[0]` matches *binary*. Used by shell-action extractors (wget,
+    ping, iperf) when qoe_metrics is the raw NetGent workflow envelope
+    rather than a parsed payload.
+    """
+    states = qoe.get("result") if isinstance(qoe, dict) else None
+    if not isinstance(states, list):
+        return None
+    for state in states:
+        outputs = state.get("output") if isinstance(state, dict) else None
+        if not isinstance(outputs, list):
+            continue
+        for action_outputs in outputs:
+            if not isinstance(action_outputs, list):
+                continue
+            for outcome in action_outputs:
+                cmd = outcome.get("command") if isinstance(outcome, dict) else None
+                if isinstance(cmd, list) and cmd and cmd[0] == binary:
+                    return outcome
+    return None
+
+
+# wget's --no-verbose final line looks like:
+#   2026-05-18 15:05:24 URL:https://… [10485760] -> "/dev/null" [1]
+import re as _re
+
+_WGET_LINE_RE = _re.compile(
+    r"URL:(?P<url>\S+)\s+\[(?P<bytes>\d+)(?:/\d+)?\]\s*->\s*\"(?P<dest>[^\"]+)\""
+)
+
+
+def extract_wget(result: dict[str, Any]) -> dict[str, Any]:
+    """Pull URL, bytes transferred, returncode, and average throughput from a
+    wget shell workflow result.
+
+    Reads the NetGent workflow envelope (``qoe_metrics.result[*].output``)
+    looking for the wget subprocess outcome, then parses the ``--no-verbose``
+    summary line on stderr.
+    """
+    qoe = result.get("qoe_metrics") or {}
+    outcome = _find_subprocess_outcome(qoe, "wget")
+    if outcome is None:
+        return {}
+    out: dict[str, Any] = {
+        "command": " ".join(outcome.get("command") or []),
+        "returncode": outcome.get("returncode"),
+    }
+    stderr = outcome.get("stderr") or ""
+    m = _WGET_LINE_RE.search(stderr)
+    if m:
+        out["url"] = m.group("url")
+        out["bytes_transferred"] = int(m.group("bytes"))
+        out["destination"] = m.group("dest")
+    # Use the substrate-worker capture duration as a fallback denominator
+    # for throughput; an exact wget duration would need --report-speed=bits.
+    duration_s = (
+        (result.get("contextual_tree") or {})
+        .get("c_static", {})
+        .get("duration_seconds")
+    )
+    if (
+        "bytes_transferred" in out
+        and isinstance(duration_s, (int, float))
+        and duration_s > 0
+    ):
+        out["avg_throughput_mbps"] = round(
+            (out["bytes_transferred"] * 8) / (duration_s * 1e6), 3
+        )
+    return out

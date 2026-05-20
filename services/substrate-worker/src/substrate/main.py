@@ -16,6 +16,104 @@ from starlette.responses import FileResponse
 # Global variables
 # =========================
 
+# Workflows dispatched via POST /run MUST traverse the shaped veth path inside
+# ns1; otherwise the captured pcap on veth2 never sees the application traffic.
+# Force the NetGent shell adapter to always wrap commands with
+# `nsenter -- ip netns exec ns1 <cmd>` regardless of how the container env was
+# set. We pin both the new (NETGENT_*) and legacy (USE_LOCAL / LINUX_NAMESPACE)
+# env names before NetGent's execution module gets loaded, and then patch
+# whatever execution-module instances already live in sys.modules so the
+# override sticks even if something has already imported it.
+os.environ["NETGENT_USE_LOCAL"] = "false"
+os.environ["NETGENT_NAMESPACE"] = "ns1"
+os.environ["USE_LOCAL"] = "false"
+os.environ["LINUX_NAMESPACE"] = "ns1"
+
+import sys as _sys
+
+for _mod_name, _mod in list(_sys.modules.items()):
+    if _mod is None:
+        continue
+    if _mod_name == "utils.execution" or _mod_name.endswith(".utils.execution"):
+        if hasattr(_mod, "USE_LOCAL"):
+            _mod.USE_LOCAL = False
+        if hasattr(_mod, "LINUX_NAMESPACE"):
+            _mod.LINUX_NAMESPACE = "ns1"
+
+# ---------------------------------------------------------------------------
+# Per-experiment shell-command deadline
+# ---------------------------------------------------------------------------
+# See main_local.py for the full rationale. We monkey-patch the NetGent
+# shell-execution `run_subprocess` to honor a contextvars-scoped wallclock
+# deadline. On timeout the process is SIGTERMed (2s grace) then SIGKILLed
+# and a (124, partial_stdout, partial_stderr + "[terminated at deadline]")
+# tuple is returned so downstream still gets a usable ProcessOutcome.
+import contextvars as _contextvars
+import importlib as _importlib
+
+_netgent_exec = _importlib.import_module("utils.execution")
+
+_SHELL_DEADLINE_SECONDS: "_contextvars.ContextVar[Optional[float]]" = (
+    _contextvars.ContextVar("substrate_shell_deadline_seconds", default=None)
+)
+# Triggered flag uses a mutable list so the patched runner can signal back
+# across asyncio.run() boundaries — NetGent runs the workflow in a fresh
+# Context, and `.set(True)` inside that Context doesn't propagate up to the
+# sync /run handler. Mutating a shared list does.
+_SHELL_DEADLINE_TRIGGERED: "_contextvars.ContextVar[list]" = _contextvars.ContextVar(
+    "substrate_shell_deadline_triggered", default=[False]
+)
+
+_orig_run_subprocess = _netgent_exec.run_subprocess
+
+
+async def _run_subprocess_with_deadline(command):
+    import asyncio
+
+    deadline = _SHELL_DEADLINE_SECONDS.get()
+    if deadline is None or deadline <= 0:
+        return await _orig_run_subprocess(command)
+
+    proc = await asyncio.create_subprocess_exec(
+        *command,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+
+    # Keep dedicated reader tasks alive across the entire run so partial
+    # stdout/stderr buffered in the pipe is still readable after we kill the
+    # child. `communicate()` with wait_for() cancels its own internal readers
+    # on timeout, which loses the buffered data — that's why we don't use it.
+    stdout_task = asyncio.create_task(proc.stdout.read())
+    stderr_task = asyncio.create_task(proc.stderr.read())
+
+    async def _drain_and_return(returncode, deadline_hit):
+        stdout_b = await stdout_task
+        stderr_b = await stderr_task
+        stderr_text = stderr_b.decode(errors="replace")
+        if deadline_hit:
+            stderr_text += "\n[terminated at experiment-duration deadline]\n"
+        return returncode, stdout_b.decode(errors="replace"), stderr_text
+
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=deadline)
+        rc = proc.returncode if proc.returncode is not None else -1
+        return await _drain_and_return(rc, deadline_hit=False)
+    except asyncio.TimeoutError:
+        # Mutate the shared list in place so the /run handler in the parent
+        # context sees the flag set even though we're in a child asyncio Context.
+        _SHELL_DEADLINE_TRIGGERED.get()[0] = True
+        proc.terminate()
+        try:
+            await asyncio.wait_for(proc.wait(), 2.0)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+        return await _drain_and_return(124, deadline_hit=True)
+
+
+_netgent_exec.run_subprocess = _run_subprocess_with_deadline
+
 app = FastAPI()
 
 CURRENT_BOTTLENECK_STATE = None  # will hold a BottleneckState
@@ -96,6 +194,17 @@ class ShapeRequest(BaseModel):
             "(e.g. {'target': '5ms', 'interval': '100ms'} for codel/fq_codel). "
             "For qdiscs in the limit-based family (pfifo, bfifo, sfq) the "
             "buffer_packets field already sets 'limit'; use this for everything else."
+        ),
+    )
+
+    verify: bool = Field(
+        True,
+        description=(
+            "Run iperf3 + ping probes after applying tc rules to confirm the "
+            "bottleneck landed. Default True because /shape's whole job is "
+            "configure + validate. Pass false when calling /shape during a "
+            "concurrent pcap capture (e.g. from the orchestrator's /intent "
+            "pipeline) so the probes don't pollute the trace."
         ),
     )
 
@@ -319,12 +428,40 @@ class RunExperimentRequest(BaseModel):
     parameters: Optional[Dict[str, str]] = Field(
         None, description="Workflow parameter substitutions (key=value)"
     )
+    experiment_max_seconds: Optional[float] = Field(
+        None,
+        gt=0,
+        description=(
+            "Wallclock deadline (seconds, from the start of this /run call) for "
+            "any shell command spawned by the workflow. On timeout the process "
+            "is SIGTERMed (2s grace) then SIGKILLed; partial stdout/stderr are "
+            "captured and the run still returns a result with "
+            "terminated_at_deadline=True. Omit to let workflows run to natural "
+            "completion (legacy behavior)."
+        ),
+    )
+    verify_shaping: bool = Field(
+        False,
+        description=(
+            "Run iperf3 + ping probes after applying shaping to verify the "
+            "bottleneck state. Default False because the probes add ~10s of "
+            "non-workflow traffic to any concurrent pcap capture. Use POST "
+            "/shape (which always verifies) when you need verification."
+        ),
+    )
 
 
 class RunExperimentResponse(BaseModel):
     status: str
     runtime: str
     result: List
+    terminated_at_deadline: bool = Field(
+        False,
+        description=(
+            "True iff any shell command in the workflow was force-terminated "
+            "because it exceeded experiment_max_seconds."
+        ),
+    )
 
 
 # =========================
@@ -422,6 +559,7 @@ def apply_shaping(
     buffer_packets: int,
     qdisc_params: Optional[Dict[str, str]] = None,
     latency_location: Optional[str] = None,
+    verify: bool = False,
 ) -> List[str]:
     applied: List[str] = []
     qdisc_args = _build_qdisc_args(qdisc, buffer_packets, qdisc_params)
@@ -462,7 +600,8 @@ def apply_shaping(
         c3 = f"tc qdisc add dev {iface} parent 1:10 handle 10: {qdisc_args}"
         run_cmd(c3)
         applied.append(c3)
-    _verify_bottleneck_state()
+    if verify:
+        _verify_bottleneck_state()
     # -------------------------
     # Latency shaping (netem)
     # -------------------------
@@ -490,7 +629,8 @@ def apply_shaping(
             run_cmd(add_cmd)
             applied.append(add_cmd)
 
-    _verify_latency()
+    if verify:
+        _verify_latency()
     return applied
 
 
@@ -749,6 +889,7 @@ def shape(cfg: ShapeRequest) -> ShapeResponse:
                 buffer_packets=cfg.buffer_packets,
                 qdisc_params=cfg.qdisc_params,
                 latency_location=cfg.latency_location,
+                verify=cfg.verify,
             )
         )
     except subprocess.CalledProcessError as exc:
@@ -1086,9 +1227,7 @@ def start_qtrace(cfg: QTraceRequest) -> QTraceResponse:
     if not (CAPTURE_DIR or "").strip():
         raise HTTPException(
             status_code=422,
-            detail=(
-                "CAPTURE_DIR is empty. Set CAPTURE_DIR to a writable directory."
-            ),
+            detail=("CAPTURE_DIR is empty. Set CAPTURE_DIR to a writable directory."),
         )
     os.makedirs(CAPTURE_DIR, exist_ok=True)
     safe_name = os.path.basename(cfg.filename).strip()
@@ -1515,6 +1654,7 @@ def run_experiment(req: RunExperimentRequest) -> RunExperimentResponse:
                 buffer_packets=req.buffer_packets,
                 qdisc_params=req.qdisc_params,
                 latency_location=req.latency_location,
+                verify=req.verify_shaping,
             )
         except subprocess.CalledProcessError as exc:
             CURRENT_BOTTLENECK_STATE = None
@@ -1531,6 +1671,16 @@ def run_experiment(req: RunExperimentRequest) -> RunExperimentResponse:
     # 3. Run workflow
     from main import NetGent
 
+    # Use a fresh mutable list so a stale flag from a prior request can't
+    # leak into this one (FastAPI runs sync endpoints in a threadpool —
+    # each thread is reused; ContextVars persist across requests on the
+    # same thread otherwise).
+    triggered_box: list[bool] = [False]
+    triggered_token = _SHELL_DEADLINE_TRIGGERED.set(triggered_box)
+    deadline_token = None
+    if req.experiment_max_seconds:
+        deadline_token = _SHELL_DEADLINE_SECONDS.set(float(req.experiment_max_seconds))
+
     try:
         client = NetGent(
             cdp_url=os.environ.get("BROWSERLESS_WS_ENDPOINT", "").strip() or None,
@@ -1543,12 +1693,18 @@ def run_experiment(req: RunExperimentRequest) -> RunExperimentResponse:
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Workflow failed: {exc}")
+    finally:
+        terminated_at_deadline = bool(triggered_box[0])
+        _SHELL_DEADLINE_TRIGGERED.reset(triggered_token)
+        if deadline_token is not None:
+            _SHELL_DEADLINE_SECONDS.reset(deadline_token)
 
     run_result = result.get("result", result) if isinstance(result, dict) else result
     return RunExperimentResponse(
         status="ok",
         runtime=req.runtime,
         result=run_result if isinstance(run_result, list) else [run_result],
+        terminated_at_deadline=terminated_at_deadline,
     )
 
 

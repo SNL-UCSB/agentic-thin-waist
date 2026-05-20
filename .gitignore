@@ -231,3 +231,6 @@ junk/
 *.pem
 
 docker-compose.override.yml
+
+# Analysis notebook pcap cache (gitignored, generated on demand)
+_pcap_cache/

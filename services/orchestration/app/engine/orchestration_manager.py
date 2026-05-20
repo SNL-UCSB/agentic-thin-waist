@@ -126,22 +126,33 @@ def _select_ctp(ctp_capacity_range: Any, experiment_id: str) -> dict[str, Any] |
     """Query the global CTP service and return the first matching transformed CTP.
 
     Returns the raw CTP object (which contains download_pcap, upload_pcap, ctp_id, etc.)
-    or None if nothing matched or the request failed.
+    or None if nothing matched, the request failed, or the experiment spec does
+    not request CTP (ctp_capacity_range is None/missing).
     """
-    default_range = [1.0, 10.0]
-    if isinstance(ctp_capacity_range, dict):
-        try:
-            low = float(ctp_capacity_range["lower_value"])
-            high = float(ctp_capacity_range["higher_value"])
-            if high < low:
-                low, high = high, low
-            low = max(0.01, low)
-            high = max(low + 0.01, high)
-            intensity_range_mbps = [round(low, 4), round(high, 4)]
-        except Exception:
-            intensity_range_mbps = default_range
-    else:
-        intensity_range_mbps = default_range
+    # No CTP requested → don't query, don't replay. This is the path taken when
+    # the user's intent does not mention cross-traffic, so the captured pcap
+    # contains only application traffic (172.16.1.1) with no 172.16.1.20 packets.
+    if not isinstance(ctp_capacity_range, dict):
+        print(
+            f"[CTP SELECT] No ctp_capacity_range in spec for {experiment_id} — "
+            f"skipping CTP selection (no background traffic)"
+        )
+        return None
+
+    try:
+        low = float(ctp_capacity_range["lower_value"])
+        high = float(ctp_capacity_range["higher_value"])
+        if high < low:
+            low, high = high, low
+        low = max(0.01, low)
+        high = max(low + 0.01, high)
+        intensity_range_mbps = [round(low, 4), round(high, 4)]
+    except Exception as exc:
+        print(
+            f"[CTP SELECT] Invalid ctp_capacity_range {ctp_capacity_range!r} "
+            f"for {experiment_id}: {exc} — skipping CTP selection"
+        )
+        return None
 
     query: dict[str, Any] = {
         "is_transformed": True,
@@ -569,6 +580,19 @@ def _run_experiment_on_worker(
                 experiment_id=exp_id,
                 application=str(spec.get("application") or "").strip(),
                 telemetry_url=telemetry_url,
+                # Cap the workload at the experiment duration so a slow-but-
+                # progressing download cannot run past the capture window.
+                # On timeout the substrate kills the process but still
+                # returns partial stdout/stderr + flags the result.
+                experiment_max_seconds=(
+                    float(spec["duration_seconds"])
+                    if spec.get("duration_seconds")
+                    else None
+                ),
+                # Capture is already running at this point — skip the
+                # worker-side iperf3 + ping probes so they don't show up
+                # in the pcap as pre-workflow traffic.
+                verify_shaping=False,
             )
             thread_results["run"] = r
             print(f"[WORKFLOW] Completed")
@@ -649,6 +673,10 @@ def _run_experiment_on_worker(
             tel = run_tr.get("telemetry")
             if isinstance(tel, dict) and tel.get("result_id"):
                 telemetry_result_id = str(tel["result_id"])
+        # Surface telemetry_result_id at the top of the result dict so callers
+        # don't have to spelunk into result["run"]["telemetry"]["result_id"]
+        # (the standard analysis path needs this to fetch from /results/<id>).
+        result["telemetry_result_id"] = telemetry_result_id
         if (
             telemetry_result_id
             and capture_id

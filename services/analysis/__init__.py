@@ -14,6 +14,8 @@ from .pcap_analysis import (
     plot_icmp_rtt,
     plot_packet_size,
     summarize_pcap,
+    filter_downlink,
+    filter_uplink,
 )
 from .qoe import (
     print_result_summary,
@@ -23,6 +25,7 @@ from .qoe import (
     extract_speedtest,
     extract_iperf,
     extract_ping,
+    extract_wget,
 )
 from .queue_trace import (
     load_queue_trace,
@@ -42,6 +45,8 @@ __all__ = [
     "plot_icmp_rtt",
     "plot_packet_size",
     "summarize_pcap",
+    "filter_downlink",
+    "filter_uplink",
     "print_result_summary",
     "print_qoe_metrics",
     "print_transport_state",
@@ -49,6 +54,7 @@ __all__ = [
     "extract_speedtest",
     "extract_iperf",
     "extract_ping",
+    "extract_wget",
     "load_queue_trace",
     "summarize_queue_trace",
     "plot_queue_occupancy",

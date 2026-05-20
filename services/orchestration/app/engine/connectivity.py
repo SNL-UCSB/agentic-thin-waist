@@ -837,14 +837,24 @@ class ConnectivityManager:
         qdisc: str = "pfifo",
         buffer_packets: int = 1000,
         qdisc_params: dict[str, str] | None = None,
-        latency_location: str = "both",
+        latency_location: str = "upstream",
         upstream_iface: str = "veth4",
         downstream_iface: str = "veth2",
+        verify: bool = True,
     ) -> dict[str, Any]:
         """Apply traffic shaping on the worker via ``POST /shape``.
 
         Only includes ``latency_location`` when *latency_ms* > 0, matching
         the behaviour of ``run_experiment.py``.
+
+        ``latency_location`` defaults to ``"upstream"`` (netem on ns2/veth3
+        only) so a requested ``latency_ms=100`` contributes ~100 ms to RTT.
+        Using ``"both"`` would put netem on both legs and double the RTT
+        contribution (100 ms each direction = 200 ms RTT).
+
+        Pass ``verify=False`` when calling during a concurrent pcap capture
+        (e.g. from the /intent pipeline) so the worker skips iperf3 + ping
+        probes and the trace doesn't get polluted with verification traffic.
         """
         info = self._backend.get_worker_info(worker_id)
         payload: dict[str, Any] = {
@@ -855,11 +865,12 @@ class ConnectivityManager:
             "latency_ms": latency_ms,
             "qdisc": qdisc,
             "buffer_packets": buffer_packets,
+            "verify": verify,
         }
         if qdisc_params:
             payload["qdisc_params"] = qdisc_params
         if latency_ms > 0:
-            payload["latency_location"] = latency_location or "both"
+            payload["latency_location"] = latency_location or "upstream"
 
         with httpx.Client(timeout=120) as client:
             resp = client.post(f"{info.endpoint}/shape", json=payload)
@@ -911,11 +922,18 @@ class ConnectivityManager:
         *,
         runtime: str = "shell",
         parameters: dict[str, str] | None = None,
+        experiment_max_seconds: float | None = None,
     ) -> dict[str, Any]:
         """Execute a workflow on the worker via ``POST /run``.
 
         Assumes shaping and congestion have already been applied via
         :meth:`apply_shaping` and :meth:`apply_congestion`.
+
+        ``experiment_max_seconds`` is a wallclock deadline (seconds) that the
+        substrate worker applies to any shell command in the workflow. On
+        timeout the process is SIGTERMed/SIGKILLed and the response carries
+        ``terminated_at_deadline=True`` — the run still produces partial
+        stdout/stderr and a usable pcap/qtrace pair.
         """
         info = self._backend.get_worker_info(worker_id)
         payload: dict[str, Any] = {
@@ -924,6 +942,8 @@ class ConnectivityManager:
         }
         if parameters:
             payload["parameters"] = parameters
+        if experiment_max_seconds is not None and experiment_max_seconds > 0:
+            payload["experiment_max_seconds"] = float(experiment_max_seconds)
 
         with httpx.Client(timeout=300) as client:
             resp = client.post(f"{info.endpoint}/run", json=payload)
@@ -945,7 +965,7 @@ class ConnectivityManager:
         qdisc: str = "pfifo",
         buffer_packets: int = 1000,
         qdisc_params: dict[str, str] | None = None,
-        latency_location: str = "both",
+        latency_location: str = "upstream",
         cca: str = "cubic",
         cca_namespace: str = "ns1",
         upstream_iface: str = "veth4",
@@ -955,6 +975,8 @@ class ConnectivityManager:
         experiment_id: str | None = None,
         application: str | None = None,
         telemetry_url: str | None = None,
+        experiment_max_seconds: float | None = None,
+        verify_shaping: bool = True,
     ) -> dict[str, Any]:
         """Shape the network, set congestion control, and run a workflow.
 
@@ -969,9 +991,12 @@ class ConnectivityManager:
             latency_ms:       One-way latency in ms (default: 0).
             qdisc:            Queue discipline (default: ``pfifo``).
             buffer_packets:   Queue depth in packets (default: 1000).
-            latency_location: Where to inject latency — ``upstream``,
-                              ``downstream``, or ``both`` (default).
-                              Ignored when *latency_ms* is 0.
+            latency_location: Where to inject latency — ``upstream``
+                              (default; netem only on ns2/veth3, so
+                              ``latency_ms`` contributes ~1× to RTT),
+                              ``downstream``, or ``both`` (netem on both
+                              legs → 2× contribution to RTT). Ignored
+                              when *latency_ms* is 0.
             cca:              TCP congestion control algorithm (default: ``cubic``).
             cca_namespace:    Namespace for CCA (default: ``ns1``).
             upstream_iface:   Upload interface inside the worker (default: ``veth4``).
@@ -999,6 +1024,7 @@ class ConnectivityManager:
             latency_location=latency_location,
             upstream_iface=upstream_iface,
             downstream_iface=downstream_iface,
+            verify=verify_shaping,
         )
 
         congestion_result = self.apply_congestion(
@@ -1012,6 +1038,7 @@ class ConnectivityManager:
             workflow,
             runtime=runtime,
             parameters=parameters,
+            experiment_max_seconds=experiment_max_seconds,
         )
 
         # --- Telemetry persistence ---

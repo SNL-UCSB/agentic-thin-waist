@@ -69,7 +69,7 @@ def test_generated_experiment_defaults_and_types():
     assert exp.cc_algorithm == "cubic"
     assert exp.aqm_policy == "pfifo"
     assert exp.ctp_cluster is None
-    assert exp.ctp_capacity_range == {"lower_value": 1.0, "higher_value": 10.0}
+    assert exp.ctp_capacity_range is None
     assert exp.reasoning == ""
 
 

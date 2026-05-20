@@ -71,8 +71,8 @@ Return ONLY a JSON object with these fields:
 - ctp_capacity_range: object describing CTP selection range in Mbps with:
     - lower_value: minimum CTP capacity in Mbps
     - higher_value: maximum CTP capacity in Mbps
-  If the user does not specify this, default to:
-  {{"lower_value": 1, "higher_value": 10}}
+  If the user does not specify cross-traffic / CTP, return null — do NOT
+  invent a default range. A null value means "no background CTP traffic".
 - duration_seconds: integer (or null if not specified)
 - num_trials: integer (default 1)
 - clarification_needed: list of strings describing what needs clarification
@@ -86,9 +86,11 @@ Intent: {intent}
 
         json_str = self._extract_json(response)
         result = json.loads(json_str)
-        # Ensure optional fields exist so downstream never sees a missing key
+        # Ensure optional fields exist so downstream never sees a missing key.
+        # Leave CTP fields as None when the intent does not mention CTP —
+        # downstream will then skip CTP selection / replay entirely.
         result.setdefault("ctp_cluster", None)
-        result.setdefault("ctp_capacity_range", {"lower_value": 1, "higher_value": 10})
+        result.setdefault("ctp_capacity_range", None)
         return result
 
     def _extract_json(self, text: str) -> str:

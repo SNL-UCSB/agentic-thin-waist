@@ -236,7 +236,7 @@ def _run_experiment(
             experiment_spec.get("upload_mbps", experiment_spec["capacity_mbps"])
         ),
         "latency_ms": float(experiment_spec["latency_ms"]),
-        "latency_location": experiment_spec.get("latency_location", "both"),
+        "latency_location": experiment_spec.get("latency_location", "upstream"),
         "qdisc": experiment_spec.get("aqm_policy", "fq_codel"),
         "buffer_packets": (
             int(experiment_spec["buffer_packets"])

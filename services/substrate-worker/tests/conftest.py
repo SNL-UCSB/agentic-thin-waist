@@ -14,6 +14,13 @@ except IndexError:
 if SHARED_DIR.is_dir() and str(SHARED_DIR) not in sys.path:
     sys.path.insert(0, str(SHARED_DIR))
 
+# substrate.main_local imports `utils.execution` via the short path that the
+# production container has on PYTHONPATH (`/shared/clients/netgent/src`).
+# Mirror that here so tests that import substrate modules can resolve it.
+NETGENT_SRC_DIR = SHARED_DIR / "clients" / "netgent" / "src"
+if NETGENT_SRC_DIR.is_dir() and str(NETGENT_SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(NETGENT_SRC_DIR))
+
 SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))

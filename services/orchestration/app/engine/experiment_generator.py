@@ -49,11 +49,11 @@ class ExperimentGenerator:
         duration = parsed_intent.get("duration_seconds") or _DEFAULT_DURATION_SECONDS
         num_trials = parsed_intent.get("num_trials", 1) or 1
         reasoning = parsed_intent.get("reasoning") or ""
-        ctp_cluster = parsed_intent.get("ctp_cluster") or "cluster0"
-        ctp_capacity_range = parsed_intent.get("ctp_capacity_range") or {
-            "lower_value": 1,
-            "higher_value": 10,
-        }
+        # When the intent does not mention CTP, leave both fields as None so
+        # the orchestrator skips CTP selection + replay entirely (no
+        # background cross-traffic, no 172.16.1.20 packets in the pcap).
+        ctp_cluster = parsed_intent.get("ctp_cluster")
+        ctp_capacity_range = parsed_intent.get("ctp_capacity_range")
 
         buffer_packets = parsed_intent.get("buffer_packets")
         qdisc_params = parsed_intent.get("qdisc_params")

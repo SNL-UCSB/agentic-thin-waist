@@ -24,6 +24,25 @@ def _as_packets(pkts_or_path):
     return pkts_or_path
 
 
+# Substrate-worker convention: the application client lives at 172.16.1.1
+# inside ns1. Capture is on veth2 (root↔ns1 leg), so packets *destined* for
+# 172.16.1.1 are download (data arriving at the app) and packets *sourced*
+# by 172.16.1.1 are upload (ACKs / requests leaving the app).
+APP_CLIENT_IP_DEFAULT = "172.16.1.1"
+
+
+def filter_downlink(pkts_or_path, app_ip: str = APP_CLIENT_IP_DEFAULT):
+    """Return only packets destined for ``app_ip`` (download direction)."""
+    pkts = _as_packets(pkts_or_path)
+    return [p for p in pkts if IP in p and p[IP].dst == app_ip]
+
+
+def filter_uplink(pkts_or_path, app_ip: str = APP_CLIENT_IP_DEFAULT):
+    """Return only packets sourced from ``app_ip`` (upload direction)."""
+    pkts = _as_packets(pkts_or_path)
+    return [p for p in pkts if IP in p and p[IP].src == app_ip]
+
+
 def _flow_key(p) -> Optional[tuple]:
     """5-tuple key, direction-normalized so A↔B flows collapse to one bucket."""
     if IP in p:
