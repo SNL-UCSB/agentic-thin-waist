@@ -88,6 +88,27 @@ echo $! > "$RUNTIME_DIR/${NS1}.pid"
 ip netns exec $NS2 sleep infinity &
 echo $! > "$RUNTIME_DIR/${NS2}.pid"
 
+########################################
+# Preload CCAnalyzer congestion-control
+# modules so experiments can ask for
+# any of the 15 algorithms without
+# round-tripping a modprobe per /run.
+# Missing modules (e.g. on Docker
+# Desktop's LinuxKit kernel) are
+# logged but non-fatal — the worker
+# still exposes whatever the kernel
+# already has built in (cubic, reno).
+########################################
+for mod in tcp_bbr tcp_bic tcp_cdg tcp_cubic tcp_highspeed \
+           tcp_htcp tcp_hybla tcp_illinois tcp_nv \
+           tcp_scalable tcp_vegas tcp_veno tcp_westwood tcp_yeah; do
+  if modprobe "$mod" 2>/dev/null; then
+    echo "  + loaded $mod"
+  else
+    echo "  - skipped $mod (module not available in this kernel)"
+  fi
+done
+
 echo
 echo "======================================"
 echo " netreplica solo setup completed successfully "

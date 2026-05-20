@@ -139,6 +139,22 @@ echo $! > "$RUNTIME_DIR/${NS1}.pid"
 ip netns exec $NS2 sleep infinity &
 echo $! > "$RUNTIME_DIR/${NS2}.pid"
 
+########################################
+# Preload CCAnalyzer congestion-control
+# modules. EC2 stock kernels usually
+# ship all 15; missing ones are logged
+# but non-fatal.
+########################################
+for mod in tcp_bbr tcp_bic tcp_cdg tcp_cubic tcp_highspeed \
+           tcp_htcp tcp_hybla tcp_illinois tcp_nv \
+           tcp_scalable tcp_vegas tcp_veno tcp_westwood tcp_yeah; do
+  if modprobe "$mod" 2>/dev/null; then
+    echo "  + loaded $mod"
+  else
+    echo "  - skipped $mod (module not available in this kernel)"
+  fi
+done
+
 echo
 echo "======================================"
 echo " netreplica solo setup completed successfully "
