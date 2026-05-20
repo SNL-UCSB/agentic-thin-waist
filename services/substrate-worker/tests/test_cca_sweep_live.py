@@ -102,13 +102,18 @@ def test_cca_round_trip(cca: str, worker_reachable: bool) -> None:
     assert status == 200, f"{cca}: /congestion returned {status}: {body}"
     assert body.get("current_algorithm") == cca
 
+    # Shape to 5 Mbps so the 5 MB wget runs for ~8 s — well above the
+    # 250 ms observer poll cadence. Without shaping, wget on a CI runner
+    # completes in <1 s and the observer's first poll can miss the socket.
     run_status, run_body = _post(
         "/run",
         {
             "runtime": "shell",
             "cca": cca,
             "cca_namespace": "ns1",
-            "experiment_max_seconds": 12,
+            "download_mbps": 5,
+            "upload_mbps": 5,
+            "experiment_max_seconds": 15,
             "workflow": {
                 "specification": "wget",
                 "states": [

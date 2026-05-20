@@ -167,6 +167,17 @@ CCA_AVAILABLE="$(sysctl -n net.ipv4.tcp_available_congestion_control 2>/dev/null
 echo
 echo "  -> tcp_available_congestion_control = ${CCA_AVAILABLE}"
 echo "  -> loaded ${#LOADED_CCAS[@]} of 15 CCAnalyzer CCAs"
+
+# Widen tcp_allowed_congestion_control in every namespace to match the full
+# loaded set. Without this, `sysctl -w net.ipv4.tcp_congestion_control=<algo>`
+# fails with EPERM in ns1 / ns2 even though the module is loaded — each
+# net namespace gates non-default CCAs through its own allowed list, which
+# Linux initializes to "reno cubic" only.
+if [ -n "${CCA_AVAILABLE}" ]; then
+  sysctl -w "net.ipv4.tcp_allowed_congestion_control=${CCA_AVAILABLE}" >/dev/null 2>&1 || true
+  ip netns exec ns1 sysctl -w "net.ipv4.tcp_allowed_congestion_control=${CCA_AVAILABLE}" >/dev/null 2>&1 || true
+  ip netns exec ns2 sysctl -w "net.ipv4.tcp_allowed_congestion_control=${CCA_AVAILABLE}" >/dev/null 2>&1 || true
+fi
 if [ ${#SKIPPED_CCAS[@]} -gt 0 ]; then
   cat <<EOF
 

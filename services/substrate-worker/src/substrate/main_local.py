@@ -1298,11 +1298,31 @@ def _observe_cca_in_ns(
 
 
 def _apply_cca_in_ns(ns: Optional[str], algorithm: str) -> str:
-    key = "net.ipv4.tcp_congestion_control"
-    if ns and ns != "root":
-        cmd = f"ip netns exec {ns} sysctl -w {key}={algorithm}"
-    else:
-        cmd = f"sysctl -w {key}={algorithm}"
+    """Set the per-namespace default CCA, widening the allowed-list as needed.
+
+    Each net namespace has its own ``tcp_allowed_congestion_control`` gate —
+    even root can't write a CCA into ``tcp_congestion_control`` if it isn't
+    in that allowed list, which Linux initializes to ``reno cubic`` only.
+    The startup script widens this list at boot, but on-demand modprobe at
+    request time can race ahead, so we always make sure the allowed list
+    contains the current full available set before the sysctl write.
+    """
+    ns_prefix = f"ip netns exec {ns} " if ns and ns != "root" else ""
+    available = subprocess.run(
+        f"{ns_prefix}sysctl -n net.ipv4.tcp_available_congestion_control",
+        shell=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    if available:
+        subprocess.run(
+            f"{ns_prefix}sysctl -w "
+            f'net.ipv4.tcp_allowed_congestion_control="{available}"',
+            shell=True,
+            capture_output=True,
+            text=True,
+        )
+    cmd = f"{ns_prefix}sysctl -w net.ipv4.tcp_congestion_control={algorithm}"
     result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
     if result.returncode != 0 or "Operation not permitted" in (
         result.stderr + result.stdout
