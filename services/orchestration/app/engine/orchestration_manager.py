@@ -589,6 +589,10 @@ def _run_experiment_on_worker(
                     if spec.get("duration_seconds")
                     else None
                 ),
+                # Capture is already running at this point — skip the
+                # worker-side iperf3 + ping probes so they don't show up
+                # in the pcap as pre-workflow traffic.
+                verify_shaping=False,
             )
             thread_results["run"] = r
             print(f"[WORKFLOW] Completed")

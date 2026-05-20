@@ -128,7 +128,7 @@ def run_chain(
         "download_mbps": capacity,
         "upload_mbps": float(os.getenv("DEMO_UPLOAD_MBPS", str(capacity))),
         "latency_ms": latency,
-        "latency_location": os.getenv("DEMO_LATENCY_LOCATION", "both"),
+        "latency_location": os.getenv("DEMO_LATENCY_LOCATION", "upstream"),
         "qdisc": os.getenv("DEMO_QDISC", "fq_codel"),
         "buffer_packets": int(os.getenv("DEMO_BUFFER_PACKETS", "1000")),
         "qdisc_params": {"target": "5ms", "interval": "100ms"},

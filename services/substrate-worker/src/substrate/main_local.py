@@ -199,6 +199,17 @@ class ShapeRequest(BaseModel):
         ),
     )
 
+    verify: bool = Field(
+        True,
+        description=(
+            "Run iperf3 + ping probes after applying tc rules to confirm the "
+            "bottleneck landed. Default True because /shape's whole job is "
+            "configure + validate. Pass false when calling /shape during a "
+            "concurrent pcap capture (e.g. from the orchestrator's /intent "
+            "pipeline) so the probes don't pollute the trace."
+        ),
+    )
+
 
 class BottleneckState(BaseModel):
     download_mbps: float
@@ -386,6 +397,15 @@ class RunExperimentRequest(BaseModel):
             "completion (legacy behavior)."
         ),
     )
+    verify_shaping: bool = Field(
+        False,
+        description=(
+            "Run iperf3 + ping probes after applying shaping to verify the "
+            "bottleneck state. Default False because the probes add ~10s of "
+            "non-workflow traffic to any concurrent pcap capture. Use POST "
+            "/shape (which always verifies) when you need verification."
+        ),
+    )
 
 
 class RunExperimentResponse(BaseModel):
@@ -477,6 +497,7 @@ def apply_shaping(
     buffer_packets: int,
     qdisc_params: Optional[Dict[str, str]] = None,
     latency_location: Optional[str] = None,
+    verify: bool = False,
 ) -> List[str]:
     applied: List[str] = []
     qdisc_args = _build_qdisc_args(qdisc, buffer_packets, qdisc_params)
@@ -509,7 +530,8 @@ def apply_shaping(
         c3 = f"tc qdisc add dev {iface} parent 1:10 handle 10: {qdisc_args}"
         run_cmd(c3)
         applied.append(c3)
-    _verify_bottleneck_state()
+    if verify:
+        _verify_bottleneck_state()
     # -------------------------
     # Latency shaping (netem)
     # -------------------------
@@ -537,7 +559,8 @@ def apply_shaping(
             run_cmd(add_cmd)
             applied.append(add_cmd)
 
-    _verify_latency()
+    if verify:
+        _verify_latency()
     return applied
 
 
@@ -796,6 +819,7 @@ def shape(cfg: ShapeRequest) -> ShapeResponse:
                 buffer_packets=cfg.buffer_packets,
                 qdisc_params=cfg.qdisc_params,
                 latency_location=cfg.latency_location,
+                verify=cfg.verify,
             )
         )
     except subprocess.CalledProcessError as exc:
@@ -1301,6 +1325,7 @@ def run_experiment(req: RunExperimentRequest) -> RunExperimentResponse:
                 buffer_packets=req.buffer_packets,
                 qdisc_params=req.qdisc_params,
                 latency_location=req.latency_location,
+                verify=req.verify_shaping,
             )
         except subprocess.CalledProcessError as exc:
             CURRENT_BOTTLENECK_STATE = None
