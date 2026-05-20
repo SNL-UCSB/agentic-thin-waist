@@ -1259,14 +1259,27 @@ def _ensure_cca_loaded(algorithm: str) -> tuple[bool, str]:
     return False, f"modprobe {module} succeeded but '{algorithm}' still missing"
 
 
-_SS_CONG_RE = re.compile(r"\bcong:([a-z0-9_]+)")
+# `ss -tin` renders the per-socket CC algorithm two different ways depending
+# on iproute2 version:
+#   - Newer (Debian bookworm, Ubuntu 22.04+): the algorithm appears as the
+#     first whitespace-separated token on the info line, immediately followed
+#     by `wscale:` — e.g. `\t cubic wscale:7,7 rto:227 ...`.
+#   - Older / certain flags: an explicit `cong:<algo>` field — e.g.
+#     `\t ... cong:bbr ...`.
+# We match either form so the observer works across distros.
+_SS_CONG_RE = re.compile(
+    r"\bcong:([a-z][a-z0-9_-]*)|(?:^|\s)([a-z][a-z0-9_-]*)\s+wscale:",
+    re.MULTILINE,
+)
 
 
 def _parse_ss_congestion(text: str) -> Dict[str, int]:
-    """Count `cong:<algo>` occurrences in `ss -tin` output."""
+    """Count per-socket CC algorithm names in `ss -tin` output."""
     counts: Dict[str, int] = {}
     for match in _SS_CONG_RE.finditer(text):
-        algo = match.group(1)
+        algo = match.group(1) or match.group(2)
+        if not algo:
+            continue
         counts[algo] = counts.get(algo, 0) + 1
     return counts
 

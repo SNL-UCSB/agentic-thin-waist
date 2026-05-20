@@ -170,6 +170,11 @@ class LocalDockerBackend(ConnectivityBackend):
                     f"{ctp_dir}:{ctp_dir}",
                     f"{capture_dir}:{capture_dir}",
                     "/var/run/docker.sock:/var/run/docker.sock",
+                    # Read-only host module dir so the ephemeral worker can
+                    # `modprobe tcp_<algo>` the 14 loadable CCAnalyzer CCAs.
+                    # No-op on Docker Desktop's LinuxKit kernel (no modules
+                    # to load), required on real Linux hosts.
+                    "/lib/modules:/lib/modules:ro",
                 ],
                 "NetworkMode": network,
             },

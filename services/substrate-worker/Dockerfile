@@ -34,7 +34,7 @@ RUN apt-get update && apt-get install -y \
     curl wget iptables byobu nano \
     speedtest-cli tcpreplay \
     python3-flask python3-requests \
-    sudo util-linux \
+    sudo util-linux kmod \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

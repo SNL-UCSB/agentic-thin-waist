@@ -190,30 +190,43 @@ class TestEnsureCcaLoaded:
 
 
 class TestParseSsCongestion:
-    SS_SAMPLE_CUBIC = """
-State    Recv-Q Send-Q   Local Address:Port    Peer Address:Port
-ESTAB    0      0        172.16.1.1:40132     91.189.91.108:443
-\t cubic wscale:7,7 rto:340 rtt:139.5/0.5 ato:40 mss:1448 pmtu:1500 rcvmss:1448 advmss:1448 cwnd:10 bytes_sent:5840 bytes_acked:5841 segs_out:122 segs_in:120 data_segs_out:1 send 829.7Kbps lastsnd:8 lastrcv:8 lastack:8 pacing_rate 1.7Mbps delivery_rate 829.7Kbps delivered:2 app_limited busy:8ms rcv_rtt:139 rcv_space:14600 rcv_ssthresh:64076 minrtt:139.5 snd_wnd:64256 cong:cubic
+    # Real `ss -tin` from Debian bookworm iproute2 (the substrate-worker base
+    # image). Algorithm appears as the first whitespace-separated token on
+    # the info line, immediately before `wscale:`. No `cong:` prefix.
+    SS_SAMPLE_BOOKWORM_CUBIC = """\
+State Recv-Q Send-Q Local Address:Port  Peer Address:PortProcess
+ESTAB 0      0         172.16.1.1:50510 172.66.0.218:443
+\t cubic wscale:7,7 rto:227 rtt:26.562/21.022 ato:40 mss:1448 pmtu:1500 rcvmss:1420 advmss:1448 cwnd:10 bytes_sent:672 bytes_acked:673 bytes_received:821978 segs_out:255 segs_in:612 data_segs_out:3 data_segs_in:608 send 4361117bps lastsnd:839 pacing_rate 8722232bps delivered:4 app_limited busy:2ms rcv_rtt:47.18 rcv_space:56600 rcv_ssthresh:148377 minrtt:0.253 snd_wnd:524288
 """
 
-    SS_SAMPLE_TWO_SOCKETS_BBR = """
-ESTAB    0    0    172.16.1.1:40000   1.2.3.4:443
-\t bbr wscale:7,7 cong:bbr
-ESTAB    0    0    172.16.1.1:40002   5.6.7.8:443
-\t bbr wscale:7,7 cong:bbr
+    # Same socket but on an older iproute2 that emits the explicit cong:
+    # field instead of the first-token rendering.
+    SS_SAMPLE_LEGACY_CONG_FIELD = """\
+ESTAB 0 0 172.16.1.1:40132 91.189.91.108:443
+\t ... cwnd:10 ... cong:bbr ... rcv_ssthresh:64076
 """
 
-    SS_SAMPLE_MIXED = """
-ESTAB    0    0    a:1 b:2
-\t cong:cubic
-ESTAB    0    0    c:3 d:4
-\t cong:reno
-ESTAB    0    0    e:5 f:6
-\t cong:cubic
+    SS_SAMPLE_TWO_SOCKETS_BBR = """\
+ESTAB 0 0 172.16.1.1:40000 1.2.3.4:443
+\t bbr wscale:7,7 cwnd:10
+ESTAB 0 0 172.16.1.1:40002 5.6.7.8:443
+\t bbr wscale:7,7 cwnd:10
 """
 
-    def test_parses_single_cubic_socket(self):
-        assert _parse_ss_congestion(self.SS_SAMPLE_CUBIC) == {"cubic": 1}
+    SS_SAMPLE_MIXED = """\
+ESTAB 0 0 a:1 b:2
+\t cubic wscale:7,7
+ESTAB 0 0 c:3 d:4
+\t reno wscale:7,7
+ESTAB 0 0 e:5 f:6
+\t cubic wscale:7,7
+"""
+
+    def test_parses_bookworm_format(self):
+        assert _parse_ss_congestion(self.SS_SAMPLE_BOOKWORM_CUBIC) == {"cubic": 1}
+
+    def test_parses_legacy_cong_field(self):
+        assert _parse_ss_congestion(self.SS_SAMPLE_LEGACY_CONG_FIELD) == {"bbr": 1}
 
     def test_counts_multiple_sockets_same_algo(self):
         assert _parse_ss_congestion(self.SS_SAMPLE_TWO_SOCKETS_BBR) == {"bbr": 2}
@@ -224,12 +237,17 @@ ESTAB    0    0    e:5 f:6
     def test_empty_output_returns_empty_dict(self):
         assert _parse_ss_congestion("") == {}
 
-    def test_no_cong_field_returns_empty_dict(self):
-        # Some kernels strip the `cong:` field when ss is run without --info.
-        # Our parser must not invent matches from random text.
-        assert _parse_ss_congestion("ESTAB 0 0 a:1 b:2") == {}
+    def test_header_only_returns_empty_dict(self):
+        # ss prints only the column header when no sockets exist. The parser
+        # must not invent matches from the header text.
+        assert (
+            _parse_ss_congestion(
+                "State Recv-Q Send-Q Local Address:Port  Peer Address:PortProcess"
+            )
+            == {}
+        )
 
     def test_underscore_algo_names_supported(self):
         # bbr_v2 / dctcp-style underscored names appear on newer kernels.
-        text = "ESTAB 0 0 a:1 b:2\n\t cong:bbr_v2"
+        text = "ESTAB 0 0 a:1 b:2\n\t ... cong:bbr_v2 ..."
         assert _parse_ss_congestion(text) == {"bbr_v2": 1}
