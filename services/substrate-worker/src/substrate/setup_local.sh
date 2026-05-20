@@ -99,15 +99,41 @@ echo $! > "$RUNTIME_DIR/${NS2}.pid"
 # still exposes whatever the kernel
 # already has built in (cubic, reno).
 ########################################
+echo
+echo "=== Loading CCAnalyzer congestion-control modules ==="
+LOADED_CCAS=()
+SKIPPED_CCAS=()
 for mod in tcp_bbr tcp_bic tcp_cdg tcp_cubic tcp_highspeed \
            tcp_htcp tcp_hybla tcp_illinois tcp_nv \
            tcp_scalable tcp_vegas tcp_veno tcp_westwood tcp_yeah; do
   if modprobe "$mod" 2>/dev/null; then
     echo "  + loaded $mod"
+    LOADED_CCAS+=("${mod#tcp_}")
   else
     echo "  - skipped $mod (module not available in this kernel)"
+    SKIPPED_CCAS+=("${mod#tcp_}")
   fi
 done
+# reno is always available as the kernel built-in fallback.
+LOADED_CCAS+=("reno")
+
+CCA_AVAILABLE="$(sysctl -n net.ipv4.tcp_available_congestion_control 2>/dev/null)"
+echo
+echo "  -> tcp_available_congestion_control = ${CCA_AVAILABLE}"
+echo "  -> loaded ${#LOADED_CCAS[@]} of 15 CCAnalyzer CCAs"
+if [ ${#SKIPPED_CCAS[@]} -gt 0 ]; then
+  cat <<EOF
+
+  WARNING: ${#SKIPPED_CCAS[@]} CCAs are not loadable on this host kernel
+  ($(uname -r)): ${SKIPPED_CCAS[*]}.
+
+  This is expected on Docker Desktop's LinuxKit kernel — it ships only
+  cubic + reno. To use the full CCAnalyzer set, run the substrate worker
+  on a real Linux host with linux-modules-extra-\$(uname -r) installed
+  and /lib/modules bind-mounted (already wired up in docker-compose.yml).
+  See services/substrate-worker/README.md for details.
+EOF
+fi
 
 echo
 echo "======================================"

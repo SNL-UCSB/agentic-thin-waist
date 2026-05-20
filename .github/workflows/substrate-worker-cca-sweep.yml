@@ -1,0 +1,64 @@
+name: Substrate Worker - CCA Sweep (live verification)
+
+# Runs the live CCAnalyzer-15 sweep against substrate-worker on a real
+# Linux host (GitHub Actions ubuntu-latest, which is a stock Ubuntu kernel
+# with linux-modules-extra installable). Verifies issue #142 end-to-end:
+# every CCA can be set via /congestion AND the runtime observer confirms
+# the application actually used it on a live TCP socket.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - "services/substrate-worker/**"
+      - ".github/workflows/substrate-worker-cca-sweep.yml"
+
+jobs:
+  cca-sweep:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install host kernel modules (linux-modules-extra)
+        # Stock GHA Ubuntu runners include cubic + reno but ship the other
+        # 13 CCAnalyzer modules in linux-modules-extra-$(uname -r). Without
+        # this package the worker would still come up but only 2/15 CCAs
+        # would be loadable. Verify the install gave us the modules we need.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y "linux-modules-extra-$(uname -r)" kmod
+          echo "kernel: $(uname -r)"
+          echo "tcp_* modules now on the host:"
+          find "/lib/modules/$(uname -r)" -name 'tcp_*.ko*' | sort
+
+      - name: Create repo .env from example
+        run: cp .env.example .env
+
+      - name: Bring up substrate-worker
+        run: docker compose up -d --wait substrate-worker
+
+      - name: Show worker startup banner (CCA load summary)
+        run: docker logs substrate-worker 2>&1 | grep -A 25 'Loading CCAnalyzer' || true
+
+      - name: Verify all 15 CCAnalyzer CCAs round-trip end-to-end (strict)
+        # REQUIRE_ALL_CCAS=1 makes the test fail if any CCA returns a
+        # "not in this kernel" 400 — i.e. on a real Linux host with
+        # modules-extra installed, every CCA must complete the
+        # /congestion -> /run -> observer round trip with a non-empty
+        # congestion_observed entry for the requested CCA.
+        run: |
+          docker compose exec -T \
+            -e RUN_CCA_SWEEP=1 \
+            -e REQUIRE_ALL_CCAS=1 \
+            -e SUBSTRATE_API_URL=http://localhost:8002 \
+            substrate-worker \
+            python -m pytest /app/tests/test_cca_sweep_live.py -v --tb=short
+
+      - name: Stop substrate-worker
+        if: always()
+        run: docker compose down

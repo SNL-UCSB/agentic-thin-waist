@@ -73,20 +73,27 @@ def worker_reachable() -> bool:
 def test_cca_round_trip(cca: str, worker_reachable: bool) -> None:
     """For each CCA: set it, run a short wget, assert the observer saw it.
 
-    Two acceptable outcomes:
+    Two acceptable outcomes by default:
       - 200 from /congestion → /run completes and `congestion_observed`
         contains the requested algorithm (the application actually used it).
       - 400 from /congestion with the structured "not available in this kernel"
         message → algorithm is in the whitelist but this kernel doesn't have
-        the module loadable. We don't fail the test here because Docker
-        Desktop's LinuxKit kernel can't load any modules; on a real Linux
-        host with `/lib/modules` mounted, only this outcome should appear
-        for algorithms genuinely unavailable in the host kernel.
+        the module loadable. Treated as a soft pass so the suite runs cleanly
+        on Docker Desktop's LinuxKit kernel.
+
+    Strict mode (``REQUIRE_ALL_CCAS=1``): kernel-unavailable 400s are treated
+    as failures. CI on a real Linux host uses this mode to verify all 15
+    CCAnalyzer algorithms genuinely work end-to-end.
     """
+    strict = bool(os.environ.get("REQUIRE_ALL_CCAS"))
     status, body = _post("/congestion", {"algorithm": cca, "namespace": "ns1"})
     if status == 400:
-        # Acceptable failure: kernel can't load this module on this host.
         detail = body.get("detail", "")
+        if strict:
+            pytest.fail(
+                f"{cca}: /congestion returned 400 in strict mode — host kernel "
+                f"is missing the module. detail: {detail}"
+            )
         assert (
             "not available in this kernel" in detail
         ), f"{cca}: unexpected 400 detail — {detail}"

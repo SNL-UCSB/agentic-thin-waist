@@ -145,15 +145,39 @@ echo $! > "$RUNTIME_DIR/${NS2}.pid"
 # ship all 15; missing ones are logged
 # but non-fatal.
 ########################################
+echo
+echo "=== Loading CCAnalyzer congestion-control modules ==="
+LOADED_CCAS=()
+SKIPPED_CCAS=()
 for mod in tcp_bbr tcp_bic tcp_cdg tcp_cubic tcp_highspeed \
            tcp_htcp tcp_hybla tcp_illinois tcp_nv \
            tcp_scalable tcp_vegas tcp_veno tcp_westwood tcp_yeah; do
   if modprobe "$mod" 2>/dev/null; then
     echo "  + loaded $mod"
+    LOADED_CCAS+=("${mod#tcp_}")
   else
     echo "  - skipped $mod (module not available in this kernel)"
+    SKIPPED_CCAS+=("${mod#tcp_}")
   fi
 done
+# reno is always available as the kernel built-in fallback.
+LOADED_CCAS+=("reno")
+
+CCA_AVAILABLE="$(sysctl -n net.ipv4.tcp_available_congestion_control 2>/dev/null)"
+echo
+echo "  -> tcp_available_congestion_control = ${CCA_AVAILABLE}"
+echo "  -> loaded ${#LOADED_CCAS[@]} of 15 CCAnalyzer CCAs"
+if [ ${#SKIPPED_CCAS[@]} -gt 0 ]; then
+  cat <<EOF
+
+  WARNING: ${#SKIPPED_CCAS[@]} CCAs are not loadable on this host kernel
+  ($(uname -r)): ${SKIPPED_CCAS[*]}.
+
+  On EC2 / real Linux hosts this usually means linux-modules-extra-\$(uname -r)
+  isn't installed. Install it and restart the worker to enable the full
+  CCAnalyzer set.
+EOF
+fi
 
 echo
 echo "======================================"
