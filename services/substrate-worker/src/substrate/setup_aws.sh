@@ -139,6 +139,57 @@ echo $! > "$RUNTIME_DIR/${NS1}.pid"
 ip netns exec $NS2 sleep infinity &
 echo $! > "$RUNTIME_DIR/${NS2}.pid"
 
+########################################
+# Preload CCAnalyzer congestion-control
+# modules. EC2 stock kernels usually
+# ship all 15; missing ones are logged
+# but non-fatal.
+########################################
+echo
+echo "=== Loading CCAnalyzer congestion-control modules ==="
+LOADED_CCAS=()
+SKIPPED_CCAS=()
+for mod in tcp_bbr tcp_bic tcp_cdg tcp_cubic tcp_highspeed \
+           tcp_htcp tcp_hybla tcp_illinois tcp_nv \
+           tcp_scalable tcp_vegas tcp_veno tcp_westwood tcp_yeah; do
+  if modprobe "$mod" 2>/dev/null; then
+    echo "  + loaded $mod"
+    LOADED_CCAS+=("${mod#tcp_}")
+  else
+    echo "  - skipped $mod (module not available in this kernel)"
+    SKIPPED_CCAS+=("${mod#tcp_}")
+  fi
+done
+# reno is always available as the kernel built-in fallback.
+LOADED_CCAS+=("reno")
+
+CCA_AVAILABLE="$(sysctl -n net.ipv4.tcp_available_congestion_control 2>/dev/null)"
+echo
+echo "  -> tcp_available_congestion_control = ${CCA_AVAILABLE}"
+echo "  -> loaded ${#LOADED_CCAS[@]} of 15 CCAnalyzer CCAs"
+
+# Widen tcp_allowed_congestion_control in every namespace to match the full
+# loaded set. Without this, `sysctl -w net.ipv4.tcp_congestion_control=<algo>`
+# fails with EPERM in ns1 / ns2 even though the module is loaded — each
+# net namespace gates non-default CCAs through its own allowed list, which
+# Linux initializes to "reno cubic" only.
+if [ -n "${CCA_AVAILABLE}" ]; then
+  sysctl -w "net.ipv4.tcp_allowed_congestion_control=${CCA_AVAILABLE}" >/dev/null 2>&1 || true
+  ip netns exec ns1 sysctl -w "net.ipv4.tcp_allowed_congestion_control=${CCA_AVAILABLE}" >/dev/null 2>&1 || true
+  ip netns exec ns2 sysctl -w "net.ipv4.tcp_allowed_congestion_control=${CCA_AVAILABLE}" >/dev/null 2>&1 || true
+fi
+if [ ${#SKIPPED_CCAS[@]} -gt 0 ]; then
+  cat <<EOF
+
+  WARNING: ${#SKIPPED_CCAS[@]} CCAs are not loadable on this host kernel
+  ($(uname -r)): ${SKIPPED_CCAS[*]}.
+
+  On EC2 / real Linux hosts this usually means linux-modules-extra-\$(uname -r)
+  isn't installed. Install it and restart the worker to enable the full
+  CCAnalyzer set.
+EOF
+fi
+
 echo
 echo "======================================"
 echo " netreplica solo setup completed successfully "

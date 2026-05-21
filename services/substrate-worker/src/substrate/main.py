@@ -64,20 +64,51 @@ _SHELL_DEADLINE_TRIGGERED: "_contextvars.ContextVar[list]" = _contextvars.Contex
     "substrate_shell_deadline_triggered", default=[False]
 )
 
+# Per-request CCA name. The patched run_subprocess injects LD_PRELOAD and
+# TCP_CCA env vars so the cca_preload shim sets the algorithm on each TCP
+# socket via setsockopt — the only path that works in non-init netns when
+# the algo isn't in tcp_allowed_congestion_control.
+_REQUEST_TCP_CCA: "_contextvars.ContextVar[Optional[str]]" = _contextvars.ContextVar(
+    "substrate_request_tcp_cca", default=None
+)
+_CCA_PRELOAD_SO = "/usr/local/lib/cca_preload.so"
+
+
+def _env_with_cca() -> dict:
+    env = os.environ.copy()
+    cca = _REQUEST_TCP_CCA.get()
+    if not cca:
+        return env
+    existing = env.get("LD_PRELOAD", "").strip()
+    env["LD_PRELOAD"] = f"{_CCA_PRELOAD_SO}:{existing}" if existing else _CCA_PRELOAD_SO
+    env["TCP_CCA"] = cca
+    return env
+
+
 _orig_run_subprocess = _netgent_exec.run_subprocess
 
 
 async def _run_subprocess_with_deadline(command):
     import asyncio
 
+    env = _env_with_cca()
     deadline = _SHELL_DEADLINE_SECONDS.get()
     if deadline is None or deadline <= 0:
-        return await _orig_run_subprocess(command)
+        proc = await asyncio.create_subprocess_exec(
+            *command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=env,
+        )
+        stdout_b, stderr_b = await proc.communicate()
+        rc = proc.returncode if proc.returncode is not None else -1
+        return rc, stdout_b.decode(errors="replace"), stderr_b.decode(errors="replace")
 
     proc = await asyncio.create_subprocess_exec(
         *command,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        env=env,
     )
 
     # Keep dedicated reader tasks alive across the entire run so partial
@@ -124,6 +155,29 @@ ACTIVE_QTRACES: dict = {}  # qtrace_id → session dict
 
 CAPTURE_DIR = os.environ.get("CAPTURE_DIR", "/home/netreplica/config/captures")
 CTP_DIR = os.environ.get("CTP_DIR", "/home/netreplica/config/ctp")
+
+# CCAnalyzer-canonical wide-area TCP congestion-control algorithms.
+# Mapping: algorithm name (as accepted by sysctl) → kernel module name
+# (as accepted by modprobe). 15 entries — matches the CCAnalyzer paper. lp
+# and dctcp are intentionally excluded: they require in-network ECN/LEDBAT
+# support that is not available in the wide area.
+CCANALYZER_CCAS: Dict[str, str] = {
+    "bbr": "tcp_bbr",
+    "bic": "tcp_bic",
+    "cdg": "tcp_cdg",
+    "cubic": "tcp_cubic",
+    "highspeed": "tcp_highspeed",
+    "htcp": "tcp_htcp",
+    "hybla": "tcp_hybla",
+    "illinois": "tcp_illinois",
+    "nv": "tcp_nv",
+    "reno": "",  # built into the kernel; no module to load
+    "scalable": "tcp_scalable",
+    "vegas": "tcp_vegas",
+    "veno": "tcp_veno",
+    "westwood": "tcp_westwood",
+    "yeah": "tcp_yeah",
+}
 
 HEALTH_CACHE: dict = {}
 
@@ -460,6 +514,15 @@ class RunExperimentResponse(BaseModel):
         description=(
             "True iff any shell command in the workflow was force-terminated "
             "because it exceeded experiment_max_seconds."
+        ),
+    )
+    congestion_observed: Dict[str, int] = Field(
+        default_factory=dict,
+        description=(
+            "Aggregate of `cong:<algo>` fields seen on TCP sockets in ns1 "
+            "during workflow execution (sampled via `ss -tin` every 250 ms). "
+            "Maps CCA name → number of (sample, socket) pairs it appeared on. "
+            "Empty when no TCP sockets were live during the workflow."
         ),
     )
 
@@ -1507,12 +1570,105 @@ def _sysctl_get_available() -> List[str]:
     return result.stdout.strip().split()
 
 
+def _ensure_cca_loaded(algorithm: str) -> tuple[bool, str]:
+    """Make sure ``algorithm`` shows up in tcp_available_congestion_control.
+
+    Tries ``modprobe`` if not loaded yet. Returns (available, detail). On
+    Docker Desktop's LinuxKit kernel only cubic + reno are typically built
+    in; modprobe will fail there with a clear message rather than blowing
+    up the request.
+    """
+    if algorithm in _sysctl_get_available():
+        return True, "already loaded"
+    module = CCANALYZER_CCAS.get(algorithm)
+    if module is None:
+        return False, f"'{algorithm}' is not in the CCAnalyzer whitelist"
+    if not module:
+        return False, f"'{algorithm}' has no loadable module and is not built in"
+    result = subprocess.run(
+        f"modprobe {module}", shell=True, capture_output=True, text=True
+    )
+    if result.returncode != 0:
+        return False, (
+            f"modprobe {module} failed: "
+            f"{(result.stderr or result.stdout or '').strip()}"
+        )
+    if algorithm in _sysctl_get_available():
+        return True, f"loaded via modprobe {module}"
+    return False, f"modprobe {module} succeeded but '{algorithm}' still missing"
+
+
+# `ss -tin` renders the per-socket CC algorithm two different ways depending
+# on iproute2 version:
+#   - Newer (Debian bookworm, Ubuntu 22.04+): the algorithm appears as the
+#     first whitespace-separated token on the info line, immediately followed
+#     by `wscale:` — e.g. `\t cubic wscale:7,7 rto:227 ...`.
+#   - Older / certain flags: an explicit `cong:<algo>` field — e.g.
+#     `\t ... cong:bbr ...`.
+# We match either form so the observer works across distros.
+_SS_CONG_RE = re.compile(
+    r"\bcong:([a-z][a-z0-9_-]*)|(?:^|\s)([a-z][a-z0-9_-]*)\s+wscale:",
+    re.MULTILINE,
+)
+
+
+def _parse_ss_congestion(text: str) -> Dict[str, int]:
+    """Count per-socket CC algorithm names in `ss -tin` output."""
+    counts: Dict[str, int] = {}
+    for match in _SS_CONG_RE.finditer(text):
+        algo = match.group(1) or match.group(2)
+        if not algo:
+            continue
+        counts[algo] = counts.get(algo, 0) + 1
+    return counts
+
+
+def _observe_cca_in_ns(
+    ns: str,
+    stop_event: "threading.Event",
+    poll_interval_s: float = 0.25,
+) -> Dict[str, int]:
+    """Poll ``ss -tin`` in ``ns`` until ``stop_event`` fires; aggregate counts."""
+    seen: Dict[str, int] = {}
+    cmd = ["ip", "netns", "exec", ns, "ss", "-tin"]
+    while not stop_event.is_set():
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=2.0)
+            for algo, n in _parse_ss_congestion(proc.stdout).items():
+                seen[algo] = seen.get(algo, 0) + n
+        except (subprocess.TimeoutExpired, OSError):
+            pass
+        if stop_event.wait(poll_interval_s):
+            break
+    return seen
+
+
 def _apply_cca_in_ns(ns: Optional[str], algorithm: str) -> str:
-    key = "net.ipv4.tcp_congestion_control"
-    if ns and ns != "root":
-        cmd = f"ip netns exec {ns} sysctl -w {key}={algorithm}"
-    else:
-        cmd = f"sysctl -w {key}={algorithm}"
+    """Set the per-namespace default CCA, widening the allowed-list as needed.
+
+    Each net namespace has its own ``tcp_allowed_congestion_control`` gate —
+    even root can't write a CCA into ``tcp_congestion_control`` if it isn't
+    in that allowed list, which Linux initializes to ``reno cubic`` only.
+    The startup script widens this list at boot, but on-demand modprobe at
+    request time can race ahead, so we always make sure the allowed list
+    contains the current full available set before the sysctl write.
+    """
+    ns_prefix = f"ip netns exec {ns} " if ns and ns != "root" else ""
+    available = subprocess.run(
+        f"{ns_prefix}sysctl -n net.ipv4.tcp_available_congestion_control",
+        shell=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    if available:
+        subprocess.run(
+            f"{ns_prefix}sysctl -w "
+            f'net.ipv4.tcp_allowed_congestion_control="{available}"',
+            shell=True,
+            capture_output=True,
+            text=True,
+        )
+    cmd = f"{ns_prefix}sysctl -w net.ipv4.tcp_congestion_control={algorithm}"
     result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
     if result.returncode != 0 or "Operation not permitted" in (
         result.stderr + result.stdout
@@ -1526,13 +1682,27 @@ def set_congestion(cfg: CongestionRequest) -> CongestionResponse:
     algorithm = cfg.algorithm.strip().lower()
     applied: List[str] = []
 
-    available = _sysctl_get_available()
-
-    if algorithm not in available:
+    if algorithm not in CCANALYZER_CCAS:
         raise HTTPException(
             status_code=400,
-            detail=f"Algorithm '{algorithm}' not available. Available: {available}",
+            detail=(
+                f"Algorithm '{algorithm}' is not in the CCAnalyzer whitelist. "
+                f"Supported: {sorted(CCANALYZER_CCAS)}."
+            ),
         )
+
+    loaded, detail = _ensure_cca_loaded(algorithm)
+    if not loaded:
+        available = _sysctl_get_available()
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Algorithm '{algorithm}' is in the CCAnalyzer whitelist but not "
+                f"available in this kernel: {detail}. "
+                f"Currently loadable: {available}."
+            ),
+        )
+    available = _sysctl_get_available()
     # Determine which namespaces to configure
     if cfg.namespace is None:
         namespaces = ["root", "ns1", "ns2"]
@@ -1546,20 +1716,25 @@ def set_congestion(cfg: CongestionRequest) -> CongestionResponse:
             detail=f"Invalid namespace '{cfg.namespace}'. Use 'ns1', 'ns2', 'root', or null.",
         )
 
+    # Best-effort sysctl write — the substrate worker also injects an
+    # LD_PRELOAD cca_preload shim at workflow time that overrides the CCA
+    # per-socket via setsockopt(TCP_CONGESTION). That path has no
+    # namespace allowed-list gate, so even when sysctl returns EPERM in
+    # ns1/ns2 the workflow's TCP flow will use the requested algorithm.
+    sysctl_errors: list[str] = []
     for ns in namespaces:
         try:
             cmd = _apply_cca_in_ns(ns, algorithm)
             applied.append(cmd)
         except RuntimeError as exc:
-            raise HTTPException(
-                status_code=500,
-                detail=(f"Cannot set '{algorithm}' in namespace '{ns}': {exc}. "),
-            )
+            sysctl_errors.append(f"{ns}: {exc}")
 
     return CongestionResponse(
         current_algorithm=algorithm,
         available_algorithms=available,
-        status="ok",
+        status=(
+            "ok" if not sysctl_errors else "ok (sysctl override deferred to LD_PRELOAD)"
+        ),
         applied_commands=applied,
     )
 
@@ -1680,6 +1855,18 @@ def run_experiment(req: RunExperimentRequest) -> RunExperimentResponse:
     deadline_token = None
     if req.experiment_max_seconds:
         deadline_token = _SHELL_DEADLINE_SECONDS.set(float(req.experiment_max_seconds))
+    cca_token = _REQUEST_TCP_CCA.set(req.cca)
+
+    observer_stop = threading.Event()
+    observer_result: Dict[str, Dict[str, int]] = {"counts": {}}
+
+    def _observer() -> None:
+        observer_result["counts"] = _observe_cca_in_ns("ns1", observer_stop)
+
+    observer_thread = threading.Thread(
+        target=_observer, name="cca-observer", daemon=True
+    )
+    observer_thread.start()
 
     try:
         client = NetGent(
@@ -1698,6 +1885,9 @@ def run_experiment(req: RunExperimentRequest) -> RunExperimentResponse:
         _SHELL_DEADLINE_TRIGGERED.reset(triggered_token)
         if deadline_token is not None:
             _SHELL_DEADLINE_SECONDS.reset(deadline_token)
+        _REQUEST_TCP_CCA.reset(cca_token)
+        observer_stop.set()
+        observer_thread.join(timeout=2.0)
 
     run_result = result.get("result", result) if isinstance(result, dict) else result
     return RunExperimentResponse(
@@ -1705,6 +1895,7 @@ def run_experiment(req: RunExperimentRequest) -> RunExperimentResponse:
         runtime=req.runtime,
         result=run_result if isinstance(run_result, list) else [run_result],
         terminated_at_deadline=terminated_at_deadline,
+        congestion_observed=observer_result["counts"],
     )
 
 

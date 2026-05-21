@@ -267,6 +267,16 @@ tc qdisc  add     dev veth2 parent 1:10 handle 10: fq_codel limit 1000 target 5m
 ip netns exec ns1 tc qdisc add dev veth1 root netem delay 50ms
 ```
 
+## Host requirements (important for CC algorithm support)
+
+The substrate worker uses the **host kernel** for everything below the application layer — there is no per-container kernel. To run experiments against the full set of CCAnalyzer congestion-control algorithms (bbr, bic, cdg, cubic, highspeed, htcp, hybla, illinois, nv, reno, scalable, vegas, veno, westwood, yeah), the host must satisfy three things:
+
+1. **Real Linux host with a stock-style kernel.** Ubuntu, Debian, Fedora, RHEL, Amazon Linux 2, etc. all work out of the box. Docker Desktop on macOS / Windows runs a minimal **LinuxKit kernel** that is built with `CONFIG_TCP_CONG_ADVANCED=N` and ships *only `cubic` and `reno`* — the other 13 CCAs are physically not available in that kernel and cannot be added without rebuilding it. If you need all 15 CCAs on a Mac/Windows workstation, run this stack on an EC2 instance, a Linux VM (Lima, Multipass, etc.), or a Linux dev box rather than Docker Desktop.
+2. **`linux-modules-extra-$(uname -r)` (or equivalent) installed on the host.** Ubuntu/Debian ship the 14 loadable `tcp_*` modules in a separate package — without it the worker can still set `cubic`/`reno` but will reject everything else with a clear `modprobe ... Module tcp_<algo> not found` 400.
+3. **`/lib/modules` bind-mounted into the container** (already wired up in `docker-compose.yml` and in the orchestrator's ephemeral-worker provisioner). This gives the privileged worker visibility into the host's kernel modules so it can `modprobe tcp_<algo>` on demand.
+
+On startup the setup script attempts `modprobe tcp_<algo>` for each of the 14 loadable CCAs and logs which loaded vs were skipped, so the worker's first few log lines are the canonical source of truth for what your host supports. The runtime `/run` endpoint also returns a `congestion_observed` field per request that aggregates `ss -tin` samples from inside ns1 — use it to confirm the configured CCA was *actually* used by the application (rather than silently downgraded to cubic).
+
 ## Configuration
 
 | Variable | Default | Purpose |

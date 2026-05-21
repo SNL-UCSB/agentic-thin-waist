@@ -157,6 +157,11 @@ services:
       - substrate-runtime:/var/run/substrate
       - ${SUBSTRATE_CTP_DIR:-/tmp/substrate-ctp}:${SUBSTRATE_CTP_DIR:-/tmp/substrate-ctp}
       - ${SUBSTRATE_CAPTURE_DIR:-/tmp/substrate-capture}:${SUBSTRATE_CAPTURE_DIR:-/tmp/substrate-capture}
+      # Read-only mount of the host kernel's module directory so the worker
+      # can `modprobe tcp_<algo>` the 14 loadable CCAnalyzer CCAs at startup.
+      # No-op on Docker Desktop (LinuxKit kernel ships no loadable modules);
+      # required on real Linux hosts (EC2, on-prem) for non-cubic/reno CCAs.
+      - /lib/modules:/lib/modules:ro
     # Substrate worker requires privileged mode to use tc (traffic control)
     privileged: true
     cap_add:
