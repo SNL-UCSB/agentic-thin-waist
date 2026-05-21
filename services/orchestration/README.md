@@ -76,6 +76,30 @@ curl http://localhost:8005/health
 # Reports reachability of: experiment-api, ctp-service, substrate-worker, telemetry-service, netgent-service
 ```
 
+### CLI (no curl required)
+`scripts/orch_cli.py` is a stdlib-only wrapper around the four most common
+orchestration interactions — submitting intents, polling status, listing
+experiment IDs, and printing a detailed debug view. It writes nothing to
+disk and takes no third-party deps.
+
+```bash
+# Submit an intent — prints the orchestration_id on stdout.
+ORCH_ID=$(python services/orchestration/scripts/orch_cli.py intent \
+    "Run iperf3 at 40 Mbps under cubic and bbr")
+
+# Poll status every 5s; exits 0 on complete, 1 on failed.
+python services/orchestration/scripts/orch_cli.py status "$ORCH_ID"
+
+# List the generated experiment IDs (one per line).
+python services/orchestration/scripts/orch_cli.py get_id "$ORCH_ID"
+
+# Detailed dump — status, experiments, lifecycle, results, reasoning.
+python services/orchestration/scripts/orch_cli.py debug "$ORCH_ID"
+```
+
+The orchestrator URL defaults to `http://localhost:8005`; override with
+`--url http://host:port` or the `ORCH_URL` environment variable.
+
 ---
 
 ## HTTP API
