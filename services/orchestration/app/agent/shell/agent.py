@@ -423,18 +423,27 @@ def choose_workflow(
             str(msg.content) for msg in prompt if hasattr(msg, "content")
         ),
     )
-    result: ChooseWorkflow = with_structured_output(model, ChooseWorkflow).invoke(
-        prompt
-    )
-    print(
-        f"[SHELL WF] LLM choose_workflow: is_valid={result.is_valid} "
-        f"id={result.id!r} params={result.parameters}"
-    )
-    log_claude_step(
-        "shell_choose_workflow",
-        reasoning=result.reasoning,
-        output=result.model_dump(),
-    )
+    # The structured picker is non-deterministic and occasionally returns
+    # is_valid=False for intents that clearly match a library workflow
+    # (observed: identical wget intents rejected against test_wget_workflow on
+    # 4 of 15 sweep runs). Try twice before giving up; LLM temperature
+    # variation typically resolves the flake without changing legitimate
+    # "no match" verdicts (which stay False on both attempts).
+    result: ChooseWorkflow | None = None
+    for attempt in range(2):
+        result = with_structured_output(model, ChooseWorkflow).invoke(prompt)
+        print(
+            f"[SHELL WF] LLM choose_workflow attempt={attempt + 1}/2: "
+            f"is_valid={result.is_valid} id={result.id!r} "
+            f"params={result.parameters}"
+        )
+        log_claude_step(
+            "shell_choose_workflow",
+            reasoning=result.reasoning,
+            output=result.model_dump(),
+        )
+        if result.is_valid and result.id:
+            break
 
     if result.is_valid and result.id:
         return _pin_shell_workflow(
