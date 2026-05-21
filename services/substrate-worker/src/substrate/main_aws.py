@@ -64,20 +64,47 @@ _SHELL_DEADLINE_TRIGGERED: "_contextvars.ContextVar[list]" = _contextvars.Contex
     "substrate_shell_deadline_triggered", default=[False]
 )
 
+_REQUEST_TCP_CCA: "_contextvars.ContextVar[Optional[str]]" = _contextvars.ContextVar(
+    "substrate_request_tcp_cca", default=None
+)
+_CCA_PRELOAD_SO = "/usr/local/lib/cca_preload.so"
+
+
+def _env_with_cca() -> dict:
+    env = os.environ.copy()
+    cca = _REQUEST_TCP_CCA.get()
+    if not cca:
+        return env
+    existing = env.get("LD_PRELOAD", "").strip()
+    env["LD_PRELOAD"] = f"{_CCA_PRELOAD_SO}:{existing}" if existing else _CCA_PRELOAD_SO
+    env["TCP_CCA"] = cca
+    return env
+
+
 _orig_run_subprocess = _netgent_exec.run_subprocess
 
 
 async def _run_subprocess_with_deadline(command):
     import asyncio
 
+    env = _env_with_cca()
     deadline = _SHELL_DEADLINE_SECONDS.get()
     if deadline is None or deadline <= 0:
-        return await _orig_run_subprocess(command)
+        proc = await asyncio.create_subprocess_exec(
+            *command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=env,
+        )
+        stdout_b, stderr_b = await proc.communicate()
+        rc = proc.returncode if proc.returncode is not None else -1
+        return rc, stdout_b.decode(errors="replace"), stderr_b.decode(errors="replace")
 
     proc = await asyncio.create_subprocess_exec(
         *command,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        env=env,
     )
 
     # Keep dedicated reader tasks alive across the entire run so partial
@@ -1374,20 +1401,24 @@ def set_congestion(cfg: CongestionRequest) -> CongestionResponse:
             detail=f"Invalid namespace '{cfg.namespace}'. Use 'ns1', 'ns2', 'root', or null.",
         )
 
+    # Best-effort sysctl write — the substrate worker also injects an
+    # LD_PRELOAD cca_preload shim at workflow time that overrides the CCA
+    # per-socket via setsockopt(TCP_CONGESTION). That path has no
+    # namespace allowed-list gate.
+    sysctl_errors: list[str] = []
     for ns in namespaces:
         try:
             cmd = _apply_cca_in_ns(ns, algorithm)
             applied.append(cmd)
         except RuntimeError as exc:
-            raise HTTPException(
-                status_code=500,
-                detail=(f"Cannot set '{algorithm}' in namespace '{ns}': {exc}. "),
-            )
+            sysctl_errors.append(f"{ns}: {exc}")
 
     return CongestionResponse(
         current_algorithm=algorithm,
         available_algorithms=available,
-        status="ok",
+        status=(
+            "ok" if not sysctl_errors else "ok (sysctl override deferred to LD_PRELOAD)"
+        ),
         applied_commands=applied,
     )
 
@@ -1508,6 +1539,7 @@ def run_experiment(req: RunExperimentRequest) -> RunExperimentResponse:
     deadline_token = None
     if req.experiment_max_seconds:
         deadline_token = _SHELL_DEADLINE_SECONDS.set(float(req.experiment_max_seconds))
+    cca_token = _REQUEST_TCP_CCA.set(req.cca)
 
     observer_stop = threading.Event()
     observer_result: Dict[str, Dict[str, int]] = {"counts": {}}
@@ -1537,6 +1569,7 @@ def run_experiment(req: RunExperimentRequest) -> RunExperimentResponse:
         _SHELL_DEADLINE_TRIGGERED.reset(triggered_token)
         if deadline_token is not None:
             _SHELL_DEADLINE_SECONDS.reset(deadline_token)
+        _REQUEST_TCP_CCA.reset(cca_token)
         observer_stop.set()
         observer_thread.join(timeout=2.0)
 

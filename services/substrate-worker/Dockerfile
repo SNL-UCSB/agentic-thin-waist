@@ -35,9 +35,18 @@ RUN apt-get update && apt-get install -y \
     speedtest-cli tcpreplay \
     python3-flask python3-requests \
     sudo util-linux kmod \
+    gcc libc6-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
+
+# Build the CCA preload shim. Lets per-flow setsockopt(TCP_CONGESTION)
+# bypass the kernel's "tcp_allowed_congestion_control" gate that
+# otherwise rejects non-default CCAs in non-init net namespaces. See
+# src/cca_preload/cca_preload.c for the full rationale.
+COPY services/substrate-worker/src/cca_preload/cca_preload.c /tmp/cca_preload.c
+RUN gcc -O2 -fPIC -shared -o /usr/local/lib/cca_preload.so /tmp/cca_preload.c -ldl \
+    && rm /tmp/cca_preload.c
 
 COPY --from=ndt-builder /usr/local/bin/ndt7-client /usr/local/bin/ndt-client
 

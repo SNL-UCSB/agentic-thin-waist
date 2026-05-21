@@ -68,20 +68,56 @@ _SHELL_DEADLINE_TRIGGERED: "_contextvars.ContextVar[list]" = _contextvars.Contex
     "substrate_shell_deadline_triggered", default=[False]
 )
 
+# Per-request CCA name. The patched run_subprocess injects LD_PRELOAD and
+# TCP_CCA env vars so the cca_preload shim sets the algorithm on each TCP
+# socket via setsockopt — the only path that works in non-init netns when
+# the algo isn't in tcp_allowed_congestion_control.
+_REQUEST_TCP_CCA: "_contextvars.ContextVar[Optional[str]]" = _contextvars.ContextVar(
+    "substrate_request_tcp_cca", default=None
+)
+_CCA_PRELOAD_SO = "/usr/local/lib/cca_preload.so"
+
+
+def _env_with_cca() -> dict:
+    """Build a child env that activates the cca_preload shim for this run."""
+    env = os.environ.copy()
+    cca = _REQUEST_TCP_CCA.get()
+    if not cca:
+        return env
+    # Compose LD_PRELOAD so we don't clobber any pre-existing preload.
+    existing = env.get("LD_PRELOAD", "").strip()
+    env["LD_PRELOAD"] = f"{_CCA_PRELOAD_SO}:{existing}" if existing else _CCA_PRELOAD_SO
+    env["TCP_CCA"] = cca
+    return env
+
+
 _orig_run_subprocess = _netgent_exec.run_subprocess
 
 
 async def _run_subprocess_with_deadline(command):
     import asyncio
 
+    env = _env_with_cca()
     deadline = _SHELL_DEADLINE_SECONDS.get()
     if deadline is None or deadline <= 0:
-        return await _orig_run_subprocess(command)
+        # Fast path: no deadline. Reuse the original runner but pass our env.
+        # The original runner doesn't take an env kwarg, so we replicate its
+        # shape inline rather than monkey-patching it twice.
+        proc = await asyncio.create_subprocess_exec(
+            *command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=env,
+        )
+        stdout_b, stderr_b = await proc.communicate()
+        rc = proc.returncode if proc.returncode is not None else -1
+        return rc, stdout_b.decode(errors="replace"), stderr_b.decode(errors="replace")
 
     proc = await asyncio.create_subprocess_exec(
         *command,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        env=env,
     )
 
     # Keep dedicated reader tasks alive across the entire run so partial
@@ -1370,20 +1406,29 @@ def set_congestion(cfg: CongestionRequest) -> CongestionResponse:
             detail=f"Invalid namespace '{cfg.namespace}'. Use 'ns1', 'ns2', 'root', or null.",
         )
 
+    # Best-effort: try the per-namespace sysctl write, but don't 500 if the
+    # kernel rejects it. Linux gates `tcp_congestion_control` writes in
+    # non-init network namespaces on `tcp_allowed_congestion_control`,
+    # which is a global sysctl only the host's init netns can modify. So
+    # in ns1 / ns2 only cubic + reno (the kernel's default allowed pair)
+    # can be set this way. The substrate worker compensates by injecting
+    # the cca_preload LD_PRELOAD shim into workflow subprocesses, which
+    # uses per-socket setsockopt(TCP_CONGESTION) — that path has no
+    # namespace restriction.
+    sysctl_errors: list[str] = []
     for ns in namespaces:
         try:
             cmd = _apply_cca_in_ns(ns, algorithm)
             applied.append(cmd)
         except RuntimeError as exc:
-            raise HTTPException(
-                status_code=500,
-                detail=(f"Cannot set '{algorithm}' in namespace '{ns}': {exc}. "),
-            )
+            sysctl_errors.append(f"{ns}: {exc}")
 
     return CongestionResponse(
         current_algorithm=algorithm,
         available_algorithms=available,
-        status="ok",
+        status=(
+            "ok" if not sysctl_errors else "ok (sysctl override deferred to LD_PRELOAD)"
+        ),
         applied_commands=applied,
     )
 
@@ -1505,6 +1550,13 @@ def run_experiment(req: RunExperimentRequest) -> RunExperimentResponse:
     if req.experiment_max_seconds:
         deadline_token = _SHELL_DEADLINE_SECONDS.set(float(req.experiment_max_seconds))
 
+    # Pin the per-request CCA so the patched run_subprocess injects
+    # LD_PRELOAD=cca_preload.so + TCP_CCA=<algo> into the workflow's env.
+    # This is what makes the configured CCA actually stick for the wget /
+    # iperf3 / etc. socket — sysctl in ns1 can't change the default to
+    # non-allowed CCAs, but setsockopt(TCP_CONGESTION) can.
+    cca_token = _REQUEST_TCP_CCA.set(req.cca)
+
     # Background CCA observer: polls `ss -tin` in ns1 every 250 ms during the
     # workflow so we can confirm the configured CCA was actually used by the
     # application. Result lands in `congestion_observed` on the response.
@@ -1536,6 +1588,7 @@ def run_experiment(req: RunExperimentRequest) -> RunExperimentResponse:
         _SHELL_DEADLINE_TRIGGERED.reset(triggered_token)
         if deadline_token is not None:
             _SHELL_DEADLINE_SECONDS.reset(deadline_token)
+        _REQUEST_TCP_CCA.reset(cca_token)
         observer_stop.set()
         observer_thread.join(timeout=2.0)
 
