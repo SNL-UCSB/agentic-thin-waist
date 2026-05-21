@@ -928,6 +928,8 @@ class ConnectivityManager:
         runtime: str = "shell",
         parameters: dict[str, str] | None = None,
         experiment_max_seconds: float | None = None,
+        cca: str | None = None,
+        cca_namespace: str | None = None,
     ) -> dict[str, Any]:
         """Execute a workflow on the worker via ``POST /run``.
 
@@ -939,6 +941,11 @@ class ConnectivityManager:
         timeout the process is SIGTERMed/SIGKILLed and the response carries
         ``terminated_at_deadline=True`` — the run still produces partial
         stdout/stderr and a usable pcap/qtrace pair.
+
+        ``cca`` / ``cca_namespace`` must be forwarded so the substrate ``/run``
+        handler pins the per-request LD_PRELOAD shim to the right algorithm.
+        Without this the substrate request schema defaults ``cca`` to ``cubic``
+        and silently overrides whatever ``/congestion`` set.
         """
         info = self._backend.get_worker_info(worker_id)
         payload: dict[str, Any] = {
@@ -949,6 +956,10 @@ class ConnectivityManager:
             payload["parameters"] = parameters
         if experiment_max_seconds is not None and experiment_max_seconds > 0:
             payload["experiment_max_seconds"] = float(experiment_max_seconds)
+        if cca:
+            payload["cca"] = cca
+        if cca_namespace:
+            payload["cca_namespace"] = cca_namespace
 
         with httpx.Client(timeout=300) as client:
             resp = client.post(f"{info.endpoint}/run", json=payload)
@@ -1044,6 +1055,8 @@ class ConnectivityManager:
             runtime=runtime,
             parameters=parameters,
             experiment_max_seconds=experiment_max_seconds,
+            cca=cca,
+            cca_namespace=cca_namespace,
         )
 
         # --- Telemetry persistence ---
