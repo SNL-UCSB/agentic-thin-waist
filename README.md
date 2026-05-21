@@ -86,6 +86,8 @@ Tip: skip the manual paste with
 EXPERIMENT_ID=$EXP jupyter nbconvert --to notebook --execute --inplace services/analysis/analyze_queue.ipynb
 ```
 
+Running the stack on a remote VM and want the plots on your laptop? See [services/analysis/README.md § Headless](services/analysis/README.md#headless--running-on-a-remote-vm-and-viewing-on-your-laptop) for the venv setup, HTML render, and `scp`-back recipe.
+
 ### 6. Tear everything down
 ```bash
 make down                       # stop containers, keep volumes (fast restart)

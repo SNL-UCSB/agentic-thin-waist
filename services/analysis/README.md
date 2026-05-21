@@ -52,6 +52,74 @@ For the default Quick Start command (10 Mbps, pfifo, 200-packet buffer, cubic, 3
 
 If the download panel goes idle in the middle of the run, or the queue stays at 0, your pcap was either captured on the wrong interface or your workflow didn't actually run — check `GET /orchestration/{id}` for an error.
 
+## Headless — running on a remote VM and viewing on your laptop
+
+When the stack runs on a remote VM (typical SNL setup), there's no browser to open the notebook in. The flow is: execute the notebook on the VM into a self-contained HTML file, then `scp` that file back to your laptop and open it locally.
+
+### 1. (On the VM) install Jupyter + analysis deps in a venv
+
+Ubuntu 24.04 blocks plain `pip install` to system Python (PEP 668), so use a venv. The `jupyter-core` apt package only ships the dispatcher, not subcommands like `nbconvert` — uninstall it if it's in the way:
+
+```bash
+sudo apt remove -y jupyter-core    # optional; system pkg is in the way and ships old versions
+sudo apt install -y python3-venv
+
+cd ~/agentic-thin-waist
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install jupyter nbconvert ipykernel matplotlib pandas scapy requests
+```
+
+When you come back later, just `source ~/agentic-thin-waist/.venv/bin/activate` first — no need to reinstall.
+
+### 2. (On the VM) render the notebook to HTML
+
+Run from the **repo root** (the notebook adds `services/analysis` to `sys.path` by walking up from `cwd`, so launching elsewhere breaks imports). Substitute your real experiment ID:
+
+```bash
+EXPERIMENT_ID=wget_10_10_20_pfifo_cubic_83423825 \
+TELEMETRY_BASE=http://localhost:8004 \
+jupyter nbconvert --to html --execute \
+  services/analysis/analyze_queue.ipynb \
+  --output analyze_queue.html
+```
+
+This produces `services/analysis/analyze_queue.html` — a self-contained HTML file with every cell's output and plot embedded. Confirm it exists and has non-zero size:
+
+```bash
+ls -la services/analysis/analyze_queue.html
+```
+
+Other output formats: `--to notebook --execute --output executed_analyze_queue.ipynb` (saves results back into an `.ipynb`), or `--to script` then `python` (no plots — useful only for quick numerical checks).
+
+### 3. (On your laptop) pull the HTML over `scp`
+
+`scp` runs **on your laptop**, not from inside the SSH session — open a new terminal on the laptop. Format is `scp -P <port> <user>@<host>:<remote-path> <local-path>`:
+
+```bash
+scp -P 2201 student@<vm-host>:~/agentic-thin-waist/services/analysis/analyze_queue.html ~/Downloads/
+```
+
+Then open it:
+
+```bash
+open  ~/Downloads/analyze_queue.html      # macOS
+xdg-open ~/Downloads/analyze_queue.html   # Linux
+start ~\Downloads\analyze_queue.html      # Windows (PowerShell)
+```
+
+Use **capital `-P`** for the port — lowercase `-p` means something else for `scp`. The password is the same one used for `ssh`.
+
+**Alternative — VS Code Remote-SSH:** If you're connected via VS Code Remote-SSH, skip the `scp` step. Right-click `analyze_queue.html` in the file explorer and pick **Download…**, or use the "Live Preview" extension to view it in the editor.
+
+### Common failures
+
+- **`Jupyter command 'jupyter-nbconvert' not found`** — you have `jupyter-core` from apt but not the `nbconvert` package. Activate the venv and `pip install nbconvert`.
+- **`NoSuchKernel: python3`** — `ipykernel` isn't installed in the venv. `pip install ipykernel`.
+- **`ImportError: services.analysis`** — you ran `nbconvert` from somewhere other than the repo root. `cd ~/agentic-thin-waist` and try again.
+- **`no telemetry rows for <id>`** — that `EXPERIMENT_ID` isn't in your telemetry DB. Did the orchestration actually finish (`status: complete`)? Pull a real ID with the snippet in [the root README §4](../../README.md#4-pull-the-experiment--result-ids).
+
 ## Using the modules directly
 
 If you want to script your own analysis or work on a pcap that isn't in telemetry:
