@@ -9,9 +9,9 @@ A five-minute walkthrough: bring the stack up, run one shaped wget download, pul
 ### Prerequisites
 - macOS or Linux host with **Docker + Docker Compose v2** (Docker Desktop 24+ works).
 - **`sudo`** (only if your user is not in the `docker` group — `docker compose up` needs to write to the docker socket).
-- `curl` and `jq` on the host (used for status polling below).
+- `curl` on the host.
 - An LLM API key — `ANTHROPIC_API_KEY` *or* `GOOGLE_API_KEY` (set `ORCHESTRATOR_LLM_PROVIDER=gemini` if you use Google).
-- Python 3.10+ with `jupyter` only if you want to run the analysis notebook locally (otherwise open it in the VS Code Jupyter extension).
+- Python 3.10+ — used by the Quick Start snippets below to extract IDs from JSON, and required for running the analysis notebook locally (otherwise open it in the VS Code Jupyter extension).
 
 ### 1. Boot the stack
 ```bash
@@ -40,13 +40,13 @@ ORCH_ID=$(curl -s -X POST http://localhost:8005/intent \
       "duration_seconds": 30,
       "num_trials": 1
     }
-  }' | jq -r .orchestration_id)
+  }' | python3 -c "import json,sys;print(json.load(sys.stdin)['orchestration_id'])")
 echo "orchestration_id = $ORCH_ID"
 ```
 
 ### 3. Watch the experiment run
 ```bash
-while STATUS=$(curl -s http://localhost:8005/orchestration/$ORCH_ID | jq -r .status); \
+while STATUS=$(curl -s http://localhost:8005/orchestration/$ORCH_ID | python3 -c "import json,sys;print(json.load(sys.stdin)['status'])"); \
       [ "$STATUS" != "complete" ] && [ "$STATUS" != "failed" ]; do
   echo "$(date +%T) $STATUS"
   sleep 5
@@ -59,9 +59,9 @@ Expect ~1.5–2 minutes total: ephemeral worker provisioning, the synchronized c
 ### 4. Pull the experiment + result IDs
 ```bash
 EXP=$(curl -s http://localhost:8005/orchestration/$ORCH_ID/results \
-        | jq -r '.results[0].experiment_id')
+        | python3 -c "import json,sys;print(json.load(sys.stdin)['results'][0]['experiment_id'])")
 RID=$(curl -s "http://localhost:8004/results?experiment_id=$EXP&limit=1" \
-        | jq -r '.results[0].result_id')
+        | python3 -c "import json,sys;print(json.load(sys.stdin)['results'][0]['result_id'])")
 echo "exp=$EXP  rid=$RID"
 ```
 
