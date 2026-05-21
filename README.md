@@ -13,13 +13,17 @@ A five-minute walkthrough: bring the stack up, run one shaped wget download, pul
 - An LLM API key — `ANTHROPIC_API_KEY` *or* `GOOGLE_API_KEY` (set `ORCHESTRATOR_LLM_PROVIDER=gemini` if you use Google).
 - Python 3.10+ — used by the Quick Start snippets below to extract IDs from JSON, and required for running the analysis notebook locally (otherwise open it in the VS Code Jupyter extension).
 
-### 1. Boot the stack
+### 1. Clone and boot the stack
 ```bash
+git clone --recurse-submodules https://github.com/SNL-UCSB/agentic-thin-waist.git
+cd agentic-thin-waist
 cp .env.example .env            # then edit .env and paste your API key
 make build                      # docker compose build
 make up                         # docker compose up -d, waits for /health, prints URLs
 make status                     # docker compose ps — every service should be (healthy)
 ```
+
+`--recurse-submodules` pulls the NetGent submodule under `shared/clients/netgent`. If you already cloned without it, run `git submodule update --init --recursive`.
 
 > Equivalent raw commands: `docker compose build && docker compose up -d && docker compose ps`.
 
@@ -193,10 +197,12 @@ The Quick Start above covers the happy path. This section is the reference: full
 
 ### 1. Clone and configure
 ```bash
-git clone git@github.com:SNL-UCSB/agentic-thin-waist.git
+git clone --recurse-submodules git@github.com:SNL-UCSB/agentic-thin-waist.git
 cd agentic-thin-waist
 cp .env.example .env        # then edit .env with your API key + paths
 ```
+
+`--recurse-submodules` pulls the NetGent submodule under `shared/clients/netgent`. If you already cloned without it, run `git submodule update --init --recursive`.
 
 ### 2. Build and start the stack
 ```bash
