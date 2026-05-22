@@ -10,6 +10,18 @@ RUNTIME_DIR="/var/run/substrate"
 # Enable forwarding
 sysctl -w net.ipv4.ip_forward=1
 
+# Idempotent cleanup: a prior container can leave host network namespaces and
+# veth pairs around (substrate runs privileged and manipulates host netns), so
+# a fresh restart would fail with "File exists" on `ip netns add ns1`.
+ip link set $BR down 2>/dev/null || true
+ip link delete $BR type bridge 2>/dev/null || true
+for _i in veth2 veth4 veth6 veth1 veth3 veth5; do
+    ip link delete $_i 2>/dev/null || true
+done
+ip netns delete $NS1 2>/dev/null || true
+ip netns delete $NS2 2>/dev/null || true
+iptables -t nat -F 2>/dev/null || true
+
 ########################
 # Downstream namespace #
 ########################
