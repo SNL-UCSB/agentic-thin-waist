@@ -39,7 +39,7 @@ def test_get_model_uses_gemini_when_configured(monkeypatch):
     model = utils.get_model()
 
     assert isinstance(model, DummyGoogle)
-    assert captured["model"] == "gemini-3.1-flash-lite-preview"
+    assert captured["model"] == "gemini-3.1-flash-lite"
     assert captured["google_api_key"].get_secret_value() == "google-key"
 
 

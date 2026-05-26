@@ -95,7 +95,7 @@ def get_model() -> BaseChatModel:
     model_name = (
         os.environ.get("ORCHESTRATOR_GOOGLE_MODEL")
         or os.environ.get("GOOGLE_MODEL")
-        or "gemini-3.1-flash-lite-preview"
+        or "gemini-3.1-flash-lite"
     )
     return ChatGoogleGenerativeAI(
         model=model_name,
