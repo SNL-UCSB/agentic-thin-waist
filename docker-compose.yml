@@ -271,6 +271,11 @@ services:
       - S3_CONNECTION_RETRIES=${S3_CONNECTION_RETRIES}
       - S3_CONNECTION_TIMEOUT_SECONDS=${S3_CONNECTION_TIMEOUT_SECONDS}
       - NETGENT_QUEUE_CONCURRENCY=${NETGENT_QUEUE_CONCURRENCY:-1}
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import os; os.kill(1, 0)'"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
     depends_on:
       netgent-service:
         condition: service_healthy
