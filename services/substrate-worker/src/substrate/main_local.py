@@ -1342,7 +1342,26 @@ def _apply_cca_in_ns(ns: Optional[str], algorithm: str) -> str:
     The startup script widens this list at boot, but on-demand modprobe at
     request time can race ahead, so we always make sure the allowed list
     contains the current full available set before the sysctl write.
+
+    Non-init netns gating: a child netns can only allow a subset of init
+    netns's allowed list, so before widening ns1/ns2 we always widen init
+    netns first. Without this step a Go binary in ns1 (no LD_PRELOAD shim)
+    inherits ns1's stuck-at-cubic default no matter what we asked for.
     """
+    init_available = subprocess.run(
+        "sysctl -n net.ipv4.tcp_available_congestion_control",
+        shell=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    if init_available:
+        subprocess.run(
+            f'sysctl -w net.ipv4.tcp_allowed_congestion_control="{init_available}"',
+            shell=True,
+            capture_output=True,
+            text=True,
+        )
+
     ns_prefix = f"ip netns exec {ns} " if ns and ns != "root" else ""
     available = subprocess.run(
         f"{ns_prefix}sysctl -n net.ipv4.tcp_available_congestion_control",
