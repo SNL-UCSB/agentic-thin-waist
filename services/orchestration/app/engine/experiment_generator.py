@@ -236,9 +236,7 @@ class ExperimentGenerator:
                 download = _fmt_num(cap)
                 upload = _fmt_num(parsed_intent.get("upload_mbps") or cap)
                 base_lat = _fmt_num(lat)
-                prefix = (
-                    f"{app_slug}_{download}_{upload}_{base_lat}_{aqm_policy}_{cc}"
-                )
+                prefix = f"{app_slug}_{download}_{upload}_{base_lat}_{aqm_policy}_{cc}"
                 exp_id = self._mint_unique_id(prefix, used, id_taken)
                 used.add(exp_id)
 

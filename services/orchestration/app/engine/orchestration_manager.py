@@ -628,9 +628,7 @@ def _run_experiment_on_worker(
                 qdisc_params=spec.get("qdisc_params") or None,
                 verify=False,
             )
-            manager.apply_congestion(
-                worker.worker_id, algorithm=cca, namespace="ns1"
-            )
+            manager.apply_congestion(worker.worker_id, algorithm=cca, namespace="ns1")
             thread_results["shaping"] = {"status": "ok"}
             print(f"[MULTI-APP] Shaping + CCA applied (pre-boundary)")
         except Exception as exc:
@@ -879,7 +877,9 @@ def _run_experiment_on_worker(
                 exp_id,
                 len(multi_workflows),
             )
-            print(f"[STEP 3/4] Experiment {exp_id} → SUCCESS ({len(multi_workflows)} apps)")
+            print(
+                f"[STEP 3/4] Experiment {exp_id} → SUCCESS ({len(multi_workflows)} apps)"
+            )
         else:
             result["status"] = "failed"
             result["error"] = "; ".join(run_failures)
