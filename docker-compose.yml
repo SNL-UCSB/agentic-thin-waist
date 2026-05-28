@@ -146,6 +146,10 @@ services:
       - CTP_DIR=${SUBSTRATE_CTP_DIR:-/tmp/substrate-ctp}
       - NETGENT_USE_LOCAL=${NETGENT_USE_LOCAL:-false}
       - NETGENT_NAMESPACE=${NETGENT_NAMESPACE:-ns1}
+      # Browserless session timeout (ms). Default is only 30s which kills long
+      # browser workflows (e.g. sitting in a Zoom meeting) mid-run.
+      - TIMEOUT=${BROWSERLESS_SESSION_TIMEOUT_MS:-600000}
+      - BROWSERLESS_WS_ENDPOINT=ws://127.0.0.1:3000/chromium/playwright?timeout=${BROWSERLESS_SESSION_TIMEOUT_MS:-600000}
     depends_on:
       - telemetry-service
     networks:
@@ -357,6 +361,7 @@ services:
       - CONNECTIVITY_BACKEND=${CONNECTIVITY_BACKEND:-local_docker}
       - SUBSTRATE_WORKER_URL=http://substrate-worker:8002
       - NETGENT_SERVICE_URL=http://netgent-service:8003
+      - BROWSERLESS_WS_ENDPOINT=${BROWSERLESS_WS_ENDPOINT:-ws://substrate-worker:3000/chromium/playwright}
       - SUBSTRATE_WORKER_IMAGE=${SUBSTRATE_WORKER_IMAGE:-agentic-thin-waist-substrate-worker}
       - SUBSTRATE_DOCKER_NETWORK=${SUBSTRATE_DOCKER_NETWORK:-agentic-thin-waist_agentic-network}
       - SUBSTRATE_WORKER_HOST=172.25.0.1

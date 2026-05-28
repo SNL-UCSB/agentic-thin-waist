@@ -1,20 +1,26 @@
 """
-End-to-end smoke test: submit an iperf3 intent to the orchestrator and
-follow the pipeline live — including server-side print statements streamed
-directly from the orchestration container logs.
+End-to-end smoke test: join a Zoom meeting via the orchestration service.
+
+The orchestrator parses the intent, selects the run_zoom_workflow from the
+browser workflow library, spins up an ephemeral substrate worker with a
+headless Chromium session, joins the meeting for `wait_seconds`, captures
+traffic on veth2, and uploads the pcap + qtrace to telemetry.
 
 Usage (from repo root):
-    python3 services/orchestration/scripts/test_orchestration_manager.py
+    python3 services/orchestration/scripts/test_orchestration_zoom.py
 
-    # Custom orchestrator URL or container name:
-    ORCH_URL=http://localhost:8005 python3 services/orchestration/scripts/test_orchestration_manager.py
-    ORCH_CONTAINER=orchestration python3 services/orchestration/scripts/test_orchestration_manager.py
+Override defaults via env vars:
+    ORCH_URL            Orchestration base URL  (default: http://localhost:8005)
+    TELEMETRY_URL       Telemetry base URL       (default: http://localhost:8004)
+    ORCH_CONTAINER      Container name for log streaming (default: orchestration)
+    POLL_INTERVAL_SECONDS   (default: 5)
+    TIMEOUT_SECONDS         (default: 600)
 
-What happens:
-    1. POST /intent  → orchestrator submits iperf3 experiment intent
-    2. Stream orchestration container logs live (server-side print statements)
-    3. Poll /orchestration/{id} every 3 s until complete/failed
-    4. Fetch and print /results and /reasoning at the end
+    # Meeting parameters (can be overridden per-run):
+    ZOOM_MEETING_ID     (default: 89481474264)
+    ZOOM_PASSCODE       (default: 138555)
+    ZOOM_DISPLAY_NAME   (default: Henry)
+    ZOOM_WAIT_SECONDS   (default: 60)
 """
 
 import json
@@ -30,24 +36,38 @@ except ImportError:
     print("requests not installed. Run: pip install requests")
     sys.exit(1)
 
-ORCH_URL = os.getenv("ORCH_URL", "http://localhost:8005").rstrip("/")
+ORCH_URL      = os.getenv("ORCH_URL",      "http://localhost:8005").rstrip("/")
+TELEMETRY_URL = os.getenv("TELEMETRY_URL", "http://localhost:8004").rstrip("/")
 ORCH_CONTAINER = os.getenv("ORCH_CONTAINER", "orchestration")
-POLL_INTERVAL = float(os.getenv("POLL_INTERVAL_SECONDS", "3"))
-TIMEOUT_SECONDS = float(os.getenv("TIMEOUT_SECONDS", "300"))
+POLL_INTERVAL  = float(os.getenv("POLL_INTERVAL_SECONDS", "5"))
+TIMEOUT_SECONDS = float(os.getenv("TIMEOUT_SECONDS", "600"))
 
-INTENT = "Run 100 ping experiments to 1.1.1.1 at 10 Mbps bottleneck capacity with 30 ms RTT latency for each capacity with a ctp between 4 and 5 Mbps, 1 trial"
+# Meeting parameters
+MEETING_ID    = os.getenv("ZOOM_MEETING_ID",    "89481474264")
+PASSCODE      = os.getenv("ZOOM_PASSCODE",      "138555")
+DISPLAY_NAME  = os.getenv("ZOOM_DISPLAY_NAME",  "Henry")
+WAIT_SECONDS  = int(os.getenv("ZOOM_WAIT_SECONDS", "60"))
 
 TERMINAL_STATUSES = {"complete", "failed", "partial"}
 
-# INTENT = (
-#     "Run 100 ping experiments to 8.8.8.8 at 10 Mbps bottleneck capacity with 20 ms RTT latency for each capacity with a ctp between 2 and 4 Mbps, 1 trial"
-# )
+# Natural-language intent — the orchestrator will parse this and map it to
+# run_zoom_workflow with the parameters above.
+CAPACITY_MBPS = int(os.getenv("ZOOM_CAPACITY_MBPS", "20"))
 
+INTENT = (
+    f"Join Zoom meeting ID {MEETING_ID} with passcode {PASSCODE}, "
+    f"display name {DISPLAY_NAME!r}, stay for {WAIT_SECONDS} seconds. "
+    f"Use a {CAPACITY_MBPS} Mbps bottleneck with 20 ms latency, 1 trial."
+)
+
+
+# ---------------------------------------------------------------------------
+# Log streaming helpers (same pattern as test_orchestration_manager.py)
+# ---------------------------------------------------------------------------
 
 def _stream_container_logs(
     container: str, stop_event: threading.Event, prefix: str = "container"
 ) -> None:
-    """Background thread: stream Docker container logs with a labeled prefix."""
     try:
         proc = subprocess.Popen(
             ["docker", "logs", "--follow", "--tail", "0", container],
@@ -76,25 +96,12 @@ def _stream_container_logs(
 
 
 def _watch_ephemeral_workers(stop_event: threading.Event) -> None:
-    """Background thread: watch docker events for new worker-* containers and
-    auto-attach a log-streaming thread to each one."""
     active: dict[str, threading.Thread] = {}
     try:
         proc = subprocess.Popen(
-            [
-                "docker",
-                "events",
-                "--filter",
-                "event=start",
-                "--filter",
-                "type=container",
-                "--format",
-                "{{.Actor.Attributes.name}}",
-            ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=True,
-            bufsize=1,
+            ["docker", "events", "--filter", "event=start",
+             "--filter", "type=container", "--format", "{{.Actor.Attributes.name}}"],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, bufsize=1,
         )
         assert proc.stdout is not None
         while not stop_event.is_set():
@@ -108,10 +115,7 @@ def _watch_ephemeral_workers(stop_event: threading.Event) -> None:
                 continue
             if name in active and active[name].is_alive():
                 continue
-            print(
-                f"\n  [watch] Ephemeral worker started: {name} — attaching log stream\n",
-                flush=True,
-            )
+            print(f"\n  [watch] Ephemeral worker started: {name} — attaching log stream\n", flush=True)
             t = threading.Thread(
                 target=_stream_container_logs,
                 args=(name, stop_event, f"worker/{name[:14]}"),
@@ -130,24 +134,22 @@ def _watch_ephemeral_workers(stop_event: threading.Event) -> None:
         print(f"  [watch] event watcher error: {exc}")
 
 
+# ---------------------------------------------------------------------------
+# Banner helpers
+# ---------------------------------------------------------------------------
+
 def banner(msg: str) -> None:
     width = 62
-    print(f"\n{'='*width}")
-    print(f"  {msg}")
-    print(f"{'='*width}")
+    print(f"\n{'='*width}\n  {msg}\n{'='*width}")
 
 
 def section(msg: str) -> None:
-    print(f"\n{'─'*60}")
-    print(f"  {msg}")
-    print(f"{'─'*60}")
+    print(f"\n{'─'*60}\n  {msg}\n{'─'*60}")
 
 
-def fmt_stage_flags(flags: dict) -> str:
-    """Return only the True flags as a compact string."""
-    true_flags = [k for k, v in flags.items() if v]
-    return ", ".join(true_flags) if true_flags else "(none yet)"
-
+# ---------------------------------------------------------------------------
+# Orchestration steps
+# ---------------------------------------------------------------------------
 
 def check_health() -> bool:
     banner("Pre-flight: checking orchestration service health")
@@ -162,22 +164,31 @@ def check_health() -> bool:
 
 
 def submit_intent() -> str:
-    banner("Step 1: Submitting iperf3 intent")
+    banner("Step 1: Submitting Zoom intent")
     payload = {
         "intent": INTENT,
-        "context": {"application": "iperf3"},
+        "context": {
+            "application": "zoom",
+        },
         "preferences": {
             "max_parallel_workers": 1,
             "use_examples": True,
         },
+        # Pin the workflow so the LLM doesn't have to guess; it also ensures
+        # the correct parameter schema is applied.
+        "workflow_id": "run_zoom_workflow",
+        "workflow_source": "library",
     }
     print(f"  POST {ORCH_URL}/intent")
-    print(f"  intent: {INTENT!r}")
+    print(f"  intent:       {INTENT!r}")
+    print(f"  meeting_id:   {MEETING_ID}")
+    print(f"  passcode:     {PASSCODE}")
+    print(f"  display_name: {DISPLAY_NAME}")
+    print(f"  wait_seconds: {WAIT_SECONDS}")
 
     r = requests.post(f"{ORCH_URL}/intent", json=payload, timeout=15)
     r.raise_for_status()
     data = r.json()
-
     orch_id = data["orchestration_id"]
     print(f"\n  ✓ Accepted — orchestration_id: {orch_id}")
     print(f"  initial status: {data['status']}")
@@ -186,12 +197,12 @@ def submit_intent() -> str:
 
 def poll_until_done(orch_id: str) -> dict:
     banner(f"Step 2: Polling {orch_id}")
-    print(f"  Will poll every {POLL_INTERVAL}s (timeout={TIMEOUT_SECONDS}s)\n")
+    print(f"  polling every {POLL_INTERVAL}s  (timeout={TIMEOUT_SECONDS}s)\n")
 
-    deadline = time.time() + TIMEOUT_SECONDS
-    last_status = None
-    last_stage_flags: dict = {}
-    iteration = 0
+    deadline     = time.time() + TIMEOUT_SECONDS
+    last_status  = None
+    last_flags: dict = {}
+    iteration    = 0
 
     while time.time() < deadline:
         iteration += 1
@@ -200,42 +211,30 @@ def poll_until_done(orch_id: str) -> dict:
             r.raise_for_status()
             data = r.json()
         except Exception as exc:
-            print(f"  [{iteration:>3}] Poll error: {exc}")
+            print(f"  [{iteration:>3}] poll error: {exc}")
             time.sleep(POLL_INTERVAL)
             continue
 
-        status = data.get("status", "unknown")
-        error = data.get("error")
+        status      = data.get("status", "unknown")
+        error       = data.get("error")
         stage_flags = (data.get("detailed_progress") or {}).get("stage_flags", {})
-        iter_flags = (data.get("detailed_progress") or {}).get(
-            "iteration_phase_flags", {}
-        )
 
-        # Print status changes
         if status != last_status:
             ts = time.strftime("%H:%M:%S")
             print(f"  [{ts}] status changed: {last_status!r} → {status!r}")
             last_status = status
 
-        # Print newly-flipped stage flags
-        new_flags = {
-            k: v for k, v in stage_flags.items() if v and not last_stage_flags.get(k)
-        }
+        new_flags = {k: v for k, v in stage_flags.items() if v and not last_flags.get(k)}
         if new_flags:
             ts = time.strftime("%H:%M:%S")
             for flag in new_flags:
                 print(f"  [{ts}]   ✓ stage: {flag}")
-            last_stage_flags = dict(stage_flags)
+            last_flags = dict(stage_flags)
 
-        # Always print a heartbeat line every ~15 s
-        if iteration % max(1, int(15 / POLL_INTERVAL)) == 0:
+        if iteration % max(1, int(30 / POLL_INTERVAL)) == 0:
             ts = time.strftime("%H:%M:%S")
-            active_stages = fmt_stage_flags(stage_flags)
-            active_iters = fmt_stage_flags(iter_flags)
-            print(
-                f"  [{ts}] heartbeat — status={status}  "
-                f"stages=[{active_stages}]  iter=[{active_iters}]"
-            )
+            true_flags = [k for k, v in stage_flags.items() if v]
+            print(f"  [{ts}] heartbeat — status={status}  stages={true_flags or '(none yet)'}")
 
         if status in TERMINAL_STATUSES:
             if error:
@@ -244,7 +243,7 @@ def poll_until_done(orch_id: str) -> dict:
 
         time.sleep(POLL_INTERVAL)
 
-    print(f"\n  ✗ Timed out after {TIMEOUT_SECONDS}s waiting for terminal status")
+    print(f"\n  ✗ Timed out after {TIMEOUT_SECONDS}s")
     return data
 
 
@@ -260,54 +259,39 @@ def print_results(orch_id: str) -> None:
 
     results = data.get("results", [])
     print(f"  Total result entries: {len(results)}")
+
     for i, res in enumerate(results):
-        exp_id = res.get("experiment_id", "?")
-        status = res.get("status", "?")
-        error = res.get("error", "")
-        run = res.get("run", {})
-        ctp = res.get("ctp_selected") or {}
+        exp_id  = res.get("experiment_id", "?")
+        status  = res.get("status", "?")
+        error   = res.get("error", "")
+        run     = res.get("run", {})
+        ctp     = res.get("ctp_selected") or {}
+
         print(f"\n  result[{i}]  exp_id={exp_id}  status={status}")
         if error:
             print(f"    error: {error}")
         if ctp:
-            print(
-                f"    ctp_id={ctp.get('ctp_id')}  intensity={ctp.get('intensity', {}).get('mean_mbps')} Mbps"
-            )
+            print(f"    ctp_id={ctp.get('ctp_id')}  intensity={ctp.get('intensity', {}).get('mean_mbps')} Mbps")
         if run and isinstance(run, dict):
             if "error" in run:
                 print(f"    run error: {run['error']}")
             else:
                 print(f"    run keys: {list(run.keys())}")
 
-        # Capture / replay summary
         capture_status = res.get("capture_status") or {}
-        capture_state = capture_status.get("status", "not_reported")
-        pcap_path = res.get("pcap_path") or capture_status.get("pcap_path", "")
-        replay_r = res.get("replay") or {}
-        replay_state = replay_r.get(
-            "replay_id", replay_r.get("skipped", replay_r.get("error", "not_reported"))
-        )
+        capture_state  = capture_status.get("status", "not_reported")
+        pcap_path      = res.get("pcap_path") or capture_status.get("pcap_path", "")
+        replay_r       = res.get("replay") or {}
+        replay_state   = replay_r.get("replay_id", replay_r.get("skipped", replay_r.get("error", "not_reported")))
         print(f"    capture: {capture_state}  replay: {replay_state}")
-        _verify_pcap(pcap_path, exp_id)
+
+        _verify_telemetry_artifacts(exp_id, pcap_path)
 
 
-def _verify_pcap(pcap_path: str, exp_id: str) -> None:
-    """Verify the pcap was uploaded to the telemetry service.
+def _verify_telemetry_artifacts(exp_id: str, pcap_path: str) -> None:
+    """Check both pcap and queue_trace artifacts in telemetry."""
+    print(f"    pcap_path (worker-side): {pcap_path or '(empty)'}")
 
-    The ephemeral worker is destroyed before this function is called, so the
-    pcap no longer exists on any container or host path.  The correct check is
-    whether orchestration successfully streamed it to telemetry via
-    GET /capture/{id}/pcap → POST /artifacts.
-    """
-    TELEMETRY_URL = os.getenv("TELEMETRY_URL", "http://localhost:8004").rstrip("/")
-
-    if not pcap_path:
-        print(f"    pcap: NOT recorded (pcap_path empty)")
-        return
-
-    print(f"    pcap_path (worker-side): {pcap_path}")
-
-    # The definitive check: look for a 'pcap' artifact in the telemetry service.
     try:
         r = requests.get(
             f"{TELEMETRY_URL}/results",
@@ -317,39 +301,39 @@ def _verify_pcap(pcap_path: str, exp_id: str) -> None:
         r.raise_for_status()
         results = r.json().get("results", [])
         if not results:
-            print(f"    pcap: ✗ no result row found in telemetry for exp_id={exp_id}")
+            print(f"    ✗ No result row in telemetry for exp_id={exp_id}")
             return
 
         result_id = results[0]["result_id"]
         ar = requests.get(f"{TELEMETRY_URL}/results/{result_id}/artifacts", timeout=10)
         ar.raise_for_status()
-        artifacts = ar.json().get("artifacts", [])
-        pcap_artifacts = [a for a in artifacts if a.get("artifact_type") == "pcap"]
-        qtrace_artifacts = [a for a in artifacts if a.get("artifact_type") == "queue_trace"]
+        artifacts      = ar.json().get("artifacts", [])
+        pcap_arts      = [a for a in artifacts if a.get("artifact_type") == "pcap"]
+        qtrace_arts    = [a for a in artifacts if a.get("artifact_type") == "queue_trace"]
 
-        if pcap_artifacts:
-            a = pcap_artifacts[0]
+        if pcap_arts:
+            a = pcap_arts[0]
             print(
-                f"    pcap: ✓ STORED in telemetry  "
+                f"    pcap:    ✓ STORED in telemetry  "
                 f"artifact_id={a['artifact_id']}  "
                 f"size={a['size_bytes']} bytes  "
                 f"file={a['filename']}"
             )
         else:
-            print(f"    pcap: ✗ NOT in telemetry artifacts (upload failed)")
+            print(f"    pcap:    ✗ NOT in telemetry (upload failed or capture failed)")
 
-        if qtrace_artifacts:
-            qt = qtrace_artifacts[0]
+        if qtrace_arts:
+            qt = qtrace_arts[0]
             print(
-                f"    qtrace: ✓ STORED in telemetry  "
+                f"    qtrace:  ✓ STORED in telemetry  "
                 f"size={qt['size_bytes']} bytes  "
                 f"file={qt['filename']}"
             )
         else:
-            print(f"    qtrace: ✗ NOT in telemetry artifacts")
+            print(f"    qtrace:  ✗ NOT in telemetry")
 
     except Exception as exc:
-        print(f"    pcap: could not query telemetry: {exc}")
+        print(f"    could not query telemetry: {exc}")
 
 
 def print_reasoning(orch_id: str) -> None:
@@ -368,24 +352,30 @@ def print_reasoning(orch_id: str) -> None:
         print(f"\n  step={step.get('step')}  action={step.get('action')}")
         reasoning = step.get("reasoning", "")
         if reasoning:
-            short = reasoning[:200] + ("…" if len(reasoning) > 200 else "")
+            short = reasoning[:300] + ("…" if len(reasoning) > 300 else "")
             print(f"    reasoning: {short}")
         output = step.get("output", {})
         if isinstance(output, dict):
-            summary_keys = ["status", "total_experiments", "successful", "failed"]
-            summary = {k: output.get(k) for k in summary_keys if k in output}
+            summary = {k: output.get(k) for k in ["status", "total_experiments", "successful", "failed"] if k in output}
             if summary:
                 print(f"    summary: {summary}")
 
 
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
 def main() -> None:
-    banner("Orchestration Manager — iperf3 Intent Test")
-    print(f"  Target:    {ORCH_URL}")
-    print(f"  Container: {ORCH_CONTAINER}  (server-side logs streamed below)")
+    banner("Orchestration — Zoom Meeting Join Test")
+    print(f"  Target:       {ORCH_URL}")
+    print(f"  Container:    {ORCH_CONTAINER}")
+    print(f"  Meeting ID:   {MEETING_ID}")
+    print(f"  Passcode:     {PASSCODE}")
+    print(f"  Display name: {DISPLAY_NAME}")
+    print(f"  Wait:         {WAIT_SECONDS}s")
 
     if not check_health():
-        print("\n  Make sure the orchestration service is running:")
-        print("    docker compose up orchestration")
+        print("\n  Make sure the stack is running: docker compose up -d")
         sys.exit(1)
 
     try:
@@ -394,11 +384,7 @@ def main() -> None:
         print(f"\n  ✗ Failed to submit intent: {exc}")
         sys.exit(1)
 
-    # Start log streams:
-    #   [orch]         — orchestration container (intent parsing, dispatch steps)
-    #   [worker/...]   — ephemeral worker-XXXX containers (auto-attached on start)
     stop_logs = threading.Event()
-
     orch_log_thread = threading.Thread(
         target=_stream_container_logs,
         args=(ORCH_CONTAINER, stop_logs, "orch"),
@@ -411,15 +397,14 @@ def main() -> None:
     )
 
     banner("Step 2: Live container logs + polling")
-    print(f"  [orch]       = orchestration service (intent parse, dispatch, CTP)")
-    print(f"  [worker/...] = ephemeral substrate worker (shape, run, capture)\n")
+    print(f"  [orch]       = orchestration service")
+    print(f"  [worker/...] = ephemeral substrate worker\n")
     orch_log_thread.start()
     worker_watch_thread.start()
 
     try:
         final_data = poll_until_done(orch_id)
     finally:
-        # Give log streams a moment to flush trailing lines, then stop them.
         time.sleep(1)
         stop_logs.set()
         orch_log_thread.join(timeout=3)
@@ -432,10 +417,10 @@ def main() -> None:
 
     banner(f"Done — final status: {final_status}")
     if final_status == "complete":
-        print("  ✓ Experiment succeeded")
+        print("  ✓ Zoom experiment succeeded")
         sys.exit(0)
     else:
-        print("  ✗ Experiment did not complete successfully")
+        print("  ✗ Zoom experiment did not complete successfully")
         error = final_data.get("error")
         if error:
             print(f"  error: {error}")

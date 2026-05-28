@@ -1,4 +1,26 @@
 {
+  "run_zoom_workflow": {
+    "meeting_id": {
+      "type": "string",
+      "default": "",
+      "description": "Zoom meeting ID (digits only, spaces optional)"
+    },
+    "passcode": {
+      "type": "string",
+      "default": "",
+      "description": "Meeting passcode / password if required"
+    },
+    "display_name": {
+      "type": "string",
+      "default": "Participant",
+      "description": "Name to display on the Zoom join screen"
+    },
+    "wait_seconds": {
+      "type": "integer",
+      "default": 60,
+      "description": "Seconds to remain in the meeting or lobby before the workflow stops"
+    }
+  },
   "test_youtube_workflow": {
     "url": {
       "type": "string",

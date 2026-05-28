@@ -44,6 +44,58 @@ logger = logging.getLogger(__name__)
 _DOCKER_API_VERSION = "v1.41"
 _SUBSTRATE_CONTAINER_PORT = 8002
 
+_DEFAULT_BROWSERLESS_HOST_PORT = "127.0.0.1:3000"
+_DEFAULT_BROWSERLESS_PATH = "/chromium/playwright"
+
+# Browserless kills a session after this many ms of activity (its own default
+# is only 30_000ms, which is far too short for browser workflows that sit in a
+# Zoom meeting / video for tens of seconds). Configurable via env.
+_BROWSERLESS_SESSION_TIMEOUT_MS = int(
+    os.getenv("BROWSERLESS_SESSION_TIMEOUT_MS", "600000")
+)
+
+
+def _default_browserless_endpoint() -> str:
+    return (
+        f"ws://{_DEFAULT_BROWSERLESS_HOST_PORT}{_DEFAULT_BROWSERLESS_PATH}"
+        f"?timeout={_BROWSERLESS_SESSION_TIMEOUT_MS}"
+    )
+
+
+def _localize_browserless_endpoint(endpoint: str) -> str:
+    """Rewrite a browserless WS endpoint for use inside an ephemeral worker.
+
+    Two corrections are applied:
+
+    1. Host → ``127.0.0.1``. Each worker image runs its *own* browserless on
+       127.0.0.1:3000, so any configured host such as ``substrate-worker``
+       (the standing worker's name) must be replaced — that hostname is not
+       resolvable from inside the worker's ns1 network namespace
+       (``getaddrinfo ENOTFOUND substrate-worker``).
+    2. Query → ``timeout=<ms>`` only. A configured ``?headless=false`` makes
+       browserless attempt a headful Chrome launch which has no display inside
+       the container and fails ("Failed to launch browser"); we drop it. We
+       also inject a long session ``timeout`` so browserless does not kill the
+       browser mid-workflow (its default is 30s).
+    """
+    if not endpoint:
+        return _default_browserless_endpoint()
+
+    from urllib.parse import urlsplit, urlunsplit
+
+    try:
+        parts = urlsplit(endpoint)
+        if not parts.scheme or not parts.path:
+            return _default_browserless_endpoint()
+        port = parts.port or 3000
+        localized = parts._replace(
+            netloc=f"127.0.0.1:{port}",
+            query=f"timeout={_BROWSERLESS_SESSION_TIMEOUT_MS}",
+        )
+        return urlunsplit(localized)
+    except Exception:
+        return _default_browserless_endpoint()
+
 
 @dataclass
 class WorkerInfo:
@@ -148,15 +200,40 @@ class LocalDockerBackend(ConnectivityBackend):
         worker_id = f"worker-{uuid.uuid4().hex[:8]}"
         container_name = f"substrate-worker-{worker_id}"
 
+        # Ephemeral workers write pcaps to a container-local directory so that
+        # tshark/dumpcap is not restricted by the host bind-mount ownership.
+        # The pcap is streamed to telemetry via GET /capture/{id}/pcap before
+        # the container is destroyed, so no host-side persistence is required.
+        container_capture_dir = "/tmp/substrate-capture"
+
+        # Each worker image launches its own browserless/Chromium on
+        # 127.0.0.1:3000 (see substrate-worker Dockerfile). The ephemeral worker
+        # must therefore connect to *its own* local browserless, not the standing
+        # substrate-worker hostname (which is unreachable from inside the worker's
+        # ns1 network namespace → "getaddrinfo ENOTFOUND substrate-worker").
+        # We preserve the path/query (e.g. ?headless=false) from the configured
+        # endpoint but force the host:port back to localhost.
+        configured_endpoint = config.get("browserless_ws_endpoint") or os.getenv(
+            "BROWSERLESS_WS_ENDPOINT", ""
+        )
+        browserless_endpoint = _localize_browserless_endpoint(configured_endpoint)
+
+        env_block = [
+            f"TELEMETRY_SERVICE_URL={telemetry_url}",
+            f"CTP_DIR={ctp_dir}",
+            f"CAPTURE_DIR={container_capture_dir}",
+            f"NETGENT_USE_LOCAL={netgent_use_local}",
+            f"NETGENT_NAMESPACE={netgent_namespace}",
+            f"BROWSERLESS_WS_ENDPOINT={browserless_endpoint}",
+            # Server-level default session timeout for browserless (ms). Backs up
+            # the per-connection ?timeout= so long browser workflows (e.g. sitting
+            # in a Zoom meeting) are not killed at browserless's 30s default.
+            f"TIMEOUT={_BROWSERLESS_SESSION_TIMEOUT_MS}",
+        ]
+
         container_config = {
             "Image": image,
-            "Env": [
-                f"TELEMETRY_SERVICE_URL={telemetry_url}",
-                f"CTP_DIR={ctp_dir}",
-                f"CAPTURE_DIR={capture_dir}",
-                f"NETGENT_USE_LOCAL={netgent_use_local}",
-                f"NETGENT_NAMESPACE={netgent_namespace}",
-            ],
+            "Env": env_block,
             "ExposedPorts": {f"{_SUBSTRATE_CONTAINER_PORT}/tcp": {}},
             "Labels": {"substrate_worker_id": worker_id},
             "HostConfig": {
@@ -168,7 +245,9 @@ class LocalDockerBackend(ConnectivityBackend):
                 },
                 "Binds": [
                     f"{ctp_dir}:{ctp_dir}",
-                    f"{capture_dir}:{capture_dir}",
+                    # capture_dir is intentionally NOT bind-mounted: tshark writes
+                    # to the container-overlay filesystem (container_capture_dir),
+                    # and orchestration pulls the pcap via HTTP before container teardown.
                     "/var/run/docker.sock:/var/run/docker.sock",
                     # Read-only host module dir so the ephemeral worker can
                     # `modprobe tcp_<algo>` the 14 loadable CCAnalyzer CCAs.

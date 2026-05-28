@@ -844,10 +844,16 @@ class OrchestrationManager:
         experiment_specs = [e.model_dump() for e in experiments]
 
         if workflow:
+            # Merge workflow_parameters: prefer the workflow-agent-supplied params,
+            # then fall back to whatever the intent parser extracted so that
+            # browser workflows (which return parameters=None for pinned IDs) still
+            # receive the meeting_id / passcode / display_name values from the intent.
+            parsed_wf_params = parsed_intent.get("workflow_parameters") if isinstance(parsed_intent, dict) else None
+            effective_params = workflow_parameters or parsed_wf_params or None
             for spec in experiment_specs:
                 spec["workflow"] = workflow
-                if workflow_parameters:
-                    spec["workflow_parameters"] = workflow_parameters
+                if effective_params:
+                    spec["workflow_parameters"] = effective_params
 
         logger.info(
             "OrchestrationManager: %d experiment(s) for orch_id=%s via backend=%s",
