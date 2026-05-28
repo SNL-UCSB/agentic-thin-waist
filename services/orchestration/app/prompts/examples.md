@@ -201,6 +201,61 @@ EXTRACTED:
 }
 REASONING: "The intent clearly specifies YouTube as the application and 10 Mbps as the link capacity. 'High-burstiness cross-traffic' maps directly to the documented CTP cluster 'ctp_mobile_bursty', which is characterized as high-burstiness with medium average load — the best match among available clusters. No latency, CC algorithm, AQM policy, or duration were specified, so defaults will apply (50 ms, cubic, fq_codel, 60s). This is a single isolated YouTube experiment with one specific CTP, so the design type is 'isolated'. The 10 Mbps capacity is above the 3 Mbps warning threshold for YouTube, so no constraint violations are triggered. A note is raised about using only 1 trial with bursty cross-traffic, since variability may be high and more trials would improve reliability."
 
+INTENT: "Run iperf3 and wget together at 25 Mbps with 50ms latency under cubic"
+EXTRACTED:
+{
+  "applications": [
+    "iperf3",
+    "wget"
+  ],
+  "application_type": "shell",
+  "capacities": [
+    25
+  ],
+  "latencies": [
+    50
+  ],
+  "cc_algorithms": [
+    "cubic"
+  ],
+  "aqm_policy": None,
+  "ctp_cluster": None,
+  "duration_seconds": 30,
+  "num_trials": 1,
+  "clarification_needed": [],
+  "design_type": [
+    "concurrent"
+  ],
+  "reasoning": "The user explicitly says 'together', indicating concurrent execution on the same bottleneck. Both iperf3 and wget are shell applications. A single concurrent experiment at 25 Mbps, 50 ms latency, under cubic is generated. No isolated experiments are needed since the user specifically asked for them together."
+}
+REASONING: "The user explicitly says 'together', indicating concurrent execution on the same bottleneck. Both iperf3 and wget are shell applications. A single concurrent experiment at 25 Mbps, 50 ms latency, under cubic is generated. No isolated experiments are needed since the user specifically asked for them together."
+
+INTENT: "Compare YouTube and NDT at 10 and 50 Mbps, both alone and together"
+EXTRACTED:
+{
+  "applications": [
+    "youtube",
+    "ndt"
+  ],
+  "application_type": "mixed",
+  "capacities": [
+    10,
+    50
+  ],
+  "latencies": None,
+  "cc_algorithms": None,
+  "aqm_policy": None,
+  "ctp_cluster": None,
+  "duration_seconds": None,
+  "num_trials": 1,
+  "clarification_needed": [],
+  "design_type": [
+    "full"
+  ],
+  "reasoning": "The user says 'both alone and together', which maps to design_type 'full' — generating both isolated experiments (each app separately) and concurrent experiments (both apps on the same bottleneck). YouTube is a browser app and NDT is a shell tool, so application_type is 'mixed'. At 2 capacities × 2 apps isolated + 2 capacities concurrent = 6 experiments total."
+}
+REASONING: "The user says 'both alone and together', which maps to design_type 'full' — generating both isolated experiments (each app separately) and concurrent experiments (both apps on the same bottleneck). YouTube is a browser app and NDT is a shell tool, so application_type is 'mixed'. At 2 capacities × 2 apps isolated + 2 capacities concurrent = 6 experiments total."
+
 INTENT: "YouTube, 10 Mbps, 50ms, CUBIC, fq_codel, 60s, 3 trials"
 EXTRACTED:
 {
