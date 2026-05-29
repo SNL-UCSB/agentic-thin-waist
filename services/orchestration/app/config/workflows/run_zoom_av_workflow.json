@@ -75,12 +75,6 @@
           }
         },
         {
-          "type": "wait",
-          "params": {
-            "seconds": "2"
-          }
-        },
-        {
           "type": "click_element",
           "params": {
             "selector": "iframe#webclient >>> a.joinaudio-by-voip__join-btn",
@@ -96,14 +90,8 @@
         {
           "type": "click_element",
           "params": {
-            "selector": "iframe#webclient >>> button[class*='join-audio-container__btn']",
+            "selector": "iframe#webclient >>> button[class*='join-audio-container__btn'][aria-label*='unmute' i]",
             "optional": true
-          }
-        },
-        {
-          "type": "wait",
-          "params": {
-            "seconds": "2"
           }
         },
         {
@@ -114,12 +102,6 @@
           }
         },
         {
-          "type": "wait",
-          "params": {
-            "seconds": "2"
-          }
-        },
-        {
           "type": "click_element",
           "params": {
             "selector": "iframe#webclient >>> button[class*='send-video-container__btn'][aria-label*='start video' i]",
@@ -127,22 +109,10 @@
           }
         },
         {
-          "type": "wait",
-          "params": {
-            "seconds": "2"
-          }
-        },
-        {
           "type": "click_element",
           "params": {
             "selector": "iframe#webclient >>> button[aria-label*='start video' i]",
             "optional": true
-          }
-        },
-        {
-          "type": "wait",
-          "params": {
-            "seconds": "2"
           }
         },
         {
