@@ -234,3 +234,6 @@ docker-compose.override.yml
 
 # Analysis notebook pcap cache (gitignored, generated on demand)
 _pcap_cache/
+
+# Media assets (large binary files)
+media/

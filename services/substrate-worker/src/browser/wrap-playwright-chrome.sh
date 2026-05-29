@@ -21,15 +21,27 @@ fi
 
 namespace_pid="\$(cat "\${pid_file}")"
 
-# If SUBSTRATE_FAKE_AUDIO_FILE is set and the file exists, stream it as the
-# browser microphone. Chrome loops the file automatically, which suits a
-# music/tone loop. The fake-device flags also suppress the real mic/camera.
-fake_audio_args=""
-if [ -n "\${SUBSTRATE_FAKE_AUDIO_FILE:-}" ] && [ -f "\${SUBSTRATE_FAKE_AUDIO_FILE}" ]; then
-  fake_audio_args="--use-fake-ui-for-media-stream --use-fake-device-for-media-stream --use-file-for-fake-audio-capture=\${SUBSTRATE_FAKE_AUDIO_FILE}"
+# Fake mic/camera injection.
+# --use-fake-ui-for-media-stream   suppress permission dialogs
+# --use-fake-device-for-media-stream  enable software fake devices
+# --use-file-for-fake-audio-capture   stream WAV as microphone (loops)
+# --use-file-for-fake-video-capture   stream MJPEG as camera (loops)
+# All four flags are added when EITHER file var is set. Individual file
+# flags are only appended when the corresponding env var points at an
+# existing file, so each can be toggled independently.
+fake_media_args=""
+if { [ -n "\${SUBSTRATE_FAKE_AUDIO_FILE:-}" ] && [ -f "\${SUBSTRATE_FAKE_AUDIO_FILE}" ]; } || \
+   { [ -n "\${SUBSTRATE_FAKE_VIDEO_FILE:-}" ] && [ -f "\${SUBSTRATE_FAKE_VIDEO_FILE}" ]; }; then
+  fake_media_args="--use-fake-ui-for-media-stream --use-fake-device-for-media-stream"
+  if [ -n "\${SUBSTRATE_FAKE_AUDIO_FILE:-}" ] && [ -f "\${SUBSTRATE_FAKE_AUDIO_FILE}" ]; then
+    fake_media_args="\${fake_media_args} --use-file-for-fake-audio-capture=\${SUBSTRATE_FAKE_AUDIO_FILE}"
+  fi
+  if [ -n "\${SUBSTRATE_FAKE_VIDEO_FILE:-}" ] && [ -f "\${SUBSTRATE_FAKE_VIDEO_FILE}" ]; then
+    fake_media_args="\${fake_media_args} --use-file-for-fake-video-capture=\${SUBSTRATE_FAKE_VIDEO_FILE}"
+  fi
 fi
 
-exec nsenter -t "\${namespace_pid}" -n -- "${real_path}" \${fake_audio_args} "\$@"
+exec nsenter -t "\${namespace_pid}" -n -- "${real_path}" \${fake_media_args} "\$@"
 EOF
   chmod 755 "${chrome_path}"
 done

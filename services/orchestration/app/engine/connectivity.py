@@ -233,6 +233,10 @@ class LocalDockerBackend(ConnectivityBackend):
             # The wrap-playwright-chrome.sh wrapper reads this env var and appends
             # the corresponding Chrome flags. Unset to disable (non-Zoom runs).
             "SUBSTRATE_FAKE_AUDIO_FILE=/opt/substrate-audio/zoom-audio.wav",
+            # Fake camera: stream this MJPEG file as the browser's webcam input.
+            # Chrome loops the file automatically. Only transmitted if the workflow
+            # clicks "Start Video" inside the meeting.
+            "SUBSTRATE_FAKE_VIDEO_FILE=/opt/substrate-audio/zoom-video.mjpeg",
         ]
 
         container_config = {
