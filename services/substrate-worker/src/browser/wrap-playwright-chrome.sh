@@ -20,7 +20,16 @@ if [ ! -r "\${pid_file}" ]; then
 fi
 
 namespace_pid="\$(cat "\${pid_file}")"
-exec nsenter -t "\${namespace_pid}" -n -- "${real_path}" "\$@"
+
+# If SUBSTRATE_FAKE_AUDIO_FILE is set and the file exists, stream it as the
+# browser microphone. Chrome loops the file automatically, which suits a
+# music/tone loop. The fake-device flags also suppress the real mic/camera.
+fake_audio_args=""
+if [ -n "\${SUBSTRATE_FAKE_AUDIO_FILE:-}" ] && [ -f "\${SUBSTRATE_FAKE_AUDIO_FILE}" ]; then
+  fake_audio_args="--use-fake-ui-for-media-stream --use-fake-device-for-media-stream --use-file-for-fake-audio-capture=\${SUBSTRATE_FAKE_AUDIO_FILE}"
+fi
+
+exec nsenter -t "\${namespace_pid}" -n -- "${real_path}" \${fake_audio_args} "\$@"
 EOF
   chmod 755 "${chrome_path}"
 done

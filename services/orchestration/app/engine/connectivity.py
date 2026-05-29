@@ -229,6 +229,10 @@ class LocalDockerBackend(ConnectivityBackend):
             # the per-connection ?timeout= so long browser workflows (e.g. sitting
             # in a Zoom meeting) are not killed at browserless's 30s default.
             f"TIMEOUT={_BROWSERLESS_SESSION_TIMEOUT_MS}",
+            # Fake microphone: stream this WAV file as the browser's mic input.
+            # The wrap-playwright-chrome.sh wrapper reads this env var and appends
+            # the corresponding Chrome flags. Unset to disable (non-Zoom runs).
+            "SUBSTRATE_FAKE_AUDIO_FILE=/opt/substrate-audio/zoom-audio.wav",
         ]
 
         container_config = {

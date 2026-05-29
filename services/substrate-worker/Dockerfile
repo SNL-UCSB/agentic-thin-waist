@@ -59,6 +59,7 @@ RUN uv sync --python /usr/bin/python3 --no-install-project
 
 COPY services/substrate-worker/ .
 COPY shared/ /shared/
+COPY media/freesound_community-000981_jfk-space-race-speech-59951.wav /opt/substrate-audio/zoom-audio.wav
 
 RUN chmod +x src/browser/wrap-playwright-chrome.sh src/substrate/setup.sh src/substrate/setup_local.sh src/substrate/setup_aws.sh \
     && ./src/browser/wrap-playwright-chrome.sh

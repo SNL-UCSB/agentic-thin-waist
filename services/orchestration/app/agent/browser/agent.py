@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import pathlib
 from typing import TYPE_CHECKING, Any
 
 import requests
@@ -10,6 +12,13 @@ from langgraph.runtime import Runtime
 from pydantic import BaseModel, ConfigDict
 
 from app.agent.utils import get_model, log_claude_step, with_structured_output
+
+# Local workflow overrides live here. Any file named <id>.json takes precedence
+# over the remote netgent-workflow library for that id, allowing local edits
+# without touching the shared upstream repo.
+_LOCAL_WORKFLOWS_DIR = (
+    pathlib.Path(__file__).parent.parent.parent / "config" / "workflows"
+)
 
 if TYPE_CHECKING:
     from main import NetGent
@@ -34,6 +43,26 @@ class ChooseWorkflow(BaseModel):
     reasoning: str
     id: str | None = None
     parameters: dict[str, Any] | None = None
+
+
+def _load_workflow(workflow_id: str, remote_link: str | None) -> dict[str, Any]:
+    """Return workflow JSON, preferring a local override over the remote link.
+
+    Checks _LOCAL_WORKFLOWS_DIR/<workflow_id>.json first. If that file exists
+    it is loaded and returned immediately (no network call). Otherwise falls
+    back to fetching remote_link if provided.
+    """
+    local_path = _LOCAL_WORKFLOWS_DIR / f"{workflow_id}.json"
+    if local_path.is_file():
+        print(f"[BROWSER WF] Using local workflow override: {local_path}")
+        with local_path.open() as f:
+            return json.load(f)
+    if remote_link:
+        try:
+            return requests.get(remote_link, timeout=10).json()
+        except Exception:
+            pass
+    return {"id": workflow_id}
 
 
 def choose_workflow(
@@ -79,7 +108,9 @@ def choose_workflow(
 
     if pinned_id:
         chosen_entry = next((w for w in available if w.get("id") == pinned_id), None)
-        if chosen_entry is None:
+        # Allow a local override even when the id isn't in the remote index.
+        local_path = _LOCAL_WORKFLOWS_DIR / f"{pinned_id}.json"
+        if chosen_entry is None and not local_path.is_file():
             reasoning = (
                 f"Requested workflow id {pinned_id!r} not present in the browser "
                 "workflow library."
@@ -90,13 +121,8 @@ def choose_workflow(
                 "parameters": None,
                 "reasoning": reasoning,
             }
-        if chosen_entry.get("link"):
-            try:
-                workflow = requests.get(chosen_entry["link"], timeout=10).json()
-            except Exception:
-                workflow = {"id": pinned_id}
-        else:
-            workflow = {"id": pinned_id}
+        remote_link = chosen_entry.get("link") if chosen_entry else None
+        workflow = _load_workflow(pinned_id, remote_link)
         workflow.setdefault("id", pinned_id)
         return {
             "workflow": workflow,
@@ -149,13 +175,8 @@ def choose_workflow(
         }
 
     chosen_entry = next((w for w in available if w["id"] == result.id), None)
-    if chosen_entry and chosen_entry.get("link"):
-        try:
-            workflow = requests.get(chosen_entry["link"], timeout=10).json()
-        except Exception:
-            workflow = {}
-    else:
-        workflow = {}
+    remote_link = chosen_entry.get("link") if chosen_entry else None
+    workflow = _load_workflow(result.id, remote_link) if result.id else {}
 
     return {
         "workflow": workflow,
