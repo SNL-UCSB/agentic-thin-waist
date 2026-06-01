@@ -1,0 +1,24 @@
+# Overlay that runs the stack from prebuilt images on Docker Hub (snlhub/*)
+# instead of building locally. Use together with docker-compose.yml:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.public.yml pull
+#   docker compose -f docker-compose.yml -f docker-compose.public.yml up -d
+#
+services:
+  experiment-api:
+    image: snlhub/atw-experiment-api:latest
+  ctp-service:
+    image: snlhub/atw-ctp-service:latest
+  substrate-worker:
+    image: snlhub/atw-substrate-worker:latest
+  netgent-service:
+    image: snlhub/atw-netgent-service:latest
+  netgent-worker:
+    image: snlhub/atw-netgent-service:latest
+  telemetry-service:
+    image: snlhub/atw-telemetry-service:latest
+  orchestration:
+    image: snlhub/atw-orchestration:latest
+    environment:
+      # orchestration spawns substrate-worker containers by image name
+      - SUBSTRATE_WORKER_IMAGE=snlhub/atw-substrate-worker:latest
