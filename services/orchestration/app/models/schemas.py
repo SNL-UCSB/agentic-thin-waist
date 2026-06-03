@@ -39,7 +39,7 @@ class ResearchIntent(BaseModel):
 
 class GeneratedExperiment(BaseModel):
     experiment_id: str
-    application_type: Literal["shell", "browser"] = "shell"
+    application_type: Literal["shell", "browser", "mixed"] = "shell"
     capacity_mbps: float
     latency_ms: float
     loss_rate: float = 0.0
@@ -47,6 +47,28 @@ class GeneratedExperiment(BaseModel):
     num_trials: int = 1
     cc_algorithm: str = "cubic"
     aqm_policy: str = "pfifo"
+    applications: List[str] = Field(
+        default_factory=list,
+        description=(
+            "Application names for this experiment (e.g. ['youtube', 'ndt']). "
+            "Empty list means single-app mode using application_type."
+        ),
+    )
+    application_types: List[Literal["shell", "browser"]] = Field(
+        default_factory=list,
+        description=(
+            "Per-app runtime type, positionally aligned with 'applications'. "
+            "Empty when applications is empty."
+        ),
+    )
+    execution_mode: Literal["isolated", "concurrent"] = Field(
+        "isolated",
+        description=(
+            "'isolated' runs a single application per worker (default). "
+            "'concurrent' runs multiple applications simultaneously on the "
+            "same worker under the same bottleneck conditions."
+        ),
+    )
     buffer_packets: Optional[int] = Field(
         default=None,
         description=(

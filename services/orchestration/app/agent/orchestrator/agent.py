@@ -51,6 +51,10 @@ class OrchestratorState(MessagesState):
     experiments: list[dict[str, Any]]
     orchestration_result: dict[str, Any] | None
     reasoning_steps: list[dict[str, Any]]
+    # Multi-app: per-application workflows (positionally aligned with
+    # parsed_intent["applications"]).  Empty list = single-workflow mode.
+    workflows: list[dict[str, Any]]
+    workflow_parameters_list: list[dict[str, Any] | None]
 
 
 class OrchestratorContext(BaseModel):
@@ -184,9 +188,12 @@ def generate_experiments(
 
 
 def route_workflow(state: OrchestratorState) -> str:
-    """Route to shell or browser workflow node based on parsed application_type."""
+    """Route to shell, browser, or mixed workflow node based on parsed application_type."""
     parsed = state.get("parsed_intent") or {}
     app_type = parsed.get("application_type", "shell")
+    applications = parsed.get("applications") or []
+    if app_type == "mixed" or (len(applications) > 1 and app_type != "browser"):
+        return "mixed_workflow"
     if app_type == "browser":
         return "browser_workflow"
     return "shell_workflow"
@@ -269,10 +276,110 @@ def browser_workflow(state: OrchestratorState) -> dict[str, Any]:
     }
 
 
+def mixed_workflow(state: OrchestratorState) -> dict[str, Any]:
+    """Generate per-application workflows for multi-app experiments."""
+    orchestration_id = state["orchestration_id"]
+    parsed = state.get("parsed_intent") or {}
+    applications = parsed.get("applications") or []
+    intent = state["intent"]
+
+    print(f"[AGENT {orchestration_id}] Routing → mixed workflow for {applications}")
+
+    from app.engine.experiment_generator import _classify_app
+
+    from main import NetGent
+
+    workflows: list[dict[str, Any]] = []
+    params_list: list[dict[str, Any] | None] = []
+
+    for app in applications:
+        app_type = _classify_app(app)
+        app_intent = f"Run {app}"
+
+        if app_type == "shell":
+            agent = create_shell_agent()
+            result = agent.invoke(
+                {
+                    "intent": app_intent,
+                    "workflow": {},
+                    "chosen_workflow": None,
+                    "parameters": None,
+                    "reasoning": "",
+                    "messages": [],
+                    "workflow_source": state.get("workflow_source") or "auto",
+                    "workflow_id": None,
+                },
+                context=ShellWorkflowContext(
+                    netgent=NetGent(
+                        cdp_url=os.environ.get("BROWSERLESS_WS_ENDPOINT", "").strip()
+                        or None,
+                        headless=True,
+                    )
+                ),
+            )
+        else:
+            agent = create_browser_agent()
+            result = agent.invoke(
+                {
+                    "intent": app_intent,
+                    "workflow": {},
+                    "chosen_workflow": None,
+                    "parameters": None,
+                    "reasoning": "",
+                    "messages": [],
+                    "workflow_source": state.get("workflow_source") or "auto",
+                    "workflow_id": None,
+                },
+                context=BrowserWorkflowContext(
+                    netgent=NetGent(
+                        cdp_url=os.environ.get("BROWSERLESS_WS_ENDPOINT", "").strip()
+                        or None,
+                        headless=True,
+                    )
+                ),
+            )
+
+        wf = result.get("workflow") or {}
+        if wf:
+            workflows.append(wf)
+            params_list.append(result.get("parameters"))
+            print(
+                f"[AGENT {orchestration_id}]   {app} ({app_type}): "
+                f"workflow resolved (id={wf.get('id', 'generated')})"
+            )
+        else:
+            print(
+                f"[AGENT {orchestration_id}]   {app} ({app_type}): "
+                f"no workflow found — skipping"
+            )
+
+    if not workflows:
+        return {
+            "workflow": {},
+            "workflows": [],
+            "workflow_parameters_list": [],
+            "workflow_reasoning": "No workflows could be resolved for any application.",
+        }
+
+    # Use the first workflow as the primary (for backward compat with
+    # route_has_workflow which checks state["workflow"]).
+    return {
+        "workflow": workflows[0],
+        "workflow_parameters": params_list[0] if params_list else None,
+        "workflows": workflows,
+        "workflow_parameters_list": params_list,
+        "workflow_reasoning": (
+            f"Resolved {len(workflows)}/{len(applications)} workflows "
+            f"for applications: {applications}"
+        ),
+    }
+
+
 def route_has_workflow(state: OrchestratorState) -> str:
     """Fail if no workflow was generated, otherwise proceed to execution."""
     workflow = state.get("workflow") or {}
-    if workflow:
+    workflows = state.get("workflows") or []
+    if workflow or workflows:
         return "execute_experiments"
     return "fail_no_workflow"
 
@@ -322,6 +429,8 @@ def execute_experiments(
 
     workflow = state.get("workflow") or {}
     workflow_parameters = state.get("workflow_parameters")
+    workflows = state.get("workflows") or []
+    workflow_parameters_list = state.get("workflow_parameters_list") or []
     mgr = runtime.context.orchestration_manager
     result = mgr.run(
         orchestration_id,
@@ -329,6 +438,8 @@ def execute_experiments(
         parsed,
         workflow=workflow,
         workflow_parameters=workflow_parameters,
+        workflows=workflows,
+        workflow_parameters_list=workflow_parameters_list,
     )
 
     summary = result.get("summary", {})
@@ -440,6 +551,7 @@ def create_agent():
     graph.add_node("generate_experiments", generate_experiments)
     graph.add_node("shell_workflow", shell_workflow)
     graph.add_node("browser_workflow", browser_workflow)
+    graph.add_node("mixed_workflow", mixed_workflow)
     graph.add_node("fail_no_workflow", fail_no_workflow)
     graph.add_node("execute_experiments", execute_experiments)
     graph.add_node("respond", respond)
@@ -449,7 +561,11 @@ def create_agent():
     graph.add_conditional_edges(
         "generate_experiments",
         route_workflow,
-        {"shell_workflow": "shell_workflow", "browser_workflow": "browser_workflow"},
+        {
+            "shell_workflow": "shell_workflow",
+            "browser_workflow": "browser_workflow",
+            "mixed_workflow": "mixed_workflow",
+        },
     )
     graph.add_conditional_edges(
         "shell_workflow",
@@ -461,6 +577,14 @@ def create_agent():
     )
     graph.add_conditional_edges(
         "browser_workflow",
+        route_has_workflow,
+        {
+            "execute_experiments": "execute_experiments",
+            "fail_no_workflow": "fail_no_workflow",
+        },
+    )
+    graph.add_conditional_edges(
+        "mixed_workflow",
         route_has_workflow,
         {
             "execute_experiments": "execute_experiments",
@@ -527,6 +651,8 @@ class OrchestratorAgent:
                 "experiments": [],
                 "orchestration_result": None,
                 "reasoning_steps": [],
+                "workflows": [],
+                "workflow_parameters_list": [],
             },
             context={
                 "generator": ExperimentGenerator(),

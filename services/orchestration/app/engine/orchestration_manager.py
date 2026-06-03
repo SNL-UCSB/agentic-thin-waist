@@ -580,18 +580,11 @@ def _run_experiment_on_worker(
                 experiment_id=exp_id,
                 application=str(spec.get("application") or "").strip(),
                 telemetry_url=telemetry_url,
-                # Cap the workload at the experiment duration so a slow-but-
-                # progressing download cannot run past the capture window.
-                # On timeout the substrate kills the process but still
-                # returns partial stdout/stderr + flags the result.
                 experiment_max_seconds=(
                     float(spec["duration_seconds"])
                     if spec.get("duration_seconds")
                     else None
                 ),
-                # Capture is already running at this point — skip the
-                # worker-side iperf3 + ping probes so they don't show up
-                # in the pcap as pre-workflow traffic.
                 verify_shaping=False,
             )
             thread_results["run"] = r
@@ -600,12 +593,121 @@ def _run_experiment_on_worker(
             thread_errors["run"] = str(exc)
             print(f"[WORKFLOW] FAILED: {exc}")
 
-    threads = [
-        threading.Thread(target=_fire_capture, name="fire-capture", daemon=True),
-        threading.Thread(target=_fire_qtrace, name="fire-qtrace", daemon=True),
-        threading.Thread(target=_fire_replay, name="fire-replay", daemon=True),
-        threading.Thread(target=_fire_workflow, name="fire-workflow", daemon=True),
-    ]
+    # --- Concurrent multi-app execution -----------------------------------
+
+    multi_workflows = spec.get("workflows") or []
+    multi_params_list = spec.get("workflow_parameters_list") or []
+    is_concurrent = (
+        spec.get("execution_mode") == "concurrent" and len(multi_workflows) > 1
+    )
+
+    def _fire_workflows() -> None:
+        """Apply shaping once, then fire multiple workflows concurrently."""
+        qdisc = spec.get("aqm_policy", "pfifo")
+        if qdisc == "fifo":
+            qdisc = "pfifo"
+        cca = spec.get("cc_algorithm", "cubic")
+        apps = spec.get("applications") or []
+        app_types = spec.get("application_types") or []
+
+        # Apply shaping + congestion BEFORE the minute boundary so the
+        # bottleneck is ready when the workflows fire.
+        try:
+            manager.apply_shaping(
+                worker.worker_id,
+                download_mbps=capacity,
+                upload_mbps=float(spec.get("upload_mbps") or capacity),
+                latency_ms=float(spec.get("latency_ms", 0)),
+                latency_location=spec.get("latency_location") or "upstream",
+                qdisc=qdisc,
+                buffer_packets=(
+                    int(spec["buffer_packets"])
+                    if spec.get("buffer_packets") is not None
+                    else 1000
+                ),
+                qdisc_params=spec.get("qdisc_params") or None,
+                verify=False,
+            )
+            manager.apply_congestion(worker.worker_id, algorithm=cca, namespace="ns1")
+            thread_results["shaping"] = {"status": "ok"}
+            print(f"[MULTI-APP] Shaping + CCA applied (pre-boundary)")
+        except Exception as exc:
+            thread_errors["shaping"] = str(exc)
+            print(f"[MULTI-APP] Shaping FAILED: {exc}")
+            return
+
+        _wait_until(start_at)
+
+        # Fire one run_workflow per app concurrently.
+        sub_threads: list[threading.Thread] = []
+        for idx, wf in enumerate(multi_workflows):
+            wf_payload = dict(wf)
+            wf_payload.pop("id", None)
+            raw_params = (
+                multi_params_list[idx] if idx < len(multi_params_list) else None
+            )
+            wf_params = _normalize_workflow_params(raw_params, wf)
+            app_name = apps[idx] if idx < len(apps) else f"app_{idx}"
+            runtime = app_types[idx] if idx < len(app_types) else "shell"
+            max_secs = (
+                float(spec["duration_seconds"])
+                if spec.get("duration_seconds")
+                else None
+            )
+
+            def _run_one(
+                i: int = idx,
+                w: dict = wf_payload,
+                rt: str = runtime,
+                p: dict | None = wf_params,
+                a: str = app_name,
+                ms: float | None = max_secs,
+            ) -> None:
+                key = f"run_{i}"
+                try:
+                    r = manager.run_workflow(
+                        worker_id=worker.worker_id,
+                        workflow=w,
+                        runtime=rt,
+                        parameters=p,
+                        experiment_max_seconds=ms,
+                        cca=cca,
+                        cca_namespace="ns1",
+                    )
+                    thread_results[key] = r
+                    print(f"[MULTI-APP] Workflow {i} ({a}) completed")
+                except Exception as exc:
+                    thread_errors[key] = str(exc)
+                    print(f"[MULTI-APP] Workflow {i} ({a}) FAILED: {exc}")
+
+            t = threading.Thread(
+                target=_run_one, name=f"fire-workflow-{idx}", daemon=True
+            )
+            sub_threads.append(t)
+
+        for t in sub_threads:
+            t.start()
+        for t in sub_threads:
+            t.join()
+
+    # --- Build and launch thread set --------------------------------------
+
+    if is_concurrent:
+        threads = [
+            threading.Thread(target=_fire_capture, name="fire-capture", daemon=True),
+            threading.Thread(target=_fire_qtrace, name="fire-qtrace", daemon=True),
+            threading.Thread(target=_fire_replay, name="fire-replay", daemon=True),
+            threading.Thread(
+                target=_fire_workflows, name="fire-workflows", daemon=True
+            ),
+        ]
+    else:
+        threads = [
+            threading.Thread(target=_fire_capture, name="fire-capture", daemon=True),
+            threading.Thread(target=_fire_qtrace, name="fire-qtrace", daemon=True),
+            threading.Thread(target=_fire_replay, name="fire-replay", daemon=True),
+            threading.Thread(target=_fire_workflow, name="fire-workflow", daemon=True),
+        ]
     for t in threads:
         t.start()
     for t in threads:
@@ -749,7 +851,46 @@ def _run_experiment_on_worker(
     # Keep experiment success criteria aligned with previous behavior:
     # workflow completion determines success/failure, while replay/capture/telemetry
     # issues are retained as warnings in the result payload.
-    if "run" in thread_results:
+    if is_concurrent:
+        # Multi-app: collect all run_N results.
+        run_results: dict[str, Any] = {}
+        run_failures: list[str] = []
+        apps = spec.get("applications") or []
+        for idx in range(len(multi_workflows)):
+            key = f"run_{idx}"
+            app_name = apps[idx] if idx < len(apps) else f"app_{idx}"
+            if key in thread_results:
+                run_results[app_name] = thread_results[key]
+            elif key in thread_errors:
+                run_results[app_name] = {"error": thread_errors[key]}
+                run_failures.append(f"{app_name}: {thread_errors[key]}")
+            else:
+                run_results[app_name] = {"error": "thread did not complete"}
+                run_failures.append(f"{app_name}: thread did not complete")
+
+        result["run"] = run_results
+        if not run_failures:
+            result["status"] = "success"
+            logger.info(
+                "Worker %s: concurrent experiment %s succeeded (%d apps)",
+                worker.worker_id,
+                exp_id,
+                len(multi_workflows),
+            )
+            print(
+                f"[STEP 3/4] Experiment {exp_id} → SUCCESS ({len(multi_workflows)} apps)"
+            )
+        else:
+            result["status"] = "failed"
+            result["error"] = "; ".join(run_failures)
+            logger.error(
+                "Worker %s: concurrent experiment %s failed: %s",
+                worker.worker_id,
+                exp_id,
+                result["error"],
+            )
+            print(f"[STEP 3/4] Experiment {exp_id} → FAILED: {result['error']}")
+    elif "run" in thread_results:
         result["run"] = thread_results["run"]
         result["status"] = "success"
         logger.info("Worker %s: experiment %s succeeded", worker.worker_id, exp_id)
@@ -822,6 +963,8 @@ class OrchestrationManager:
         parsed_intent: dict[str, Any],
         workflow: dict[str, Any] | None = None,
         workflow_parameters: dict[str, Any] | None = None,
+        workflows: list[dict[str, Any]] | None = None,
+        workflow_parameters_list: list[dict[str, Any] | None] | None = None,
     ) -> dict[str, Any]:
         """Full pipeline: generate specs → dispatch → aggregate results.
 
@@ -831,6 +974,9 @@ class OrchestrationManager:
             parsed_intent: Structured output from IntentParser.
             workflow: NetGent workflow dict (state-machine JSON) to execute
                       on each experiment. Falls back to a default ping workflow.
+            workflows: Per-application workflow list for multi-app experiments.
+            workflow_parameters_list: Per-application parameters aligned with
+                                     workflows.
 
         Returns:
             Dict with orchestration_id, status, experiment_specs, results, summary.
@@ -843,8 +989,18 @@ class OrchestrationManager:
         )
         experiment_specs = [e.model_dump() for e in experiments]
 
-        if workflow:
-            for spec in experiment_specs:
+        workflows = workflows or []
+        workflow_parameters_list = workflow_parameters_list or []
+
+        for spec in experiment_specs:
+            if spec.get("execution_mode") == "concurrent" and workflows:
+                # Concurrent multi-app: attach per-app workflow lists.
+                spec["workflows"] = [dict(w) for w in workflows]
+                spec["workflow_parameters_list"] = list(workflow_parameters_list)
+                # Also set the primary workflow for logging / fallback.
+                if not spec.get("workflow") and workflows:
+                    spec["workflow"] = workflows[0]
+            elif workflow:
                 spec["workflow"] = workflow
                 if workflow_parameters:
                     spec["workflow_parameters"] = workflow_parameters

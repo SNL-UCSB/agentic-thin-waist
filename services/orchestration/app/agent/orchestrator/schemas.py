@@ -11,9 +11,13 @@ class ParsedIntent(BaseModel):
     applications: List[str] = Field(
         ..., description="Application names (e.g. youtube, ndt, ping, wget)"
     )
-    application_type: Literal["shell", "browser"] = Field(
+    application_type: Literal["shell", "browser", "mixed"] = Field(
         "shell",
-        description="Runtime type: 'shell' for CLI tools (ndt, iperf, ping, speedtest, wget) or 'browser' for web applications (youtube, zoom, browsing)",
+        description=(
+            "Runtime type: 'shell' for CLI tools (ndt, iperf, ping, speedtest, wget), "
+            "'browser' for web applications (youtube, zoom, browsing), or "
+            "'mixed' when the intent includes both shell and browser applications"
+        ),
     )
     capacities: Optional[List[float]] = Field(
         None, description="Link capacities in Mbps"
