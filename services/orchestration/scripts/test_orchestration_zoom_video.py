@@ -25,7 +25,9 @@ Override defaults via env vars:
     ZOOM_PASSCODE       (default: 008211)
     ZOOM_DISPLAY_NAME   (default: Henry)
     ZOOM_WAIT_SECONDS   (default: 60)
-    ZOOM_CAPACITY_MBPS  (default: 20)
+    ZOOM_CAPACITY_MBPS  (default: 6)
+    ZOOM_LATENCY_MS     (default: 100)
+    ZOOM_QDISC          (default: pfifo)
 """
 
 import json
@@ -55,13 +57,16 @@ WAIT_SECONDS = int(os.getenv("ZOOM_WAIT_SECONDS", "60"))
 
 TERMINAL_STATUSES = {"complete", "failed", "partial"}
 
-CAPACITY_MBPS = int(os.getenv("ZOOM_CAPACITY_MBPS", "20"))
+CAPACITY_MBPS = int(os.getenv("ZOOM_CAPACITY_MBPS", "6"))
+LATENCY_MS    = int(os.getenv("ZOOM_LATENCY_MS",    "100"))
+QDISC         = os.getenv("ZOOM_QDISC",             "pfifo")
 
 INTENT = (
     f"Join Zoom meeting ID {MEETING_ID} with passcode {PASSCODE}, "
     f"display name {DISPLAY_NAME!r}, stay for {WAIT_SECONDS} seconds, "
     f"streaming WAV audio as the microphone and MJPEG video as the camera. "
-    f"Use a {CAPACITY_MBPS} Mbps bottleneck with 20 ms latency, 1 trial."
+    f"Use a {CAPACITY_MBPS} Mbps bottleneck with {LATENCY_MS} ms latency, "
+    f"{QDISC} AQM policy, 1 trial."
 )
 
 
@@ -377,6 +382,7 @@ def main() -> None:
     print(f"  Passcode:     {PASSCODE}")
     print(f"  Display name: {DISPLAY_NAME}")
     print(f"  Wait:         {WAIT_SECONDS}s")
+    print(f"  Capacity:     {CAPACITY_MBPS} Mbps  Latency: {LATENCY_MS} ms  QDisc: {QDISC}")
     print(f"  Audio:        WAV streamed as fake microphone (SUBSTRATE_FAKE_AUDIO_FILE)")
     print(f"  Video:        MJPEG streamed as fake camera   (SUBSTRATE_FAKE_VIDEO_FILE)")
     print(f"  Workflow:     run_zoom_av_workflow (local override — joins audio + unmutes + starts video)")

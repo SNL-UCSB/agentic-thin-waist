@@ -352,6 +352,13 @@ services:
       - CTP_SERVICE_URL=${CTP_SERVICE_URL:-http://ctp-service:8001}
       - CTP_SERVICE_GLOBAL=${CTP_SERVICE_GLOBAL:-http://128.111.5.236:8001}
       - ORCH_CTP_INTENSITY_DIRECTION=${ORCH_CTP_INTENSITY_DIRECTION:-}
+      - ORCH_CTP_SOURCE=${ORCH_CTP_SOURCE:-local_list}
+      - ORCH_LOCAL_CTP_ROOT=${ORCH_LOCAL_CTP_ROOT:-}
+      - ORCH_LOCAL_CTP_LIST=${ORCH_LOCAL_CTP_LIST:-}
+      - ORCH_LOCAL_CTP_SELECTION=${ORCH_LOCAL_CTP_SELECTION:-first}
+      - ORCH_LOCAL_CTP_ALLOW_RANGE_FALLBACK=${ORCH_LOCAL_CTP_ALLOW_RANGE_FALLBACK:-false}
+      - ORCH_CTP_POINTER_MODE=${ORCH_CTP_POINTER_MODE:-local_path}
+      - ORCH_WORKER_STARTUP_WAIT_SECONDS=${ORCH_WORKER_STARTUP_WAIT_SECONDS:-15}
       - ORCH_DEFAULT_WORKFLOW_SOURCE=${ORCH_DEFAULT_WORKFLOW_SOURCE:-auto}
       - ORCHESTRATOR_LLM_PROVIDER=${ORCHESTRATOR_LLM_PROVIDER:-anthropic}
       - NETGENT_LLM_PROVIDER=${NETGENT_LLM_PROVIDER:-gemini}
@@ -393,6 +400,533 @@ services:
           "-c",
           "import urllib.request; urllib.request.urlopen('http://localhost:8005/health')",
         ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Second orchestration instance for 10ms-latency sweeps — runs on host port 8006
+  # so it can operate concurrently with the primary orchestration (port 8005) without
+  # sharing the CTP-pin file.  Started only when the sweep10ms profile is requested:
+  #   docker compose --profile sweep10ms up -d orchestration-10ms
+  orchestration-10ms:
+    build:
+      context: .
+      dockerfile: ./services/orchestration/Dockerfile
+    container_name: orchestration-10ms
+    profiles:
+      - sweep10ms
+    ports:
+      - "8006:8005"
+    environment:
+      - FLASK_ENV=development
+      - EXPERIMENT_API_URL=http://experiment-api:8000
+      - CTP_SERVICE_URL=${CTP_SERVICE_URL:-http://ctp-service:8001}
+      - CTP_SERVICE_GLOBAL=${CTP_SERVICE_GLOBAL:-http://128.111.5.236:8001}
+      - ORCH_CTP_INTENSITY_DIRECTION=${ORCH_CTP_INTENSITY_DIRECTION:-}
+      - ORCH_CTP_SOURCE=${ORCH_CTP_SOURCE:-local_list}
+      - ORCH_LOCAL_CTP_ROOT=${ORCH_LOCAL_CTP_ROOT:-}
+      - ORCH_LOCAL_CTP_LIST=${ORCH_LOCAL_CTP_LIST_10MS:-/mnt/md0/haarika/ctps_sweep_10ms.txt}
+      - ORCH_LOCAL_CTP_SELECTION=${ORCH_LOCAL_CTP_SELECTION:-first}
+      - ORCH_LOCAL_CTP_ALLOW_RANGE_FALLBACK=${ORCH_LOCAL_CTP_ALLOW_RANGE_FALLBACK:-false}
+      - ORCH_CTP_POINTER_MODE=${ORCH_CTP_POINTER_MODE:-local_path}
+      - ORCH_WORKER_STARTUP_WAIT_SECONDS=${ORCH_WORKER_STARTUP_WAIT_SECONDS:-15}
+      - ORCH_DEFAULT_WORKFLOW_SOURCE=${ORCH_DEFAULT_WORKFLOW_SOURCE:-auto}
+      - ORCHESTRATOR_LLM_PROVIDER=${ORCHESTRATOR_LLM_PROVIDER:-anthropic}
+      - NETGENT_LLM_PROVIDER=${NETGENT_LLM_PROVIDER:-gemini}
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - CONNECTIVITY_BACKEND=${CONNECTIVITY_BACKEND:-local_docker}
+      - SUBSTRATE_WORKER_URL=http://substrate-worker:8002
+      - NETGENT_SERVICE_URL=http://netgent-service:8003
+      - BROWSERLESS_WS_ENDPOINT=${BROWSERLESS_WS_ENDPOINT:-ws://substrate-worker:3000/chromium/playwright}
+      - SUBSTRATE_WORKER_IMAGE=${SUBSTRATE_WORKER_IMAGE:-agentic-thin-waist-substrate-worker}
+      - SUBSTRATE_DOCKER_NETWORK=${SUBSTRATE_DOCKER_NETWORK:-agentic-thin-waist_agentic-network}
+      - SUBSTRATE_WORKER_HOST=172.25.0.1
+      - TELEMETRY_SERVICE_URL=http://telemetry-service:8004
+      - SUBSTRATE_CTP_DIR=${SUBSTRATE_CTP_DIR:-/tmp/substrate-ctp}
+      - SUBSTRATE_CAPTURE_DIR=${SUBSTRATE_CAPTURE_DIR:-/tmp/substrate-capture}
+      - NETGENT_USE_LOCAL=${NETGENT_USE_LOCAL:-false}
+      - NETGENT_NAMESPACE=${NETGENT_NAMESPACE:-ns1}
+      - PYTHONPATH=/app:/shared:/shared/clients/netgent/src:/app/app
+    depends_on:
+      - experiment-api
+      - ctp-service
+      - substrate-worker
+      - netgent-service
+      - telemetry-service
+    networks:
+      - agentic-network
+    volumes:
+      - ./services/orchestration:/app
+      - ./shared:/shared
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${SUBSTRATE_CTP_DIR:-/tmp/substrate-ctp}:${SUBSTRATE_CTP_DIR:-/tmp/substrate-ctp}:ro
+      - ${SUBSTRATE_CAPTURE_DIR:-/tmp/substrate-capture}:${SUBSTRATE_CAPTURE_DIR:-/tmp/substrate-capture}
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8005/health')",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Third orchestration instance for 100Mbps/10ms-latency sweeps — runs on host port 8007.
+  orchestration-100mbps-10ms:
+    build:
+      context: .
+      dockerfile: ./services/orchestration/Dockerfile
+    container_name: orchestration-100mbps-10ms
+    profiles:
+      - sweep100mbps10ms
+    ports:
+      - "8007:8005"
+    environment:
+      - FLASK_ENV=development
+      - EXPERIMENT_API_URL=http://experiment-api:8000
+      - CTP_SERVICE_URL=${CTP_SERVICE_URL:-http://ctp-service:8001}
+      - CTP_SERVICE_GLOBAL=${CTP_SERVICE_GLOBAL:-http://128.111.5.236:8001}
+      - ORCH_CTP_INTENSITY_DIRECTION=${ORCH_CTP_INTENSITY_DIRECTION:-}
+      - ORCH_CTP_SOURCE=${ORCH_CTP_SOURCE:-local_list}
+      - ORCH_LOCAL_CTP_ROOT=${ORCH_LOCAL_CTP_ROOT:-}
+      - ORCH_LOCAL_CTP_LIST=${ORCH_LOCAL_CTP_LIST_100MBPS_10MS:-/mnt/md0/haarika/ctps_sweep_100mbps_10ms.txt}
+      - ORCH_LOCAL_CTP_SELECTION=${ORCH_LOCAL_CTP_SELECTION:-first}
+      - ORCH_LOCAL_CTP_ALLOW_RANGE_FALLBACK=${ORCH_LOCAL_CTP_ALLOW_RANGE_FALLBACK:-false}
+      - ORCH_CTP_POINTER_MODE=${ORCH_CTP_POINTER_MODE:-local_path}
+      - ORCH_WORKER_STARTUP_WAIT_SECONDS=${ORCH_WORKER_STARTUP_WAIT_SECONDS:-15}
+      - ORCH_DEFAULT_WORKFLOW_SOURCE=${ORCH_DEFAULT_WORKFLOW_SOURCE:-auto}
+      - ORCHESTRATOR_LLM_PROVIDER=${ORCHESTRATOR_LLM_PROVIDER:-anthropic}
+      - NETGENT_LLM_PROVIDER=${NETGENT_LLM_PROVIDER:-gemini}
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - CONNECTIVITY_BACKEND=${CONNECTIVITY_BACKEND:-local_docker}
+      - SUBSTRATE_WORKER_URL=http://substrate-worker:8002
+      - NETGENT_SERVICE_URL=http://netgent-service:8003
+      - BROWSERLESS_WS_ENDPOINT=${BROWSERLESS_WS_ENDPOINT:-ws://substrate-worker:3000/chromium/playwright}
+      - SUBSTRATE_WORKER_IMAGE=${SUBSTRATE_WORKER_IMAGE:-agentic-thin-waist-substrate-worker}
+      - SUBSTRATE_DOCKER_NETWORK=${SUBSTRATE_DOCKER_NETWORK:-agentic-thin-waist_agentic-network}
+      - SUBSTRATE_WORKER_HOST=172.25.0.1
+      - TELEMETRY_SERVICE_URL=http://telemetry-service:8004
+      - SUBSTRATE_CTP_DIR=${SUBSTRATE_CTP_DIR:-/tmp/substrate-ctp}
+      - SUBSTRATE_CAPTURE_DIR=${SUBSTRATE_CAPTURE_DIR:-/tmp/substrate-capture}
+      - NETGENT_USE_LOCAL=${NETGENT_USE_LOCAL:-false}
+      - NETGENT_NAMESPACE=${NETGENT_NAMESPACE:-ns1}
+      - PYTHONPATH=/app:/shared:/shared/clients/netgent/src:/app/app
+    depends_on:
+      - experiment-api
+      - ctp-service
+      - substrate-worker
+      - netgent-service
+      - telemetry-service
+    networks:
+      - agentic-network
+    volumes:
+      - ./services/orchestration:/app
+      - ./shared:/shared
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${SUBSTRATE_CTP_DIR:-/tmp/substrate-ctp}:${SUBSTRATE_CTP_DIR:-/tmp/substrate-ctp}:ro
+      - ${SUBSTRATE_CAPTURE_DIR:-/tmp/substrate-capture}:${SUBSTRATE_CAPTURE_DIR:-/tmp/substrate-capture}
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8005/health')",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Second 100Mbps/10ms orchestration instance (parallel partition "B") — host port 8008.
+  orchestration-100mbps-10ms-b:
+    build:
+      context: .
+      dockerfile: ./services/orchestration/Dockerfile
+    container_name: orchestration-100mbps-10ms-b
+    profiles:
+      - sweep100mbps10msb
+    ports:
+      - "8008:8005"
+    environment:
+      - FLASK_ENV=development
+      - EXPERIMENT_API_URL=http://experiment-api:8000
+      - CTP_SERVICE_URL=${CTP_SERVICE_URL:-http://ctp-service:8001}
+      - CTP_SERVICE_GLOBAL=${CTP_SERVICE_GLOBAL:-http://128.111.5.236:8001}
+      - ORCH_CTP_INTENSITY_DIRECTION=${ORCH_CTP_INTENSITY_DIRECTION:-}
+      - ORCH_CTP_SOURCE=${ORCH_CTP_SOURCE:-local_list}
+      - ORCH_LOCAL_CTP_ROOT=${ORCH_LOCAL_CTP_ROOT:-}
+      - ORCH_LOCAL_CTP_LIST=${ORCH_LOCAL_CTP_LIST_100MBPS_10MS_B:-/mnt/md0/haarika/ctps_sweep_100mbps_10ms_b.txt}
+      - ORCH_LOCAL_CTP_SELECTION=${ORCH_LOCAL_CTP_SELECTION:-first}
+      - ORCH_LOCAL_CTP_ALLOW_RANGE_FALLBACK=${ORCH_LOCAL_CTP_ALLOW_RANGE_FALLBACK:-false}
+      - ORCH_CTP_POINTER_MODE=${ORCH_CTP_POINTER_MODE:-local_path}
+      - ORCH_WORKER_STARTUP_WAIT_SECONDS=${ORCH_WORKER_STARTUP_WAIT_SECONDS:-15}
+      - ORCH_DEFAULT_WORKFLOW_SOURCE=${ORCH_DEFAULT_WORKFLOW_SOURCE:-auto}
+      - ORCHESTRATOR_LLM_PROVIDER=${ORCHESTRATOR_LLM_PROVIDER:-anthropic}
+      - NETGENT_LLM_PROVIDER=${NETGENT_LLM_PROVIDER:-gemini}
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - CONNECTIVITY_BACKEND=${CONNECTIVITY_BACKEND:-local_docker}
+      - SUBSTRATE_WORKER_URL=http://substrate-worker:8002
+      - NETGENT_SERVICE_URL=http://netgent-service:8003
+      - BROWSERLESS_WS_ENDPOINT=${BROWSERLESS_WS_ENDPOINT:-ws://substrate-worker:3000/chromium/playwright}
+      - SUBSTRATE_WORKER_IMAGE=${SUBSTRATE_WORKER_IMAGE:-agentic-thin-waist-substrate-worker}
+      - SUBSTRATE_DOCKER_NETWORK=${SUBSTRATE_DOCKER_NETWORK:-agentic-thin-waist_agentic-network}
+      - SUBSTRATE_WORKER_HOST=172.25.0.1
+      - TELEMETRY_SERVICE_URL=http://telemetry-service:8004
+      - SUBSTRATE_CTP_DIR=${SUBSTRATE_CTP_DIR:-/tmp/substrate-ctp}
+      - SUBSTRATE_CAPTURE_DIR=${SUBSTRATE_CAPTURE_DIR:-/tmp/substrate-capture}
+      - NETGENT_USE_LOCAL=${NETGENT_USE_LOCAL:-false}
+      - NETGENT_NAMESPACE=${NETGENT_NAMESPACE:-ns1}
+      - PYTHONPATH=/app:/shared:/shared/clients/netgent/src:/app/app
+    depends_on:
+      - experiment-api
+      - ctp-service
+      - substrate-worker
+      - netgent-service
+      - telemetry-service
+    networks:
+      - agentic-network
+    volumes:
+      - ./services/orchestration:/app
+      - ./shared:/shared
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${SUBSTRATE_CTP_DIR:-/tmp/substrate-ctp}:${SUBSTRATE_CTP_DIR:-/tmp/substrate-ctp}:ro
+      - ${SUBSTRATE_CAPTURE_DIR:-/tmp/substrate-capture}:${SUBSTRATE_CAPTURE_DIR:-/tmp/substrate-capture}
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8005/health')",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ---------- 6 Mbps / 100ms parallel partitions p1-p6 (ports 8009-8014) ----------
+
+  orchestration-6mbps-100ms-p1:
+    build:
+      context: .
+      dockerfile: ./services/orchestration/Dockerfile
+    container_name: orchestration-6mbps-100ms-p1
+    profiles: [sweep6m100ms_p1]
+    ports: ["8009:8005"]
+    environment:
+      - FLASK_ENV=development
+      - EXPERIMENT_API_URL=http://experiment-api:8000
+      - CTP_SERVICE_URL=${CTP_SERVICE_URL:-http://ctp-service:8001}
+      - CTP_SERVICE_GLOBAL=${CTP_SERVICE_GLOBAL:-http://128.111.5.236:8001}
+      - ORCH_CTP_INTENSITY_DIRECTION=${ORCH_CTP_INTENSITY_DIRECTION:-}
+      - ORCH_CTP_SOURCE=local_list
+      - ORCH_LOCAL_CTP_ROOT=${ORCH_LOCAL_CTP_ROOT:-}
+      - ORCH_LOCAL_CTP_LIST=/mnt/md0/haarika/ctps_6mbps_100ms_p1.txt
+      - ORCH_LOCAL_CTP_SELECTION=first
+      - ORCH_LOCAL_CTP_ALLOW_RANGE_FALLBACK=false
+      - ORCH_CTP_POINTER_MODE=local_path
+      - ORCH_WORKER_STARTUP_WAIT_SECONDS=${ORCH_WORKER_STARTUP_WAIT_SECONDS:-15}
+      - ORCH_DEFAULT_WORKFLOW_SOURCE=${ORCH_DEFAULT_WORKFLOW_SOURCE:-auto}
+      - ORCHESTRATOR_LLM_PROVIDER=${ORCHESTRATOR_LLM_PROVIDER:-anthropic}
+      - NETGENT_LLM_PROVIDER=${NETGENT_LLM_PROVIDER:-gemini}
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - CONNECTIVITY_BACKEND=${CONNECTIVITY_BACKEND:-local_docker}
+      - SUBSTRATE_WORKER_URL=http://substrate-worker:8002
+      - NETGENT_SERVICE_URL=http://netgent-service:8003
+      - BROWSERLESS_WS_ENDPOINT=${BROWSERLESS_WS_ENDPOINT:-ws://substrate-worker:3000/chromium/playwright}
+      - SUBSTRATE_WORKER_IMAGE=${SUBSTRATE_WORKER_IMAGE:-agentic-thin-waist-substrate-worker}
+      - SUBSTRATE_DOCKER_NETWORK=${SUBSTRATE_DOCKER_NETWORK:-agentic-thin-waist_agentic-network}
+      - SUBSTRATE_WORKER_HOST=172.25.0.1
+      - TELEMETRY_SERVICE_URL=http://telemetry-service:8004
+      - SUBSTRATE_CTP_DIR=${SUBSTRATE_CTP_DIR:-/tmp/substrate-ctp}
+      - SUBSTRATE_CAPTURE_DIR=${SUBSTRATE_CAPTURE_DIR:-/tmp/substrate-capture}
+      - NETGENT_USE_LOCAL=${NETGENT_USE_LOCAL:-false}
+      - NETGENT_NAMESPACE=${NETGENT_NAMESPACE:-ns1}
+      - PYTHONPATH=/app:/shared:/shared/clients/netgent/src:/app/app
+    depends_on: [experiment-api, ctp-service, substrate-worker, netgent-service, telemetry-service]
+    networks: [agentic-network]
+    volumes:
+      - ./services/orchestration:/app
+      - ./shared:/shared
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${SUBSTRATE_CTP_DIR:-/tmp/substrate-ctp}:${SUBSTRATE_CTP_DIR:-/tmp/substrate-ctp}:ro
+      - ${SUBSTRATE_CAPTURE_DIR:-/tmp/substrate-capture}:${SUBSTRATE_CAPTURE_DIR:-/tmp/substrate-capture}
+    healthcheck:
+      test: ["CMD","python","-c","import urllib.request; urllib.request.urlopen('http://localhost:8005/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  orchestration-6mbps-100ms-p2:
+    build:
+      context: .
+      dockerfile: ./services/orchestration/Dockerfile
+    container_name: orchestration-6mbps-100ms-p2
+    profiles: [sweep6m100ms_p2]
+    ports: ["8015:8005"]
+    environment:
+      - FLASK_ENV=development
+      - EXPERIMENT_API_URL=http://experiment-api:8000
+      - CTP_SERVICE_URL=${CTP_SERVICE_URL:-http://ctp-service:8001}
+      - CTP_SERVICE_GLOBAL=${CTP_SERVICE_GLOBAL:-http://128.111.5.236:8001}
+      - ORCH_CTP_INTENSITY_DIRECTION=${ORCH_CTP_INTENSITY_DIRECTION:-}
+      - ORCH_CTP_SOURCE=local_list
+      - ORCH_LOCAL_CTP_ROOT=${ORCH_LOCAL_CTP_ROOT:-}
+      - ORCH_LOCAL_CTP_LIST=/mnt/md0/haarika/ctps_6mbps_100ms_p2.txt
+      - ORCH_LOCAL_CTP_SELECTION=first
+      - ORCH_LOCAL_CTP_ALLOW_RANGE_FALLBACK=false
+      - ORCH_CTP_POINTER_MODE=local_path
+      - ORCH_WORKER_STARTUP_WAIT_SECONDS=${ORCH_WORKER_STARTUP_WAIT_SECONDS:-15}
+      - ORCH_DEFAULT_WORKFLOW_SOURCE=${ORCH_DEFAULT_WORKFLOW_SOURCE:-auto}
+      - ORCHESTRATOR_LLM_PROVIDER=${ORCHESTRATOR_LLM_PROVIDER:-anthropic}
+      - NETGENT_LLM_PROVIDER=${NETGENT_LLM_PROVIDER:-gemini}
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - CONNECTIVITY_BACKEND=${CONNECTIVITY_BACKEND:-local_docker}
+      - SUBSTRATE_WORKER_URL=http://substrate-worker:8002
+      - NETGENT_SERVICE_URL=http://netgent-service:8003
+      - BROWSERLESS_WS_ENDPOINT=${BROWSERLESS_WS_ENDPOINT:-ws://substrate-worker:3000/chromium/playwright}
+      - SUBSTRATE_WORKER_IMAGE=${SUBSTRATE_WORKER_IMAGE:-agentic-thin-waist-substrate-worker}
+      - SUBSTRATE_DOCKER_NETWORK=${SUBSTRATE_DOCKER_NETWORK:-agentic-thin-waist_agentic-network}
+      - SUBSTRATE_WORKER_HOST=172.25.0.1
+      - TELEMETRY_SERVICE_URL=http://telemetry-service:8004
+      - SUBSTRATE_CTP_DIR=${SUBSTRATE_CTP_DIR:-/tmp/substrate-ctp}
+      - SUBSTRATE_CAPTURE_DIR=${SUBSTRATE_CAPTURE_DIR:-/tmp/substrate-capture}
+      - NETGENT_USE_LOCAL=${NETGENT_USE_LOCAL:-false}
+      - NETGENT_NAMESPACE=${NETGENT_NAMESPACE:-ns1}
+      - PYTHONPATH=/app:/shared:/shared/clients/netgent/src:/app/app
+    depends_on: [experiment-api, ctp-service, substrate-worker, netgent-service, telemetry-service]
+    networks: [agentic-network]
+    volumes:
+      - ./services/orchestration:/app
+      - ./shared:/shared
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${SUBSTRATE_CTP_DIR:-/tmp/substrate-ctp}:${SUBSTRATE_CTP_DIR:-/tmp/substrate-ctp}:ro
+      - ${SUBSTRATE_CAPTURE_DIR:-/tmp/substrate-capture}:${SUBSTRATE_CAPTURE_DIR:-/tmp/substrate-capture}
+    healthcheck:
+      test: ["CMD","python","-c","import urllib.request; urllib.request.urlopen('http://localhost:8005/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  orchestration-6mbps-100ms-p3:
+    build:
+      context: .
+      dockerfile: ./services/orchestration/Dockerfile
+    container_name: orchestration-6mbps-100ms-p3
+    profiles: [sweep6m100ms_p3]
+    ports: ["8011:8005"]
+    environment:
+      - FLASK_ENV=development
+      - EXPERIMENT_API_URL=http://experiment-api:8000
+      - CTP_SERVICE_URL=${CTP_SERVICE_URL:-http://ctp-service:8001}
+      - CTP_SERVICE_GLOBAL=${CTP_SERVICE_GLOBAL:-http://128.111.5.236:8001}
+      - ORCH_CTP_INTENSITY_DIRECTION=${ORCH_CTP_INTENSITY_DIRECTION:-}
+      - ORCH_CTP_SOURCE=local_list
+      - ORCH_LOCAL_CTP_ROOT=${ORCH_LOCAL_CTP_ROOT:-}
+      - ORCH_LOCAL_CTP_LIST=/mnt/md0/haarika/ctps_6mbps_100ms_p3.txt
+      - ORCH_LOCAL_CTP_SELECTION=first
+      - ORCH_LOCAL_CTP_ALLOW_RANGE_FALLBACK=false
+      - ORCH_CTP_POINTER_MODE=local_path
+      - ORCH_WORKER_STARTUP_WAIT_SECONDS=${ORCH_WORKER_STARTUP_WAIT_SECONDS:-15}
+      - ORCH_DEFAULT_WORKFLOW_SOURCE=${ORCH_DEFAULT_WORKFLOW_SOURCE:-auto}
+      - ORCHESTRATOR_LLM_PROVIDER=${ORCHESTRATOR_LLM_PROVIDER:-anthropic}
+      - NETGENT_LLM_PROVIDER=${NETGENT_LLM_PROVIDER:-gemini}
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - CONNECTIVITY_BACKEND=${CONNECTIVITY_BACKEND:-local_docker}
+      - SUBSTRATE_WORKER_URL=http://substrate-worker:8002
+      - NETGENT_SERVICE_URL=http://netgent-service:8003
+      - BROWSERLESS_WS_ENDPOINT=${BROWSERLESS_WS_ENDPOINT:-ws://substrate-worker:3000/chromium/playwright}
+      - SUBSTRATE_WORKER_IMAGE=${SUBSTRATE_WORKER_IMAGE:-agentic-thin-waist-substrate-worker}
+      - SUBSTRATE_DOCKER_NETWORK=${SUBSTRATE_DOCKER_NETWORK:-agentic-thin-waist_agentic-network}
+      - SUBSTRATE_WORKER_HOST=172.25.0.1
+      - TELEMETRY_SERVICE_URL=http://telemetry-service:8004
+      - SUBSTRATE_CTP_DIR=${SUBSTRATE_CTP_DIR:-/tmp/substrate-ctp}
+      - SUBSTRATE_CAPTURE_DIR=${SUBSTRATE_CAPTURE_DIR:-/tmp/substrate-capture}
+      - NETGENT_USE_LOCAL=${NETGENT_USE_LOCAL:-false}
+      - NETGENT_NAMESPACE=${NETGENT_NAMESPACE:-ns1}
+      - PYTHONPATH=/app:/shared:/shared/clients/netgent/src:/app/app
+    depends_on: [experiment-api, ctp-service, substrate-worker, netgent-service, telemetry-service]
+    networks: [agentic-network]
+    volumes:
+      - ./services/orchestration:/app
+      - ./shared:/shared
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${SUBSTRATE_CTP_DIR:-/tmp/substrate-ctp}:${SUBSTRATE_CTP_DIR:-/tmp/substrate-ctp}:ro
+      - ${SUBSTRATE_CAPTURE_DIR:-/tmp/substrate-capture}:${SUBSTRATE_CAPTURE_DIR:-/tmp/substrate-capture}
+    healthcheck:
+      test: ["CMD","python","-c","import urllib.request; urllib.request.urlopen('http://localhost:8005/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  orchestration-6mbps-100ms-p4:
+    build:
+      context: .
+      dockerfile: ./services/orchestration/Dockerfile
+    container_name: orchestration-6mbps-100ms-p4
+    profiles: [sweep6m100ms_p4]
+    ports: ["8012:8005"]
+    environment:
+      - FLASK_ENV=development
+      - EXPERIMENT_API_URL=http://experiment-api:8000
+      - CTP_SERVICE_URL=${CTP_SERVICE_URL:-http://ctp-service:8001}
+      - CTP_SERVICE_GLOBAL=${CTP_SERVICE_GLOBAL:-http://128.111.5.236:8001}
+      - ORCH_CTP_INTENSITY_DIRECTION=${ORCH_CTP_INTENSITY_DIRECTION:-}
+      - ORCH_CTP_SOURCE=local_list
+      - ORCH_LOCAL_CTP_ROOT=${ORCH_LOCAL_CTP_ROOT:-}
+      - ORCH_LOCAL_CTP_LIST=/mnt/md0/haarika/ctps_6mbps_100ms_p4.txt
+      - ORCH_LOCAL_CTP_SELECTION=first
+      - ORCH_LOCAL_CTP_ALLOW_RANGE_FALLBACK=false
+      - ORCH_CTP_POINTER_MODE=local_path
+      - ORCH_WORKER_STARTUP_WAIT_SECONDS=${ORCH_WORKER_STARTUP_WAIT_SECONDS:-15}
+      - ORCH_DEFAULT_WORKFLOW_SOURCE=${ORCH_DEFAULT_WORKFLOW_SOURCE:-auto}
+      - ORCHESTRATOR_LLM_PROVIDER=${ORCHESTRATOR_LLM_PROVIDER:-anthropic}
+      - NETGENT_LLM_PROVIDER=${NETGENT_LLM_PROVIDER:-gemini}
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - CONNECTIVITY_BACKEND=${CONNECTIVITY_BACKEND:-local_docker}
+      - SUBSTRATE_WORKER_URL=http://substrate-worker:8002
+      - NETGENT_SERVICE_URL=http://netgent-service:8003
+      - BROWSERLESS_WS_ENDPOINT=${BROWSERLESS_WS_ENDPOINT:-ws://substrate-worker:3000/chromium/playwright}
+      - SUBSTRATE_WORKER_IMAGE=${SUBSTRATE_WORKER_IMAGE:-agentic-thin-waist-substrate-worker}
+      - SUBSTRATE_DOCKER_NETWORK=${SUBSTRATE_DOCKER_NETWORK:-agentic-thin-waist_agentic-network}
+      - SUBSTRATE_WORKER_HOST=172.25.0.1
+      - TELEMETRY_SERVICE_URL=http://telemetry-service:8004
+      - SUBSTRATE_CTP_DIR=${SUBSTRATE_CTP_DIR:-/tmp/substrate-ctp}
+      - SUBSTRATE_CAPTURE_DIR=${SUBSTRATE_CAPTURE_DIR:-/tmp/substrate-capture}
+      - NETGENT_USE_LOCAL=${NETGENT_USE_LOCAL:-false}
+      - NETGENT_NAMESPACE=${NETGENT_NAMESPACE:-ns1}
+      - PYTHONPATH=/app:/shared:/shared/clients/netgent/src:/app/app
+    depends_on: [experiment-api, ctp-service, substrate-worker, netgent-service, telemetry-service]
+    networks: [agentic-network]
+    volumes:
+      - ./services/orchestration:/app
+      - ./shared:/shared
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${SUBSTRATE_CTP_DIR:-/tmp/substrate-ctp}:${SUBSTRATE_CTP_DIR:-/tmp/substrate-ctp}:ro
+      - ${SUBSTRATE_CAPTURE_DIR:-/tmp/substrate-capture}:${SUBSTRATE_CAPTURE_DIR:-/tmp/substrate-capture}
+    healthcheck:
+      test: ["CMD","python","-c","import urllib.request; urllib.request.urlopen('http://localhost:8005/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  orchestration-6mbps-100ms-p5:
+    build:
+      context: .
+      dockerfile: ./services/orchestration/Dockerfile
+    container_name: orchestration-6mbps-100ms-p5
+    profiles: [sweep6m100ms_p5]
+    ports: ["8013:8005"]
+    environment:
+      - FLASK_ENV=development
+      - EXPERIMENT_API_URL=http://experiment-api:8000
+      - CTP_SERVICE_URL=${CTP_SERVICE_URL:-http://ctp-service:8001}
+      - CTP_SERVICE_GLOBAL=${CTP_SERVICE_GLOBAL:-http://128.111.5.236:8001}
+      - ORCH_CTP_INTENSITY_DIRECTION=${ORCH_CTP_INTENSITY_DIRECTION:-}
+      - ORCH_CTP_SOURCE=local_list
+      - ORCH_LOCAL_CTP_ROOT=${ORCH_LOCAL_CTP_ROOT:-}
+      - ORCH_LOCAL_CTP_LIST=/mnt/md0/haarika/ctps_6mbps_100ms_p5.txt
+      - ORCH_LOCAL_CTP_SELECTION=first
+      - ORCH_LOCAL_CTP_ALLOW_RANGE_FALLBACK=false
+      - ORCH_CTP_POINTER_MODE=local_path
+      - ORCH_WORKER_STARTUP_WAIT_SECONDS=${ORCH_WORKER_STARTUP_WAIT_SECONDS:-15}
+      - ORCH_DEFAULT_WORKFLOW_SOURCE=${ORCH_DEFAULT_WORKFLOW_SOURCE:-auto}
+      - ORCHESTRATOR_LLM_PROVIDER=${ORCHESTRATOR_LLM_PROVIDER:-anthropic}
+      - NETGENT_LLM_PROVIDER=${NETGENT_LLM_PROVIDER:-gemini}
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - CONNECTIVITY_BACKEND=${CONNECTIVITY_BACKEND:-local_docker}
+      - SUBSTRATE_WORKER_URL=http://substrate-worker:8002
+      - NETGENT_SERVICE_URL=http://netgent-service:8003
+      - BROWSERLESS_WS_ENDPOINT=${BROWSERLESS_WS_ENDPOINT:-ws://substrate-worker:3000/chromium/playwright}
+      - SUBSTRATE_WORKER_IMAGE=${SUBSTRATE_WORKER_IMAGE:-agentic-thin-waist-substrate-worker}
+      - SUBSTRATE_DOCKER_NETWORK=${SUBSTRATE_DOCKER_NETWORK:-agentic-thin-waist_agentic-network}
+      - SUBSTRATE_WORKER_HOST=172.25.0.1
+      - TELEMETRY_SERVICE_URL=http://telemetry-service:8004
+      - SUBSTRATE_CTP_DIR=${SUBSTRATE_CTP_DIR:-/tmp/substrate-ctp}
+      - SUBSTRATE_CAPTURE_DIR=${SUBSTRATE_CAPTURE_DIR:-/tmp/substrate-capture}
+      - NETGENT_USE_LOCAL=${NETGENT_USE_LOCAL:-false}
+      - NETGENT_NAMESPACE=${NETGENT_NAMESPACE:-ns1}
+      - PYTHONPATH=/app:/shared:/shared/clients/netgent/src:/app/app
+    depends_on: [experiment-api, ctp-service, substrate-worker, netgent-service, telemetry-service]
+    networks: [agentic-network]
+    volumes:
+      - ./services/orchestration:/app
+      - ./shared:/shared
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${SUBSTRATE_CTP_DIR:-/tmp/substrate-ctp}:${SUBSTRATE_CTP_DIR:-/tmp/substrate-ctp}:ro
+      - ${SUBSTRATE_CAPTURE_DIR:-/tmp/substrate-capture}:${SUBSTRATE_CAPTURE_DIR:-/tmp/substrate-capture}
+    healthcheck:
+      test: ["CMD","python","-c","import urllib.request; urllib.request.urlopen('http://localhost:8005/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  orchestration-6mbps-100ms-p6:
+    build:
+      context: .
+      dockerfile: ./services/orchestration/Dockerfile
+    container_name: orchestration-6mbps-100ms-p6
+    profiles: [sweep6m100ms_p6]
+    ports: ["8014:8005"]
+    environment:
+      - FLASK_ENV=development
+      - EXPERIMENT_API_URL=http://experiment-api:8000
+      - CTP_SERVICE_URL=${CTP_SERVICE_URL:-http://ctp-service:8001}
+      - CTP_SERVICE_GLOBAL=${CTP_SERVICE_GLOBAL:-http://128.111.5.236:8001}
+      - ORCH_CTP_INTENSITY_DIRECTION=${ORCH_CTP_INTENSITY_DIRECTION:-}
+      - ORCH_CTP_SOURCE=local_list
+      - ORCH_LOCAL_CTP_ROOT=${ORCH_LOCAL_CTP_ROOT:-}
+      - ORCH_LOCAL_CTP_LIST=/mnt/md0/haarika/ctps_6mbps_100ms_p6.txt
+      - ORCH_LOCAL_CTP_SELECTION=first
+      - ORCH_LOCAL_CTP_ALLOW_RANGE_FALLBACK=false
+      - ORCH_CTP_POINTER_MODE=local_path
+      - ORCH_WORKER_STARTUP_WAIT_SECONDS=${ORCH_WORKER_STARTUP_WAIT_SECONDS:-15}
+      - ORCH_DEFAULT_WORKFLOW_SOURCE=${ORCH_DEFAULT_WORKFLOW_SOURCE:-auto}
+      - ORCHESTRATOR_LLM_PROVIDER=${ORCHESTRATOR_LLM_PROVIDER:-anthropic}
+      - NETGENT_LLM_PROVIDER=${NETGENT_LLM_PROVIDER:-gemini}
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - CONNECTIVITY_BACKEND=${CONNECTIVITY_BACKEND:-local_docker}
+      - SUBSTRATE_WORKER_URL=http://substrate-worker:8002
+      - NETGENT_SERVICE_URL=http://netgent-service:8003
+      - BROWSERLESS_WS_ENDPOINT=${BROWSERLESS_WS_ENDPOINT:-ws://substrate-worker:3000/chromium/playwright}
+      - SUBSTRATE_WORKER_IMAGE=${SUBSTRATE_WORKER_IMAGE:-agentic-thin-waist-substrate-worker}
+      - SUBSTRATE_DOCKER_NETWORK=${SUBSTRATE_DOCKER_NETWORK:-agentic-thin-waist_agentic-network}
+      - SUBSTRATE_WORKER_HOST=172.25.0.1
+      - TELEMETRY_SERVICE_URL=http://telemetry-service:8004
+      - SUBSTRATE_CTP_DIR=${SUBSTRATE_CTP_DIR:-/tmp/substrate-ctp}
+      - SUBSTRATE_CAPTURE_DIR=${SUBSTRATE_CAPTURE_DIR:-/tmp/substrate-capture}
+      - NETGENT_USE_LOCAL=${NETGENT_USE_LOCAL:-false}
+      - NETGENT_NAMESPACE=${NETGENT_NAMESPACE:-ns1}
+      - PYTHONPATH=/app:/shared:/shared/clients/netgent/src:/app/app
+    depends_on: [experiment-api, ctp-service, substrate-worker, netgent-service, telemetry-service]
+    networks: [agentic-network]
+    volumes:
+      - ./services/orchestration:/app
+      - ./shared:/shared
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${SUBSTRATE_CTP_DIR:-/tmp/substrate-ctp}:${SUBSTRATE_CTP_DIR:-/tmp/substrate-ctp}:ro
+      - ${SUBSTRATE_CAPTURE_DIR:-/tmp/substrate-capture}:${SUBSTRATE_CAPTURE_DIR:-/tmp/substrate-capture}
+    healthcheck:
+      test: ["CMD","python","-c","import urllib.request; urllib.request.urlopen('http://localhost:8005/health')"]
       interval: 5s
       timeout: 3s
       retries: 10

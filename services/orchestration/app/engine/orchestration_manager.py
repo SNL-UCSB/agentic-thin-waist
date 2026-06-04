@@ -21,6 +21,21 @@ Environment variables
 CTP_SERVICE_GLOBAL               Global CTP service URL  (default: http://128.111.5.236:8001)
 ORCH_CTP_SELECT_LIMIT            Max CTPs returned by /ctps/select  (default: 10)
 ORCH_CTP_INTENSITY_DIRECTION     Optional: pass ``download`` or ``upload`` on /ctps/select query
+ORCH_CTP_SOURCE                  ``service`` (default) = query CTP_SERVICE_GLOBAL;
+                                 ``local_list`` = bypass service and use local PCAPs.
+                                 When local_list is set, ORCH_LOCAL_CTP_ROOT and
+                                 ORCH_LOCAL_CTP_LIST must be provided, and
+                                 ORCH_CTP_POINTER_MODE should be ``local_path``.
+ORCH_LOCAL_CTP_ROOT              Host path containing download/ and upload/ PCAP
+                                 subdirectories (used when ORCH_CTP_SOURCE=local_list).
+ORCH_LOCAL_CTP_LIST              Path to a .txt or .json file listing local CTP names.
+                                 .txt: one base name per line (no extension).
+                                 .json: list of {"name": ..., "mean_mbps": ...} objects
+                                 (mean_mbps is optional; enables capacity-range filtering).
+ORCH_LOCAL_CTP_SELECTION         ``first`` (default) = deterministic first match;
+                                 ``random`` = random choice from candidates.
+ORCH_LOCAL_CTP_ALLOW_RANGE_FALLBACK  ``false`` (default) = no CTP when no match in range;
+                                 ``true`` = fall back to full list when range yields no match.
 ORCH_CTP_POINTER_MODE            ``export`` (default) = HTTP URL ``.../ctps/{id}/export`` ZIP fetch
                                  on the worker; ``local_path`` = use ``download_pcap`` from select
 ORCH_WORKER_STARTUP_WAIT_SECONDS Seconds to wait for a new container to be ready  (default: 3)
@@ -47,6 +62,7 @@ import logging
 import math
 import os
 import pathlib
+import random
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -122,13 +138,169 @@ def _global_ctp_url() -> str:
     return os.getenv("CTP_SERVICE_GLOBAL", "http://128.111.5.236:8001").rstrip("/")
 
 
-def _select_ctp(ctp_capacity_range: Any, experiment_id: str) -> dict[str, Any] | None:
-    """Query the global CTP service and return the first matching transformed CTP.
+def _parse_ctp_capacity_range(
+    ctp_capacity_range: Any,
+) -> tuple[float, float]:
+    """Return (low, high) Mbps from a ctp_capacity_range dict.
 
-    Returns the raw CTP object (which contains download_pcap, upload_pcap, ctp_id, etc.)
-    or None if nothing matched, the request failed, or the experiment spec does
-    not request CTP (ctp_capacity_range is None/missing).
+    Falls back to (1.0, 10.0) on any parse error.
     """
+    default = (1.0, 10.0)
+    if not isinstance(ctp_capacity_range, dict):
+        return default
+    try:
+        low = float(ctp_capacity_range["lower_value"])
+        high = float(ctp_capacity_range["higher_value"])
+        if high < low:
+            low, high = high, low
+        low = max(0.01, low)
+        high = max(low + 0.01, high)
+        return round(low, 4), round(high, 4)
+    except Exception:
+        return default
+
+
+def _load_local_ctp_candidates(
+    list_path: str,
+) -> list[dict[str, Any]]:
+    """Load the local CTP list from a .txt or .json file.
+
+    .txt format  — one bare CTP name per non-empty line.
+    .json format — a list of {"name": ..., "mean_mbps": ...} objects;
+                   ``mean_mbps`` is optional.
+
+    Returns a list of dicts with at least ``{"name": str}``.
+    """
+    path = pathlib.Path(list_path)
+    if not path.exists():
+        logger.warning("[LOCAL CTP] List file not found: %s", list_path)
+        return []
+    try:
+        text = path.read_text().strip()
+        if path.suffix.lower() == ".json":
+            raw = json.loads(text)
+            if not isinstance(raw, list):
+                logger.warning("[LOCAL CTP] JSON list file must contain a top-level array")
+                return []
+            candidates = []
+            for entry in raw:
+                if isinstance(entry, dict) and "name" in entry:
+                    candidates.append(
+                        {
+                            "name": str(entry["name"]),
+                            "mean_mbps": float(entry["mean_mbps"])
+                            if "mean_mbps" in entry
+                            else None,
+                        }
+                    )
+                elif isinstance(entry, str):
+                    candidates.append({"name": entry, "mean_mbps": None})
+            return candidates
+        else:
+            return [
+                {"name": line.strip(), "mean_mbps": None}
+                for line in text.splitlines()
+                if line.strip()
+            ]
+    except Exception as exc:
+        logger.warning("[LOCAL CTP] Failed to parse list file %s: %s", list_path, exc)
+        return []
+
+
+def _select_local_ctp(
+    ctp_capacity_range: Any,
+    experiment_id: str,
+) -> dict[str, Any] | None:
+    """Select a CTP from a local list, bypassing the CTP service entirely.
+
+    Reads ORCH_LOCAL_CTP_ROOT and ORCH_LOCAL_CTP_LIST from the environment.
+    Filters by capacity range when mean_mbps is available.
+    Falls back to the full list when ORCH_LOCAL_CTP_ALLOW_RANGE_FALLBACK=true.
+    Returns a CTP-shaped dict compatible with the rest of the pipeline, or None.
+    """
+    root = (os.getenv("ORCH_LOCAL_CTP_ROOT") or "").strip()
+    list_path = (os.getenv("ORCH_LOCAL_CTP_LIST") or "").strip()
+    selection_mode = os.getenv("ORCH_LOCAL_CTP_SELECTION", "first").strip().lower()
+    allow_fallback = (
+        os.getenv("ORCH_LOCAL_CTP_ALLOW_RANGE_FALLBACK", "false").strip().lower()
+        in {"1", "true", "yes"}
+    )
+
+    if not root:
+        logger.warning("[LOCAL CTP] ORCH_LOCAL_CTP_ROOT is not set")
+        print("[LOCAL CTP] ORCH_LOCAL_CTP_ROOT is not set — skipping CTP")
+        return None
+    if not list_path:
+        logger.warning("[LOCAL CTP] ORCH_LOCAL_CTP_LIST is not set")
+        print("[LOCAL CTP] ORCH_LOCAL_CTP_LIST is not set — skipping CTP")
+        return None
+
+    candidates = _load_local_ctp_candidates(list_path)
+    if not candidates:
+        print(f"[LOCAL CTP] No candidates in {list_path} — skipping CTP")
+        return None
+
+    low, high = _parse_ctp_capacity_range(ctp_capacity_range)
+    filtered = [
+        c
+        for c in candidates
+        if c["mean_mbps"] is None or low <= c["mean_mbps"] <= high
+    ]
+
+    if not filtered:
+        msg = (
+            f"No local CTPs in range [{low}, {high}] Mbps "
+            f"(experiment={experiment_id})"
+        )
+        if allow_fallback:
+            logger.info("[LOCAL CTP] %s — using full list as fallback", msg)
+            print(f"[LOCAL CTP] {msg} — range fallback enabled, using full list")
+            filtered = candidates
+        else:
+            logger.warning("[LOCAL CTP] %s — skipping CTP", msg)
+            print(f"[LOCAL CTP] {msg} — skipping CTP (set ORCH_LOCAL_CTP_ALLOW_RANGE_FALLBACK=true to override)")
+            return None
+
+    chosen = (
+        random.choice(filtered) if selection_mode == "random" else filtered[0]
+    )
+    name = chosen["name"]
+    mean_mbps = chosen["mean_mbps"]
+    dl_path = str(pathlib.Path(root) / "download" / f"{name}.pcap")
+    ul_path = str(pathlib.Path(root) / "upload" / f"{name}.pcap")
+
+    logger.info(
+        "[LOCAL CTP] Selected %s for %s (mean_mbps=%s)",
+        name,
+        experiment_id,
+        mean_mbps,
+    )
+    print(
+        f"[LOCAL CTP] Selected ctp_id={name} "
+        f"intensity={mean_mbps} Mbps  "
+        f"download={dl_path}"
+    )
+    return {
+        "ctp_id": name,
+        "download_pcap": dl_path,
+        "upload_pcap": ul_path,
+        "intensity": {"mean_mbps": mean_mbps},
+        "source": "local_list",
+    }
+
+
+def _select_ctp(ctp_capacity_range: Any, experiment_id: str) -> dict[str, Any] | None:
+    """Select a CTP background-traffic profile.
+
+    When ORCH_CTP_SOURCE=local_list, bypasses the CTP service and selects from
+    a user-provided local directory and list file.  The default (``service``)
+    queries CTP_SERVICE_GLOBAL as before.
+    """
+    source = os.getenv("ORCH_CTP_SOURCE", "service").strip().lower()
+    if source == "local_list":
+        return _select_local_ctp(ctp_capacity_range, experiment_id)
+
+    # --- service mode (original behavior) ---
     # No CTP requested → don't query, don't replay. This is the path taken when
     # the user's intent does not mention cross-traffic, so the captured pcap
     # contains only application traffic (172.16.1.1) with no 172.16.1.20 packets.

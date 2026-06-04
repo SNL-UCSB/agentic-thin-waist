@@ -237,3 +237,7 @@ _pcap_cache/
 
 # Media assets (large binary files)
 media/
+
+# Packet captures (can exceed GitHub size limits)
+*.pcap
+*.pcapng
