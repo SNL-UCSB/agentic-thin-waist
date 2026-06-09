@@ -289,13 +289,57 @@ def _select_local_ctp(
     }
 
 
-def _select_ctp(ctp_capacity_range: Any, experiment_id: str) -> dict[str, Any] | None:
+def _ctp_from_explicit_name(ctp_name: str, experiment_id: str) -> dict[str, Any] | None:
+    """Build a CTP-shaped dict from an explicit CTP name + ORCH_LOCAL_CTP_ROOT.
+
+    This is the fan-out path: when a spec already carries ``ctp_name`` (e.g. the
+    receiver rooms expand one intent into N experiments, each pinned to a
+    distinct CTP), we skip list-file selection entirely and resolve the PCAP
+    paths directly under ``download/`` and ``upload/`` of the local CTP root.
+    """
+    root = (os.getenv("ORCH_LOCAL_CTP_ROOT") or "").strip()
+    if not root:
+        logger.warning(
+            "[CTP SELECT] ctp_name=%s given but ORCH_LOCAL_CTP_ROOT is unset "
+            "(experiment=%s) — skipping CTP",
+            ctp_name,
+            experiment_id,
+        )
+        print(
+            f"[CTP SELECT] ctp_name={ctp_name} but ORCH_LOCAL_CTP_ROOT unset — skipping CTP"
+        )
+        return None
+    dl_path = str(pathlib.Path(root) / "download" / f"{ctp_name}.pcap")
+    ul_path = str(pathlib.Path(root) / "upload" / f"{ctp_name}.pcap")
+    print(
+        f"[CTP SELECT] Explicit ctp_name={ctp_name} (experiment={experiment_id})  "
+        f"download={dl_path}"
+    )
+    return {
+        "ctp_id": ctp_name,
+        "download_pcap": dl_path,
+        "upload_pcap": ul_path,
+        "intensity": {"mean_mbps": None},
+        "source": "explicit_name",
+    }
+
+
+def _select_ctp(
+    ctp_capacity_range: Any,
+    experiment_id: str,
+    ctp_name: str | None = None,
+) -> dict[str, Any] | None:
     """Select a CTP background-traffic profile.
 
-    When ORCH_CTP_SOURCE=local_list, bypasses the CTP service and selects from
-    a user-provided local directory and list file.  The default (``service``)
-    queries CTP_SERVICE_GLOBAL as before.
+    Resolution order:
+      1. Explicit ``ctp_name`` on the spec (fan-out path) → resolve directly
+         from ORCH_LOCAL_CTP_ROOT, bypassing any list file.
+      2. ORCH_CTP_SOURCE=local_list → pick from a local directory + list file.
+      3. Default (``service``) → query CTP_SERVICE_GLOBAL as before.
     """
+    if ctp_name:
+        return _ctp_from_explicit_name(str(ctp_name), experiment_id)
+
     source = os.getenv("ORCH_CTP_SOURCE", "service").strip().lower()
     if source == "local_list":
         return _select_local_ctp(ctp_capacity_range, experiment_id)
@@ -590,7 +634,9 @@ def _run_experiment_on_worker(
 
     # Step 1: Pick a background-traffic profile from the global CTP service.
     print(f"\n[STEP 1/4] Selecting CTP background-traffic profile …")
-    ctp = _select_ctp(spec.get("ctp_capacity_range"), exp_id)
+    ctp = _select_ctp(
+        spec.get("ctp_capacity_range"), exp_id, ctp_name=spec.get("ctp_name")
+    )
     result["ctp_selected"] = ctp
 
     # Step 2: Tell the worker to fetch download + upload PCAPs (HTTP /export ZIP by default).
@@ -1124,7 +1170,11 @@ class OrchestrationManager:
             print(
                 f"\n[DISPATCH spec[{idx}]] Provisioning ephemeral worker for {exp_id} …"
             )
-            worker = self.manager.create_worker({})
+            # fake_media defaults True (broadcaster-style); receive-only specs set
+            # it False so the worker's browser has no camera/mic to broadcast.
+            worker = self.manager.create_worker(
+                {"fake_media": bool(spec.get("fake_media", True))}
+            )
             logger.info(
                 "Provisioned worker %s at %s for spec[%d] %s",
                 worker.worker_id,

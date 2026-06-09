@@ -232,11 +232,15 @@ def _pin_shell_workflow(
     selected_id: str,
     available: list[dict[str, Any]],
     source_label: str,
+    pre_seeded_params: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Fetch a library workflow by id, run the parameter mapper, return state delta.
 
     `source_label` is included in the reasoning string for trace clarity
     (e.g. "request workflow_id", "library selection").
+
+    If `pre_seeded_params` is provided, skip the Claude mapper and use those
+    values directly (after validation against the schema).
     """
     chosen_entry = next((w for w in available if w.get("id") == selected_id), None)
     if not chosen_entry:
@@ -272,36 +276,54 @@ def _pin_shell_workflow(
 
     schema = _WORKFLOW_SCHEMAS.get(selected_id, {})
     param_names = list(chosen_entry.get("parameters") or list(schema.keys()))
-    try:
-        parameters, map_reasoning = _map_workflow_params_with_claude(
-            intent=intent,
-            workflow_id=selected_id,
-            param_names=param_names,
-            workflow_schema=schema,
-            workflow_description=str(chosen_entry.get("description", "")),
+
+    if pre_seeded_params is not None:
+        # Caller provided explicit parameters — skip the LLM mapper.
+        # Fill any missing param_names from schema defaults so validation passes.
+        merged = {k: meta.get("default", "") for k, meta in schema.items()}
+        merged.update(pre_seeded_params)
+        try:
+            parameters = _validate_mapped_params(merged, param_names, schema)
+        except Exception as exc:
+            parameters = {k: str(v) for k, v in merged.items() if k in param_names}
+            print(f"[SHELL WF] pre-seeded param validation warning: {exc} — using as-is")
+        map_reasoning = "pre-seeded by caller — Claude mapper skipped"
+        print(
+            f"[SHELL WF] pinned id={selected_id!r} source={source_label} "
+            f"workflow_param_source=pre_seeded params={parameters}"
         )
-    except Exception as exc:
-        reasoning = (
-            f"Selected shell workflow {selected_id!r} via {source_label}, "
-            f"but parameter mapper failed: {exc}"
-        )
-        print(f"[SHELL WF] mapper failure: {reasoning}")
-        return {
-            "workflow": {},
-            "parameters": None,
-            "reasoning": reasoning,
-            "chosen_workflow": {
-                "is_valid": False,
-                "reasoning": reasoning,
-                "id": selected_id,
+    else:
+        try:
+            parameters, map_reasoning = _map_workflow_params_with_claude(
+                intent=intent,
+                workflow_id=selected_id,
+                param_names=param_names,
+                workflow_schema=schema,
+                workflow_description=str(chosen_entry.get("description", "")),
+            )
+        except Exception as exc:
+            reasoning = (
+                f"Selected shell workflow {selected_id!r} via {source_label}, "
+                f"but parameter mapper failed: {exc}"
+            )
+            print(f"[SHELL WF] mapper failure: {reasoning}")
+            return {
+                "workflow": {},
                 "parameters": None,
-                "fail_fast": True,
-            },
-        }
-    print(
-        f"[SHELL WF] pinned id={selected_id!r} source={source_label} "
-        f"workflow_param_source=claude_mapper params={parameters}"
-    )
+                "reasoning": reasoning,
+                "chosen_workflow": {
+                    "is_valid": False,
+                    "reasoning": reasoning,
+                    "id": selected_id,
+                    "parameters": None,
+                    "fail_fast": True,
+                },
+            }
+        print(
+            f"[SHELL WF] pinned id={selected_id!r} source={source_label} "
+            f"workflow_param_source=claude_mapper params={parameters}"
+        )
+
     reasoning = (
         f"Selected shell workflow {selected_id!r} via {source_label}. "
         f"Mapper reasoning: {map_reasoning}"
@@ -347,11 +369,15 @@ def choose_workflow(
 
     # 1. Explicit id pin wins over workflow_source.
     if pinned_id:
+        # If the caller pre-seeded workflow parameters in context["workflow"]["parameters"],
+        # bypass the Claude mapper entirely — use those values directly.
+        pre_seeded = (state.get("workflow") or {}).get("parameters")
         return _pin_shell_workflow(
             intent=intent,
             selected_id=pinned_id,
             available=available,
             source_label="request workflow_id",
+            pre_seeded_params=pre_seeded if isinstance(pre_seeded, dict) else None,
         )
 
     # 2. Generate-only: short-circuit to the generate node via is_valid=False

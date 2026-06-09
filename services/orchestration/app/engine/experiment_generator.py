@@ -54,9 +54,24 @@ class ExperimentGenerator:
         # background cross-traffic, no 172.16.1.20 packets in the pcap).
         ctp_cluster = parsed_intent.get("ctp_cluster")
         ctp_capacity_range = parsed_intent.get("ctp_capacity_range")
+        ctp_name = parsed_intent.get("ctp_name")
+        # CTP fan-out: when a caller supplies an explicit list of CTP names, the
+        # cap x lat x cc product is multiplied by the CTP list so a single intent
+        # expands into one experiment per CTP (each pinned to a distinct profile
+        # via ``ctp_name``). This is how the receiver rooms sweep N CTPs in
+        # parallel from one /intent submission without per-CTP list files.
+        ctp_list = parsed_intent.get("ctp_list")
+        if isinstance(ctp_list, list):
+            ctp_values: list = [c for c in ctp_list if c] or [ctp_name]
+        else:
+            ctp_values = [ctp_name]
 
         buffer_packets = parsed_intent.get("buffer_packets")
         qdisc_params = parsed_intent.get("qdisc_params")
+        # Receive-only experiments set fake_media=False so their worker browser
+        # has no camera/mic device and cannot broadcast. Defaults to True.
+        fake_media = parsed_intent.get("fake_media")
+        fake_media = True if fake_media is None else bool(fake_media)
 
         applications = parsed_intent.get("applications") or []
         app_slug = _slugify_app(applications[0]) if applications else application_type
@@ -67,28 +82,34 @@ class ExperimentGenerator:
             download = _fmt_num(cap)
             upload = _fmt_num(parsed_intent.get("upload_mbps") or cap)
             base_lat = _fmt_num(lat)
-            prefix = f"{app_slug}_{download}_{upload}_{base_lat}_{aqm_policy}_{cc}"
-            exp_id = self._mint_unique_id(prefix, used, id_taken)
-            used.add(exp_id)
+            for ctp_choice in ctp_values:
+                ctp_slug = _slugify_app(str(ctp_choice)) if ctp_choice else ""
+                prefix = f"{app_slug}_{download}_{upload}_{base_lat}_{aqm_policy}_{cc}"
+                if ctp_slug:
+                    prefix = f"{prefix}_{ctp_slug}"
+                exp_id = self._mint_unique_id(prefix, used, id_taken)
+                used.add(exp_id)
 
-            exp = GeneratedExperiment(
-                experiment_id=exp_id,
-                application_type=application_type,
-                capacity_mbps=float(cap),
-                latency_ms=float(lat),
-                cc_algorithm=cc,
-                aqm_policy=aqm_policy,
-                buffer_packets=(
-                    int(buffer_packets) if buffer_packets is not None else None
-                ),
-                qdisc_params=qdisc_params if qdisc_params else None,
-                duration_seconds=int(duration),
-                num_trials=int(num_trials),
-                reasoning=reasoning,
-                ctp_cluster=ctp_cluster,
-                ctp_capacity_range=ctp_capacity_range,
-            )
-            experiments.append(exp)
+                exp = GeneratedExperiment(
+                    experiment_id=exp_id,
+                    application_type=application_type,
+                    capacity_mbps=float(cap),
+                    latency_ms=float(lat),
+                    cc_algorithm=cc,
+                    aqm_policy=aqm_policy,
+                    buffer_packets=(
+                        int(buffer_packets) if buffer_packets is not None else None
+                    ),
+                    qdisc_params=qdisc_params if qdisc_params else None,
+                    duration_seconds=int(duration),
+                    num_trials=int(num_trials),
+                    reasoning=reasoning,
+                    ctp_cluster=ctp_cluster,
+                    ctp_capacity_range=ctp_capacity_range,
+                    ctp_name=ctp_choice,
+                    fake_media=fake_media,
+                )
+                experiments.append(exp)
         return experiments
 
     @staticmethod

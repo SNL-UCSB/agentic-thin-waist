@@ -931,6 +931,249 @@ services:
       timeout: 3s
       retries: 10
 
+  # ---------- Broadcaster + receiver rooms ----------
+  # Shared receiver orchestrator (host port 8016). ALL rooms submit their
+  # receive-only sweeps here; each /intent carries an explicit ctp_list that
+  # fans out into N parallel receivers pinned to distinct CTPs (no list files).
+  #   docker compose --profile rooms up -d orchestration-rooms
+  orchestration-rooms: &orch_rooms_base
+    build:
+      context: .
+      dockerfile: ./services/orchestration/Dockerfile
+    container_name: orchestration-rooms
+    profiles: [rooms]
+    ports: ["8016:8005"]
+    environment: &orch_rooms_env
+      - FLASK_ENV=development
+      - EXPERIMENT_API_URL=http://experiment-api:8000
+      - CTP_SERVICE_URL=${CTP_SERVICE_URL:-http://ctp-service:8001}
+      - CTP_SERVICE_GLOBAL=${CTP_SERVICE_GLOBAL:-http://128.111.5.236:8001}
+      - ORCH_CTP_INTENSITY_DIRECTION=${ORCH_CTP_INTENSITY_DIRECTION:-}
+      - ORCH_CTP_SOURCE=local_list
+      - ORCH_LOCAL_CTP_ROOT=${ORCH_LOCAL_CTP_ROOT:-}
+      - ORCH_LOCAL_CTP_LIST=${ORCH_LOCAL_CTP_LIST:-}
+      - ORCH_LOCAL_CTP_SELECTION=first
+      - ORCH_LOCAL_CTP_ALLOW_RANGE_FALLBACK=false
+      - ORCH_CTP_POINTER_MODE=local_path
+      - ORCH_WORKER_STARTUP_WAIT_SECONDS=${ORCH_WORKER_STARTUP_WAIT_SECONDS:-15}
+      # Per-process cap on simultaneous container creates. With 5 per-room
+      # orchestrators this sums to 5 x 2 = 10 concurrent creates on the single
+      # Docker daemon — the level we verified is safe (no thundering-herd).
+      - ORCH_MAX_CONCURRENT_CREATES=${ROOMS_ORCH_CREATE_CAP:-2}
+      - ORCH_DOCKER_TIMEOUT_SECONDS=${ORCH_DOCKER_TIMEOUT_SECONDS:-120}
+      - ORCH_DEFAULT_WORKFLOW_SOURCE=${ORCH_DEFAULT_WORKFLOW_SOURCE:-auto}
+      - ORCHESTRATOR_LLM_PROVIDER=${ORCHESTRATOR_LLM_PROVIDER:-anthropic}
+      - NETGENT_LLM_PROVIDER=${NETGENT_LLM_PROVIDER:-gemini}
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - CONNECTIVITY_BACKEND=${CONNECTIVITY_BACKEND:-local_docker}
+      - SUBSTRATE_WORKER_URL=http://substrate-worker:8002
+      - NETGENT_SERVICE_URL=http://netgent-service:8003
+      - BROWSERLESS_WS_ENDPOINT=${BROWSERLESS_WS_ENDPOINT:-ws://substrate-worker:3000/chromium/playwright}
+      - SUBSTRATE_WORKER_IMAGE=${SUBSTRATE_WORKER_IMAGE:-agentic-thin-waist-substrate-worker}
+      - SUBSTRATE_DOCKER_NETWORK=${SUBSTRATE_DOCKER_NETWORK:-agentic-thin-waist_agentic-network}
+      - SUBSTRATE_WORKER_HOST=172.25.0.1
+      - TELEMETRY_SERVICE_URL=http://telemetry-service:8004
+      - SUBSTRATE_CTP_DIR=${SUBSTRATE_CTP_DIR:-/tmp/substrate-ctp}
+      - SUBSTRATE_CAPTURE_DIR=${SUBSTRATE_CAPTURE_DIR:-/tmp/substrate-capture}
+      - NETGENT_USE_LOCAL=${NETGENT_USE_LOCAL:-false}
+      - NETGENT_NAMESPACE=${NETGENT_NAMESPACE:-ns1}
+      - PYTHONPATH=/app:/shared:/shared/clients/netgent/src:/app/app
+    depends_on: [experiment-api, ctp-service, substrate-worker, netgent-service, telemetry-service]
+    networks: [agentic-network]
+    volumes:
+      - ./services/orchestration:/app
+      - ./shared:/shared
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${SUBSTRATE_CTP_DIR:-/tmp/substrate-ctp}:${SUBSTRATE_CTP_DIR:-/tmp/substrate-ctp}:ro
+      - ${SUBSTRATE_CAPTURE_DIR:-/tmp/substrate-capture}:${SUBSTRATE_CAPTURE_DIR:-/tmp/substrate-capture}
+    healthcheck:
+      test: ["CMD","python","-c","import urllib.request; urllib.request.urlopen('http://localhost:8005/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ---------- Per-room orchestrators (web-server isolation) ----------
+  # One orchestrator process per room so a busy room can't starve another's
+  # HTTP server (health/poll). Each shares orch_rooms_env (incl. the per-process
+  # create cap). Bring all 5 up with:  docker compose --profile roomsx up -d
+  # Each room sweep targets its own port (ORCH_URL=http://localhost:801{6..9},8020).
+  orchestration-room1:
+    <<: *orch_rooms_base
+    container_name: orchestration-room1
+    profiles: [roomsx]
+    ports: ["8016:8005"]
+    environment: *orch_rooms_env
+
+  orchestration-room2:
+    <<: *orch_rooms_base
+    container_name: orchestration-room2
+    profiles: [roomsx]
+    ports: ["8017:8005"]
+    environment: *orch_rooms_env
+
+  orchestration-room3:
+    <<: *orch_rooms_base
+    container_name: orchestration-room3
+    profiles: [roomsx]
+    ports: ["8018:8005"]
+    environment: *orch_rooms_env
+
+  orchestration-room4:
+    <<: *orch_rooms_base
+    container_name: orchestration-room4
+    profiles: [roomsx]
+    ports: ["8019:8005"]
+    environment: *orch_rooms_env
+
+  orchestration-room5:
+    <<: *orch_rooms_base
+    container_name: orchestration-room5
+    profiles: [roomsx]
+    ports: ["8020:8005"]
+    environment: *orch_rooms_env
+
+  orchestration-room6:
+    <<: *orch_rooms_base
+    container_name: orchestration-room6
+    profiles: [roomsx]
+    ports: ["8021:8005"]
+    environment: *orch_rooms_env
+
+  orchestration-room7:
+    <<: *orch_rooms_base
+    container_name: orchestration-room7
+    profiles: [roomsx]
+    ports: ["8022:8005"]
+    environment: *orch_rooms_env
+
+  orchestration-room8:
+    <<: *orch_rooms_base
+    container_name: orchestration-room8
+    profiles: [roomsx]
+    ports: ["8023:8005"]
+    environment: *orch_rooms_env
+
+  orchestration-room9:
+    <<: *orch_rooms_base
+    container_name: orchestration-room9
+    profiles: [roomsx]
+    ports: ["8024:8005"]
+    environment: *orch_rooms_env
+
+  orchestration-room10:
+    <<: *orch_rooms_base
+    container_name: orchestration-room10
+    profiles: [roomsx]
+    ports: ["8025:8005"]
+    environment: *orch_rooms_env
+
+  # Dedicated long-lived broadcaster workers (one per room). Each runs its own
+  # browserless with fake A/V media and a ~1,000,000s session timeout so a single
+  # broadcast session stays alive. broadcast_room.py POSTs /run directly here.
+  #   docker compose --profile room1 up -d broadcaster-room1   (then run broadcast_room.py ROOM_INDEX=1)
+  broadcaster-room1: &broadcaster-base
+    build:
+      context: .
+      dockerfile: ./services/substrate-worker/Dockerfile
+    image: ${SUBSTRATE_WORKER_IMAGE:-agentic-thin-waist-substrate-worker}
+    container_name: broadcaster-room1
+    profiles: [room1]
+    ports: ["8101:8002"]
+    environment: &broadcaster-env
+      - FLASK_ENV=development
+      - CONNECTIVITY_BACKEND=${CONNECTIVITY_BACKEND:-local_docker}
+      - TELEMETRY_SERVICE_URL=http://telemetry-service:8004
+      - BROWSER_PROXY_HOST=172.16.1.1
+      - BROWSER_PROXY_PORT=8888
+      - CAPTURE_DIR=${SUBSTRATE_CAPTURE_DIR:-/tmp/substrate-capture}
+      - CTP_DIR=${SUBSTRATE_CTP_DIR:-/tmp/substrate-ctp}
+      - NETGENT_USE_LOCAL=${NETGENT_USE_LOCAL:-false}
+      - NETGENT_NAMESPACE=${NETGENT_NAMESPACE:-ns1}
+      # ~1,000,000 s session so a single long broadcast is never killed.
+      - TIMEOUT=${BROADCASTER_SESSION_TIMEOUT_MS:-1000600000}
+      - BROWSERLESS_WS_ENDPOINT=ws://127.0.0.1:3000/chromium/playwright?timeout=${BROADCASTER_SESSION_TIMEOUT_MS:-1000600000}
+      # Fake mic + camera so the broadcaster transmits looping A/V.
+      - SUBSTRATE_FAKE_AUDIO_FILE=/opt/substrate-audio/zoom-audio.wav
+      - SUBSTRATE_FAKE_VIDEO_FILE=/opt/substrate-audio/zoom-video.mjpeg
+    networks: [agentic-network]
+    volumes:
+      - ./services/substrate-worker:/app
+      - ./shared:/shared
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /lib/modules:/lib/modules:ro
+    privileged: true
+    cap_add: [NET_ADMIN, SYS_ADMIN]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  broadcaster-room2:
+    <<: *broadcaster-base
+    container_name: broadcaster-room2
+    profiles: [room2]
+    ports: ["8102:8002"]
+    environment: *broadcaster-env
+
+  broadcaster-room3:
+    <<: *broadcaster-base
+    container_name: broadcaster-room3
+    profiles: [room3]
+    ports: ["8103:8002"]
+    environment: *broadcaster-env
+
+  broadcaster-room4:
+    <<: *broadcaster-base
+    container_name: broadcaster-room4
+    profiles: [room4]
+    ports: ["8104:8002"]
+    environment: *broadcaster-env
+
+  broadcaster-room5:
+    <<: *broadcaster-base
+    container_name: broadcaster-room5
+    profiles: [room5]
+    ports: ["8105:8002"]
+    environment: *broadcaster-env
+
+  broadcaster-room6:
+    <<: *broadcaster-base
+    container_name: broadcaster-room6
+    profiles: [room6]
+    ports: ["8106:8002"]
+    environment: *broadcaster-env
+
+  broadcaster-room7:
+    <<: *broadcaster-base
+    container_name: broadcaster-room7
+    profiles: [room7]
+    ports: ["8107:8002"]
+    environment: *broadcaster-env
+
+  broadcaster-room8:
+    <<: *broadcaster-base
+    container_name: broadcaster-room8
+    profiles: [room8]
+    ports: ["8108:8002"]
+    environment: *broadcaster-env
+
+  broadcaster-room9:
+    <<: *broadcaster-base
+    container_name: broadcaster-room9
+    profiles: [room9]
+    ports: ["8109:8002"]
+    environment: *broadcaster-env
+
+  broadcaster-room10:
+    <<: *broadcaster-base
+    container_name: broadcaster-room10
+    profiles: [room10]
+    ports: ["8110:8002"]
+    environment: *broadcaster-env
+
 networks:
   agentic-network:
     driver: bridge

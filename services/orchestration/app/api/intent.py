@@ -178,6 +178,9 @@ def process_intent(orch_id: str, request: ResearchIntent) -> None:
             "qdisc_params",
             "duration_seconds",
             "num_trials",
+            "ctp_name",
+            "ctp_list",
+            "fake_media",
         ):
             if key in request.context and request.context[key] is not None:
                 intent_overrides[key] = request.context[key]

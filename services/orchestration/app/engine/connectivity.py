@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 import time
 import uuid
 from abc import ABC, abstractmethod
@@ -135,10 +136,41 @@ class ConnectivityBackend(ABC):
 
 
 def _docker_http_client() -> httpx.Client:
-    """httpx client routed through the Docker Unix socket."""
+    """httpx client routed through the Docker Unix socket.
+
+    Timeout is configurable via ORCH_DOCKER_TIMEOUT_SECONDS (default 120s).
+    The default is generous because when many ephemeral workers are created
+    at once the Docker daemon serializes create/start/inspect calls, and a
+    short timeout would spuriously fail container provisioning under load.
+    """
     sock = os.getenv("DOCKER_SOCKET", "/var/run/docker.sock")
     transport = httpx.HTTPTransport(uds=sock)
-    return httpx.Client(transport=transport, base_url="http://localhost", timeout=30)
+    timeout = float(os.getenv("ORCH_DOCKER_TIMEOUT_SECONDS", "120"))
+    return httpx.Client(transport=transport, base_url="http://localhost", timeout=timeout)
+
+
+# Throttle simultaneous container provisioning. Creating many privileged
+# browser containers at once serializes inside the single Docker daemon and,
+# past a point, blows request timeouts (thundering-herd). This bounded
+# semaphore caps how many create/start/inspect bursts run concurrently *within
+# this process*. With multiple orchestrator processes on one host, set the per
+# process cap so the SUM across processes stays within the daemon's comfortable
+# range (e.g. 5 orchestrators x cap 2 = 10 concurrent creates).
+#
+# Controlled by ORCH_MAX_CONCURRENT_CREATES (default 8). Lazily built so the
+# env var is read at first use (after the process env is fully populated).
+_CREATE_SEMAPHORE: "threading.BoundedSemaphore | None" = None
+_CREATE_SEMAPHORE_LOCK = threading.Lock()
+
+
+def _create_semaphore() -> "threading.BoundedSemaphore":
+    global _CREATE_SEMAPHORE
+    if _CREATE_SEMAPHORE is None:
+        with _CREATE_SEMAPHORE_LOCK:
+            if _CREATE_SEMAPHORE is None:
+                cap = max(1, int(os.getenv("ORCH_MAX_CONCURRENT_CREATES", "8")))
+                _CREATE_SEMAPHORE = threading.BoundedSemaphore(cap)
+    return _CREATE_SEMAPHORE
 
 
 class LocalDockerBackend(ConnectivityBackend):
@@ -218,6 +250,14 @@ class LocalDockerBackend(ConnectivityBackend):
         )
         browserless_endpoint = _localize_browserless_endpoint(configured_endpoint)
 
+        # Whether to attach looping fake mic/camera media to the browser.
+        #   True  (default) → broadcaster-style worker: streams WAV + MJPEG so the
+        #                     page can transmit audio/video.
+        #   False           → receive-only worker: NO fake camera/mic device, only
+        #                     auto-dismiss of media permission prompts, so the page
+        #                     cannot capture or broadcast any audio/video.
+        fake_media = config.get("fake_media", True)
+
         env_block = [
             f"TELEMETRY_SERVICE_URL={telemetry_url}",
             f"CTP_DIR={ctp_dir}",
@@ -229,15 +269,22 @@ class LocalDockerBackend(ConnectivityBackend):
             # the per-connection ?timeout= so long browser workflows (e.g. sitting
             # in a Zoom meeting) are not killed at browserless's 30s default.
             f"TIMEOUT={_BROWSERLESS_SESSION_TIMEOUT_MS}",
-            # Fake microphone: stream this WAV file as the browser's mic input.
-            # The wrap-playwright-chrome.sh wrapper reads this env var and appends
-            # the corresponding Chrome flags. Unset to disable (non-Zoom runs).
-            "SUBSTRATE_FAKE_AUDIO_FILE=/opt/substrate-audio/zoom-audio.wav",
-            # Fake camera: stream this MJPEG file as the browser's webcam input.
-            # Chrome loops the file automatically. Only transmitted if the workflow
-            # clicks "Start Video" inside the meeting.
-            "SUBSTRATE_FAKE_VIDEO_FILE=/opt/substrate-audio/zoom-video.mjpeg",
         ]
+        if fake_media:
+            env_block += [
+                # Fake microphone: stream this WAV file as the browser's mic input.
+                # The wrap-playwright-chrome.sh wrapper reads this env var and appends
+                # the corresponding Chrome flags. Unset to disable (non-Zoom runs).
+                "SUBSTRATE_FAKE_AUDIO_FILE=/opt/substrate-audio/zoom-audio.wav",
+                # Fake camera: stream this MJPEG file as the browser's webcam input.
+                # Chrome loops the file automatically. Only transmitted if the workflow
+                # clicks "Start Video" inside the meeting.
+                "SUBSTRATE_FAKE_VIDEO_FILE=/opt/substrate-audio/zoom-video.mjpeg",
+            ]
+        else:
+            # Receive-only: auto-dismiss media permission prompts but expose no
+            # fake camera/mic device, so this participant cannot broadcast.
+            env_block.append("SUBSTRATE_FAKE_UI_FOR_MEDIA=1")
 
         container_config = {
             "Image": image,
@@ -267,40 +314,43 @@ class LocalDockerBackend(ConnectivityBackend):
             },
         }
 
-        with _docker_http_client() as docker:
-            # Create container
-            resp = docker.post(
-                f"/{_DOCKER_API_VERSION}/containers/create",
-                params={"name": container_name},
-                json=container_config,
-            )
-            if resp.status_code not in (200, 201):
-                raise RuntimeError(
-                    f"docker create failed for {worker_id} "
-                    f"(HTTP {resp.status_code}): {resp.text[:1000]}"
+        # Throttle the Docker create/start/inspect burst so many simultaneous
+        # provisions don't overwhelm the daemon (thundering-herd → timeouts).
+        with _create_semaphore():
+            with _docker_http_client() as docker:
+                # Create container
+                resp = docker.post(
+                    f"/{_DOCKER_API_VERSION}/containers/create",
+                    params={"name": container_name},
+                    json=container_config,
                 )
-            container_id: str = resp.json()["Id"]
+                if resp.status_code not in (200, 201):
+                    raise RuntimeError(
+                        f"docker create failed for {worker_id} "
+                        f"(HTTP {resp.status_code}): {resp.text[:1000]}"
+                    )
+                container_id: str = resp.json()["Id"]
 
-            # Start container
-            start_resp = docker.post(
-                f"/{_DOCKER_API_VERSION}/containers/{container_id}/start"
-            )
-            if start_resp.status_code not in (204, 200):
-                docker.delete(
-                    f"/{_DOCKER_API_VERSION}/containers/{container_id}",
-                    params={"force": "true"},
+                # Start container
+                start_resp = docker.post(
+                    f"/{_DOCKER_API_VERSION}/containers/{container_id}/start"
                 )
-                raise RuntimeError(
-                    f"docker start failed for {worker_id} "
-                    f"(HTTP {start_resp.status_code}): {start_resp.text[:1000]}"
-                )
+                if start_resp.status_code not in (204, 200):
+                    docker.delete(
+                        f"/{_DOCKER_API_VERSION}/containers/{container_id}",
+                        params={"force": "true"},
+                    )
+                    raise RuntimeError(
+                        f"docker start failed for {worker_id} "
+                        f"(HTTP {start_resp.status_code}): {start_resp.text[:1000]}"
+                    )
 
-            # Inspect to get assigned host port
-            inspect_resp = docker.get(
-                f"/{_DOCKER_API_VERSION}/containers/{container_id}/json"
-            )
-            inspect_resp.raise_for_status()
-            inspect = inspect_resp.json()
+                # Inspect to get assigned host port
+                inspect_resp = docker.get(
+                    f"/{_DOCKER_API_VERSION}/containers/{container_id}/json"
+                )
+                inspect_resp.raise_for_status()
+                inspect = inspect_resp.json()
 
         # Prefer the container's IP on the Docker network for container-to-
         # container communication.  Fall back to host-mapped port.

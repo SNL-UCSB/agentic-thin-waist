@@ -59,8 +59,11 @@ RUN uv sync --python /usr/bin/python3 --no-install-project
 
 COPY services/substrate-worker/ .
 COPY shared/ /shared/
-COPY media/freesound_community-000981_jfk-space-race-speech-59951.wav /opt/substrate-audio/zoom-audio.wav
-COPY media/sample_1280x720_surfing_with_audio.mjpeg /opt/substrate-audio/zoom-video.mjpeg
+# JSON COPY form because the source filenames contain spaces / special chars.
+# Destination paths are unchanged so SUBSTRATE_FAKE_AUDIO_FILE / _VIDEO_FILE
+# still resolve to /opt/substrate-audio/zoom-audio.wav and zoom-video.mjpeg.
+COPY ["media/Zoom_Call_for_Vermonters_and_Friends_to_Connect_and_Share_Resources_About_the_Flood (online-video-cutter.com).wav", "/opt/substrate-audio/zoom-audio.wav"]
+COPY ["media/Zoom_Call_for_Vermonters_and_Friends_to_Connect_and_Share_Resources_About_the_Flood+%28online-video-cutter.com%29.mjpeg", "/opt/substrate-audio/zoom-video.mjpeg"]
 
 RUN chmod +x src/browser/wrap-playwright-chrome.sh src/substrate/setup.sh src/substrate/setup_local.sh src/substrate/setup_aws.sh \
     && ./src/browser/wrap-playwright-chrome.sh

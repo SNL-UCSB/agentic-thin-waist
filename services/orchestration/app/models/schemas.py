@@ -63,6 +63,15 @@ class GeneratedExperiment(BaseModel):
         ),
     )
     ctp_cluster: Optional[str] = None
+    ctp_name: Optional[str] = Field(
+        default=None,
+        description=(
+            "Explicit CTP name override. When set, CTP selection bypasses the "
+            "list file and range filter and builds the pcap paths directly from "
+            "ORCH_LOCAL_CTP_ROOT/download/<name>.pcap and .../upload/<name>.pcap. "
+            "Takes precedence over ctp_capacity_range."
+        ),
+    )
     ctp_capacity_range: Optional[Dict[str, float]] = Field(
         default=None,
         description=(
@@ -78,6 +87,15 @@ class GeneratedExperiment(BaseModel):
             "standard source subnets (169.231.0.0/16, 128.111.0.0/16) are reused. "
             "Leave unset to use the orchestrator default (172.16.1.20). Must not "
             "conflict with the application IP."
+        ),
+    )
+    fake_media: bool = Field(
+        default=True,
+        description=(
+            "Whether this experiment's ephemeral worker attaches looping fake "
+            "mic/camera media to the browser. True (default) = can broadcast "
+            "audio/video. False = receive-only (no camera/mic device, so it "
+            "cannot capture or broadcast)."
         ),
     )
     reasoning: str = ""
