@@ -59,6 +59,7 @@ from __future__ import annotations
 
 import json
 import logging
+import hashlib
 import math
 import os
 import pathlib
@@ -460,9 +461,53 @@ _DEFAULT_WORKFLOW: dict[str, Any] = {
 # ---------------------------------------------------------------------------
 
 
-def _next_minute_epoch() -> float:
-    """Return the POSIX timestamp of the start of the next whole minute."""
-    return math.ceil(time.time() / 60) * 60
+def _sync_boundary_seconds() -> float:
+    try:
+        boundary = float(os.getenv("ORCH_SYNC_BOUNDARY_SECONDS", "60"))
+    except ValueError:
+        boundary = 60.0
+    if boundary <= 0:
+        boundary = 60.0
+    return boundary
+
+
+def _phase_offset(exp_id: str | None, boundary: float) -> float:
+    """Deterministic per-experiment phase offset in [0, boundary).
+
+    When ORCH_SYNC_PHASE_JITTER is enabled, each experiment's firing time is
+    shifted by a stable offset derived from its id so that many independent
+    workers do NOT all land on the same boundary tick (which causes a
+    synchronized capture-start AND a synchronized telemetry upload burst that
+    overwhelms the shared telemetry-service). The offset is stable per exp_id so
+    the experiment's own capture/replay/workflow threads stay aligned.
+    """
+    enabled = os.getenv("ORCH_SYNC_PHASE_JITTER", "false").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
+    if not enabled or not exp_id:
+        return 0.0
+    h = int(hashlib.md5(exp_id.encode("utf-8")).hexdigest()[:8], 16)
+    # Quantize to 100ms steps within the window.
+    steps = max(1, int(boundary * 10))
+    return (h % steps) / 10.0
+
+
+def _next_minute_epoch(exp_id: str | None = None) -> float:
+    """Return the POSIX timestamp of the next sync boundary (optionally phase-shifted).
+
+    The boundary defaults to the next whole minute (60s) for tight temporal
+    alignment of pcaps, but can be shortened via ORCH_SYNC_BOUNDARY_SECONDS
+    (e.g. 10) to cut the per-experiment sync wait. Values <= 0 fall back to 60.
+
+    With ORCH_SYNC_PHASE_JITTER enabled, a deterministic per-experiment offset
+    is added so independent workers spread across the window instead of all
+    firing on the same tick.
+    """
+    boundary = _sync_boundary_seconds()
+    offset = _phase_offset(exp_id, boundary)
+    now = time.time()
+    # Smallest t >= now with (t - offset) a multiple of boundary.
+    return math.ceil((now - offset) / boundary) * boundary + offset
 
 
 def _wait_until(target_epoch: float) -> None:
@@ -703,7 +748,7 @@ def _run_experiment_on_worker(
         _build_replay_payload(replay_ctp_file, spec) if replay_ctp_file else None
     )
 
-    start_at = _next_minute_epoch()
+    start_at = _next_minute_epoch(exp_id)
     secs_until = max(0.0, start_at - time.time())
     print(
         f"\n[STEP 3/4] Synchronizing to next minute boundary in {secs_until:.1f}s — "
@@ -903,30 +948,46 @@ def _run_experiment_on_worker(
             pcap_fn = os.path.basename(capture_status.get("pcap_path") or "") or (
                 f"{exp_id}.pcap"
             )
-            try:
-                pull_out = stream_capture_pcap_to_telemetry(
-                    worker_base_url=worker.endpoint,
-                    capture_id=capture_id,
-                    telemetry_base_url=telemetry_url.strip().rstrip("/"),
-                    result_id=telemetry_result_id,
-                    pcap_filename=pcap_fn,
+            # Retry the pcap upload: the helper re-fetches from the worker on
+            # each call, so it is safe to retry when telemetry is momentarily
+            # slow during a synchronized upload burst. Without this the pcap is
+            # silently dropped even though the capture succeeded.
+            pcap_attempts = int(os.getenv("ORCH_PCAP_UPLOAD_RETRIES", "5"))
+            pull_out: dict[str, Any] = {"status": "error", "detail": "not attempted"}
+            for _pa in range(1, pcap_attempts + 1):
+                try:
+                    pull_out = stream_capture_pcap_to_telemetry(
+                        worker_base_url=worker.endpoint,
+                        capture_id=capture_id,
+                        telemetry_base_url=telemetry_url.strip().rstrip("/"),
+                        result_id=telemetry_result_id,
+                        pcap_filename=pcap_fn,
+                    )
+                    if pull_out.get("status") == "stored":
+                        print(
+                            f"[TELEMETRY] PCAP artifact stored for result_id={telemetry_result_id}"
+                            + (f" (attempt {_pa})" if _pa > 1 else "")
+                        )
+                        break
+                    print(
+                        f"[TELEMETRY] PCAP artifact upload failed (attempt {_pa}/{pcap_attempts}): "
+                        f"{pull_out.get('detail', pull_out)}"
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "PCAP pull to telemetry failed (attempt %d/%d): %s",
+                        _pa, pcap_attempts, exc, exc_info=True,
+                    )
+                    pull_out = {"status": "error", "detail": str(exc)}
+                    print(f"[TELEMETRY] PCAP pull exception (attempt {_pa}): {exc}")
+                if _pa < pcap_attempts:
+                    time.sleep(min(8.0, 1.5 * (2 ** (_pa - 1))) + random.uniform(0, 1.5))
+            result["telemetry_pcap_artifact"] = pull_out
+            if pull_out.get("status") != "stored":
+                logger.error(
+                    "PCAP NOT persisted for result_id=%s after %d attempts",
+                    telemetry_result_id, pcap_attempts,
                 )
-                result["telemetry_pcap_artifact"] = pull_out
-                if pull_out.get("status") == "stored":
-                    print(
-                        f"[TELEMETRY] PCAP artifact stored for result_id={telemetry_result_id}"
-                    )
-                else:
-                    print(
-                        f"[TELEMETRY] PCAP artifact upload failed: {pull_out.get('detail', pull_out)}"
-                    )
-            except Exception as exc:
-                logger.warning("PCAP pull to telemetry failed: %s", exc, exc_info=True)
-                result["telemetry_pcap_artifact"] = {
-                    "status": "error",
-                    "detail": str(exc),
-                }
-                print(f"[TELEMETRY] PCAP pull exception: {exc}")
         elif not telemetry_result_id:
             logger.info(
                 "Skipping PCAP pull to telemetry: no telemetry result_id (telemetry disabled or POST /results failed)"

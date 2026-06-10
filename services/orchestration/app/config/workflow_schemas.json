@@ -17,7 +17,7 @@
     },
     "wait_seconds": {
       "type": "integer",
-      "default": 60,
+      "default": 30,
       "description": "Seconds to remain in the meeting (receive-only: muted, no video) before stopping"
     }
   },

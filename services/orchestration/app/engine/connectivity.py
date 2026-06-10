@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import logging
 import os
+import random
 import threading
 import time
 import uuid
@@ -1243,28 +1244,55 @@ class ConnectivityManager:
                 "transport_state": {},
                 "pcap_path": "",
             }
-            try:
-                with httpx.Client(timeout=10) as client:
-                    tel_resp = client.post(
-                        f"{resolved_telemetry_url}/results", json=telemetry_payload
+            # Persist the result row with retries. Under a synchronized upload
+            # burst the single telemetry-service can momentarily exceed the
+            # request timeout; without retries the result row (and therefore
+            # the pcap artifact, which needs its result_id) is silently lost.
+            tel_timeout = float(os.getenv("ORCH_TELEMETRY_POST_TIMEOUT_SECONDS", "30"))
+            tel_attempts = int(os.getenv("ORCH_TELEMETRY_POST_RETRIES", "5"))
+            telemetry_save = {"error": "not attempted", "stored": False}
+            for _attempt in range(1, tel_attempts + 1):
+                try:
+                    with httpx.Client(timeout=tel_timeout) as client:
+                        tel_resp = client.post(
+                            f"{resolved_telemetry_url}/results", json=telemetry_payload
+                        )
+                    if tel_resp.status_code >= 400:
+                        telemetry_save = {
+                            "error": f"HTTP {tel_resp.status_code}",
+                            "body": (tel_resp.text or "")[:2000],
+                            "stored": False,
+                        }
+                        # 4xx is a client error — retrying won't help.
+                        if tel_resp.status_code < 500:
+                            break
+                    else:
+                        telemetry_save = tel_resp.json()
+                        logger.info(
+                            "Telemetry saved for experiment %s (HTTP %s, attempt %d)",
+                            exp_id,
+                            tel_resp.status_code,
+                            _attempt,
+                        )
+                        break
+                except Exception as exc:
+                    telemetry_save = {"error": str(exc), "stored": False}
+                    logger.warning(
+                        "Telemetry POST failed for experiment %s (attempt %d/%d): %s",
+                        exp_id,
+                        _attempt,
+                        tel_attempts,
+                        exc,
                     )
-                if tel_resp.status_code >= 400:
-                    telemetry_save = {
-                        "error": f"HTTP {tel_resp.status_code}",
-                        "body": (tel_resp.text or "")[:2000],
-                        "stored": False,
-                    }
-                else:
-                    telemetry_save = tel_resp.json()
-                logger.info(
-                    "Telemetry saved for experiment %s (HTTP %s)",
+                if _attempt < tel_attempts:
+                    # Exponential backoff with jitter to avoid a retry stampede.
+                    time.sleep(min(8.0, 1.5 * (2 ** (_attempt - 1))) + random.uniform(0, 1.5))
+            if not telemetry_save.get("result_id") and not telemetry_save.get("stored"):
+                logger.error(
+                    "Telemetry result NOT persisted for experiment %s after %d attempts: %s",
                     exp_id,
-                    tel_resp.status_code,
-                )
-            except Exception as exc:
-                telemetry_save = {"error": str(exc), "stored": False}
-                logger.warning(
-                    "Telemetry POST failed for experiment %s: %s", exp_id, exc
+                    tel_attempts,
+                    telemetry_save.get("error"),
                 )
 
         return {

@@ -10,7 +10,12 @@ import os
 import uuid
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 
-from app.engine.orchestration_store import load_orchestration, save_orchestration
+from app.engine.orchestration_store import (
+    load_orchestration,
+    save_orchestration,
+    load_orchestration_async,
+    save_orchestration_async,
+)
 from app.agent.orchestrator import OrchestratorAgent
 from app.models.schemas import (
     ResearchIntent,
@@ -111,7 +116,7 @@ async def submit_intent(request: ResearchIntent, background_tasks: BackgroundTas
         "results": [],
     }
     try:
-        save_orchestration(record)
+        await save_orchestration_async(record)
     except Exception as exc:
         raise HTTPException(
             status_code=503,
@@ -260,7 +265,7 @@ async def execute_skill(skill_name: str, payload: dict):
 
 @router.get("/orchestration/{orch_id}")
 async def get_status(orch_id: str):
-    orch = load_orchestration(orch_id)
+    orch = await load_orchestration_async(orch_id)
     if orch is None:
         raise HTTPException(status_code=404, detail="Orchestration not found")
     return {
@@ -277,7 +282,7 @@ async def get_status(orch_id: str):
 
 @router.get("/orchestration/{orch_id}/results")
 async def get_results(orch_id: str):
-    orch = load_orchestration(orch_id)
+    orch = await load_orchestration_async(orch_id)
     if orch is None:
         raise HTTPException(status_code=404, detail="Orchestration not found")
     return {
@@ -292,7 +297,7 @@ async def get_results(orch_id: str):
 
 @router.get("/orchestration/{orch_id}/reasoning")
 async def get_reasoning(orch_id: str):
-    orch = load_orchestration(orch_id)
+    orch = await load_orchestration_async(orch_id)
     if orch is None:
         raise HTTPException(status_code=404, detail="Orchestration not found")
     return {

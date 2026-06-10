@@ -943,11 +943,29 @@ services:
     container_name: orchestration-rooms
     profiles: [rooms]
     ports: ["8016:8005"]
+    # Multiple uvicorn workers so a single blocked/slow request can't freeze the
+    # whole orchestrator for all receivers sharing this room. State is external
+    # (telemetry/postgres), so multi-worker is safe. NOTE: the docker-create
+    # BoundedSemaphore is per-process, so effective concurrent creates =
+    # workers x ORCH_MAX_CONCURRENT_CREATES — keep ROOMS_ORCH_CREATE_CAP low.
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8005", "--workers", "4"]
     environment: &orch_rooms_env
       - FLASK_ENV=development
       - EXPERIMENT_API_URL=http://experiment-api:8000
       - CTP_SERVICE_URL=${CTP_SERVICE_URL:-http://ctp-service:8001}
       - CTP_SERVICE_GLOBAL=${CTP_SERVICE_GLOBAL:-http://128.111.5.236:8001}
+      # Sync boundary for firing capture+workflow. 60 = next whole minute,
+      # 10 = next 10s boundary (shorter per-experiment wait).
+      - ORCH_SYNC_BOUNDARY_SECONDS=${ORCH_SYNC_BOUNDARY_SECONDS:-60}
+      # Spread independent workers across the boundary window (deterministic
+      # per-experiment phase offset) so they don't all fire/upload at once.
+      - ORCH_SYNC_PHASE_JITTER=${ORCH_SYNC_PHASE_JITTER:-false}
+      # Telemetry write hardening: retry result/pcap/orchestration saves so a
+      # momentary telemetry slowdown during a burst doesn't drop data.
+      - ORCH_TELEMETRY_POST_TIMEOUT_SECONDS=${ORCH_TELEMETRY_POST_TIMEOUT_SECONDS:-30}
+      - ORCH_TELEMETRY_POST_RETRIES=${ORCH_TELEMETRY_POST_RETRIES:-5}
+      - ORCH_PCAP_UPLOAD_RETRIES=${ORCH_PCAP_UPLOAD_RETRIES:-5}
+      - ORCH_SAVE_RETRIES=${ORCH_SAVE_RETRIES:-4}
       - ORCH_CTP_INTENSITY_DIRECTION=${ORCH_CTP_INTENSITY_DIRECTION:-}
       - ORCH_CTP_SOURCE=local_list
       - ORCH_LOCAL_CTP_ROOT=${ORCH_LOCAL_CTP_ROOT:-}
