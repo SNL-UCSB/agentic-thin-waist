@@ -168,6 +168,48 @@ For AQM qdiscs (e.g. `fq_codel`), put the queue size in `qdisc_params.limit` rat
 "context": { "aqm_policy": "fq_codel", "qdisc_params": {"limit": "500", "target": "5ms"} }
 ```
 
+### LLM bypass mode
+
+When provider credentials are unavailable, you can bypass all orchestration LLM
+calls and build `parsed_intent` deterministically from `context`.
+
+- Request-level toggle: `preferences.bypass_llm`
+- Deployment default: `ORCH_BYPASS_LLM=false` (from `.env`)
+
+In bypass mode:
+- `parse_intent` does not call Claude.
+- Workflow selection still requires a pinned `workflow_id`.
+- Workflow runtime parameters come from `context.workflow_parameters` (or
+  top-level context keys that match the pinned workflow schema).
+
+Example:
+```json
+{
+  "intent": "Join Zoom receive-only with pinned shaping",
+  "context": {
+    "application": "zoom",
+    "applications": ["zoom"],
+    "application_type": "shell",
+    "capacities": [10],
+    "latencies": [10],
+    "cc_algorithms": ["cubic"],
+    "aqm_policy": "pfifo",
+    "workflow_parameters": {
+      "meeting_id": "123456789",
+      "passcode": "abc123",
+      "display_name": "Receiver2",
+      "wait_seconds": 60
+    }
+  },
+  "preferences": {
+    "bypass_llm": true,
+    "max_parallel_workers": 10
+  },
+  "workflow_id": "run_zoom_receive_workflow",
+  "workflow_source": "library"
+}
+```
+
 ---
 
 ## Workflow Source

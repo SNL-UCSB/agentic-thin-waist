@@ -1,0 +1,40 @@
+#!/bin/bash
+# 25 receivers per room across rooms 1-2 (= 50 agents) on the 2500-CTP list.
+# Network params: 1 Mbps / 10 ms / pfifo, receive-only Zoom participants.
+# Uses the same master list file as the 0.5 Mbps run.
+set -u
+cd "$(dirname "$0")"
+mkdir -p logs pids
+
+NUM_ROOMS=2
+SLOTS=25
+MASTER=../services/orchestration/scripts/master_cosine_2500_0p5_mbps.txt
+ROOMS_ENV_FILE=./rooms_10m600ms.env
+STAGGER=2
+RUN_TAG="${RUN_TAG:-$(date +%Y%m%d_%H%M%S)}"
+LOG_DIR="logs/scale25_1m10ms_${RUN_TAG}"
+PID_DIR="pids/scale25_1m10ms_${RUN_TAG}"
+mkdir -p "$LOG_DIR" "$PID_DIR"
+
+for R in 1 2; do
+  PORT=$(( 8015 + R ))
+  for S in $(seq 1 $SLOTS); do
+    RLOG="${LOG_DIR}/scale25_1m10ms_room${R}_slot${S}.log"
+    RJL="${LOG_DIR}/scale25_1m10ms_room${R}_slot${S}.jsonl"
+    ROOM_INDEX=$R SLOT_INDEX=$S SLOTS_PER_ROOM=$SLOTS NUM_ROOMS=$NUM_ROOMS \
+      ROOMS_ENV_FILE="$ROOMS_ENV_FILE" \
+      ORCH_URL=http://localhost:${PORT} \
+      ZOOM_DISPLAY_NAME=Henry \
+      ZOOM_CAPACITY_MBPS=1 ZOOM_LATENCY_MS=10 ZOOM_QDISC=pfifo ZOOM_WAIT_SECONDS=30 \
+      SWEEP_LOG="$RJL" MASTER_CTP_LIST="$MASTER" \
+      setsid python3 -u room_receiver.py > "$RLOG" 2>&1 < /dev/null &
+    PID=$!; disown $PID
+    echo "$PID" > "${PID_DIR}/scale25_1m10ms_room${R}_slot${S}.pid"
+    echo "room${R} slot${S} pid=${PID}"
+    sleep $STAGGER
+  done
+done
+echo "[launch] 50 receivers launched (25/room x 2 rooms) on shared 2500 list at 1Mbps/10ms"
+echo "[launch] run_tag=${RUN_TAG}"
+echo "[launch] logs=${LOG_DIR}"
+echo "[launch] pids=${PID_DIR}"

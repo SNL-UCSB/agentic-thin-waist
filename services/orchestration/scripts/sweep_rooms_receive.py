@@ -147,11 +147,20 @@ def submit_batch(ctps: list[str]) -> str:
         "intent": build_intent(),
         "context": {
             "application": "zoom",
+            "applications": ["zoom"],
+            "application_type": "shell",
             "ctp_list": ctps,
             "capacities": [CAPACITY],
             "latencies": [LATENCY],
+            "cc_algorithms": ["cubic"],
             "aqm_policy": QDISC,
             "duration_seconds": WAIT_SECONDS,
+            "workflow_parameters": {
+                "meeting_id": MEETING_ID,
+                "passcode": PASSCODE,
+                "display_name": DISPLAY_NAME,
+                "wait_seconds": WAIT_SECONDS,
+            },
             # Receive-only: no fake camera/mic on the worker, so receivers never
             # broadcast audio or video.
             "fake_media": False,
@@ -159,6 +168,7 @@ def submit_batch(ctps: list[str]) -> str:
         "preferences": {
             "max_parallel_workers": len(ctps),
             "use_examples": True,
+            "bypass_llm": True,
         },
         "workflow_id": "run_zoom_receive_workflow",
         "workflow_source": "library",

@@ -29,6 +29,25 @@ from app.engine.skills import load_skills, SkillExecutor
 router = APIRouter()
 
 
+def _env_flag(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _parse_bool(value: object, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return default
+
+
 def _build_detailed_progress(orch: dict) -> dict:
     """Build compact, UI-friendly detail flags from lifecycle + iteration phases."""
     lifecycle_stages = orch.get("lifecycle_stages", []) or []
@@ -166,6 +185,11 @@ def process_intent(orch_id: str, request: ResearchIntent) -> None:
             f"[INTENT {orch_id}]   workflow_source={workflow_source!r} "
             f"workflow_id={workflow_id!r}"
         )
+        bypass_llm = _parse_bool(
+            request.preferences.get("bypass_llm"),
+            _env_flag("ORCH_BYPASS_LLM", False),
+        )
+        print(f"[INTENT {orch_id}]   bypass_llm={bypass_llm}")
         print(f"{'#'*60}")
 
         workflow = request.context.get("workflow") or {}
@@ -186,6 +210,12 @@ def process_intent(orch_id: str, request: ResearchIntent) -> None:
             "ctp_name",
             "ctp_list",
             "fake_media",
+            "applications",
+            "application_type",
+            "workflow_parameters",
+            "upload_mbps",
+            "ctp_cluster",
+            "ctp_capacity_range",
         ):
             if key in request.context and request.context[key] is not None:
                 intent_overrides[key] = request.context[key]
@@ -200,6 +230,8 @@ def process_intent(orch_id: str, request: ResearchIntent) -> None:
             workflow_source=workflow_source,
             workflow_id=workflow_id,
             intent_overrides=intent_overrides,
+            bypass_llm=bypass_llm,
+            context=request.context,
         )
 
         orch_result = result.get("orchestration_result") or {}

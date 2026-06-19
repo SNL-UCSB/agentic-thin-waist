@@ -14,6 +14,9 @@ from app.agent.browser.agent import (
     BrowserWorkflowContext,
 )
 from app.agent.browser.agent import (
+    _load_workflow as _load_browser_workflow,
+)
+from app.agent.browser.agent import (
     create_agent as create_browser_agent,
 )
 from app.agent.orchestrator.prompts import (
@@ -22,6 +25,10 @@ from app.agent.orchestrator.prompts import (
 )
 from app.agent.orchestrator.schemas import ParsedIntent
 from app.agent.shell.agent import ShellWorkflowContext
+from app.agent.shell.agent import (
+    _load_shell_workflows,
+    _pin_shell_workflow,
+)
 from app.agent.shell.agent import create_agent as create_shell_agent
 from app.agent.utils import (
     get_model,
@@ -30,6 +37,10 @@ from app.agent.utils import (
     with_structured_output,
 )
 from app.engine.experiment_generator import ExperimentGenerator
+from app.engine.deterministic_intent import (
+    build_parsed_intent,
+    build_workflow_parameters,
+)
 from app.engine.orchestration_manager import OrchestrationManager
 from app.models.schemas import OrchestrationStatus
 
@@ -44,6 +55,8 @@ class OrchestratorState(MessagesState):
     workflow_reasoning: str | None
     workflow_source: str
     workflow_id: str | None
+    bypass_llm: bool
+    context: dict[str, Any]
     use_examples: bool
     max_parallel_workers: int
     parsed_intent: dict[str, Any] | None
@@ -65,12 +78,38 @@ def parse_intent(state: OrchestratorState) -> dict[str, Any]:
     use_examples = state.get("use_examples", True)
 
     print(f"\n{'#' * 60}")
-    print(f"[AGENT {orchestration_id}] Step 1/3: Parsing intent via Claude …")
+    print(f"[AGENT {orchestration_id}] Step 1/3: Parsing intent …")
     print(f"[AGENT {orchestration_id}]   intent: {intent!r}")
     print(f"[AGENT {orchestration_id}]   use_examples={use_examples}")
     print(f"{'#' * 60}")
 
     save_state(state, status=OrchestrationStatus.parsing)
+
+    if state.get("bypass_llm"):
+        parsed_dict = build_parsed_intent(
+            state.get("context") or {},
+            intent=intent,
+            workflow_id=state.get("workflow_id"),
+        )
+        print(
+            f"[AGENT {orchestration_id}] Intent parsed via deterministic bypass → "
+            f"apps={parsed_dict.get('applications')} "
+            f"capacities={parsed_dict.get('capacities')} "
+            f"cc={parsed_dict.get('cc_algorithms')}"
+        )
+        return {
+            "parsed_intent": parsed_dict,
+            "reasoning_steps": [
+                {
+                    "step": 1,
+                    "action": "parse_intent_deterministic",
+                    "input": {"intent": intent},
+                    "output": parsed_dict,
+                    "reasoning": "Bypassed LLM and built parsed_intent from request context.",
+                }
+            ],
+            "messages": [AIMessage(content="Parsed intent via deterministic bypass.")],
+        }
 
     model = get_model()
     examples_block = build_examples_block() if use_examples else ""
@@ -197,8 +236,45 @@ def shell_workflow(state: OrchestratorState) -> dict[str, Any]:
     orchestration_id = state["orchestration_id"]
     existing = state.get("workflow") or {}
     if existing:
+        existing_params = existing.get("parameters")
+        if not isinstance(existing_params, dict):
+            existing_params = build_workflow_parameters(
+                state.get("context") or {},
+                state.get("workflow_id"),
+            )
         print(f"[AGENT {orchestration_id}] Routing → shell workflow (user-provided)")
-        return {"workflow": existing}
+        return {"workflow": existing, "workflow_parameters": existing_params}
+
+    if state.get("bypass_llm"):
+        pinned_id = (state.get("workflow_id") or "").strip() or None
+        if not pinned_id:
+            return {
+                "workflow": {},
+                "workflow_parameters": None,
+                "workflow_reasoning": (
+                    "Bypass mode requires workflow_id for shell workflows."
+                ),
+            }
+        pre_seeded_params = build_workflow_parameters(
+            state.get("context") or {},
+            pinned_id,
+        )
+        print(
+            f"[AGENT {orchestration_id}] Routing → shell workflow deterministic bypass "
+            f"(workflow_id={pinned_id!r})"
+        )
+        pinned = _pin_shell_workflow(
+            intent=state["intent"],
+            selected_id=pinned_id,
+            available=_load_shell_workflows(),
+            source_label="deterministic bypass",
+            pre_seeded_params=pre_seeded_params,
+        )
+        return {
+            "workflow": pinned.get("workflow") or {},
+            "workflow_parameters": pinned.get("parameters"),
+            "workflow_reasoning": pinned.get("reasoning"),
+        }
 
     print(f"[AGENT {orchestration_id}] Routing → shell workflow agent")
     from main import NetGent
@@ -237,8 +313,41 @@ def browser_workflow(state: OrchestratorState) -> dict[str, Any]:
     orchestration_id = state["orchestration_id"]
     existing = state.get("workflow") or {}
     if existing:
+        existing_params = existing.get("parameters")
+        if not isinstance(existing_params, dict):
+            existing_params = build_workflow_parameters(
+                state.get("context") or {},
+                state.get("workflow_id"),
+            )
         print(f"[AGENT {orchestration_id}] Routing → browser workflow (user-provided)")
-        return {"workflow": existing}
+        return {"workflow": existing, "workflow_parameters": existing_params}
+
+    if state.get("bypass_llm"):
+        pinned_id = (state.get("workflow_id") or "").strip() or None
+        if not pinned_id:
+            return {
+                "workflow": {},
+                "workflow_parameters": None,
+                "workflow_reasoning": (
+                    "Bypass mode requires workflow_id for browser workflows."
+                ),
+            }
+        print(
+            f"[AGENT {orchestration_id}] Routing → browser workflow deterministic bypass "
+            f"(workflow_id={pinned_id!r})"
+        )
+        workflow = _load_browser_workflow(pinned_id, None)
+        workflow.setdefault("id", pinned_id)
+        return {
+            "workflow": workflow,
+            "workflow_parameters": build_workflow_parameters(
+                state.get("context") or {},
+                pinned_id,
+            ),
+            "workflow_reasoning": (
+                f"Pinned browser workflow {pinned_id!r} via deterministic bypass."
+            ),
+        }
 
     print(f"[AGENT {orchestration_id}] Routing → browser workflow agent")
     from main import NetGent
@@ -496,6 +605,8 @@ class OrchestratorAgent:
         workflow_source: str = "auto",
         workflow_id: str | None = None,
         intent_overrides: dict[str, Any] | None = None,
+        bypass_llm: bool = False,
+        context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Run the full orchestration pipeline for a given intent.
 
@@ -519,6 +630,8 @@ class OrchestratorAgent:
                 "workflow_reasoning": None,
                 "workflow_source": workflow_source,
                 "workflow_id": workflow_id,
+                "bypass_llm": bool(bypass_llm),
+                "context": context or {},
                 "use_examples": use_examples,
                 "max_parallel_workers": max_parallel_workers,
                 "messages": [HumanMessage(content=intent)],

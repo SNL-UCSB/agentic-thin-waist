@@ -315,6 +315,7 @@ services:
       - .env
     environment:
       FLASK_ENV: development
+      GUNICORN_TELEMETRY_WORKERS: ${GUNICORN_TELEMETRY_WORKERS:-8}
       DB_HOST: ${DB_HOST}
       DB_NAME: ${DB_NAME}
       DB_PORT: ${DB_PORT}

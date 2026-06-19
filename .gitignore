@@ -243,6 +243,16 @@ media/
 *.pcapng
 
 # Zoom sweep local artifacts (credentials, run output, progress logs)
-run_files/
+# See ZOOM_DATA_COLLECTION.md for run layout.
+run_files/logs/
+run_files/pids/
+run_files/**/logs/
+run_files/**/pids/
+run_files/**/*.log
+run_files/**/*.jsonl
+run_files/logs/missing_*.txt
+run_files/rooms*.env
+run_files/room*_slot*.sh
+run_files/room*_worker*.sh
 **/rooms.env
 *_progress.jsonl
