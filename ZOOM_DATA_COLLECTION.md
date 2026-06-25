@@ -17,8 +17,10 @@ For generic platform quick-start see [README.md](README.md). For legacy LLM-base
 7. [Starting receivers from bash scripts](#7-starting-receivers-from-bash-scripts)
 8. [How NL intent is skipped](#8-how-nl-intent-is-skipped)
 9. [End-to-end checklist](#9-end-to-end-checklist)
-10. [Troubleshooting](#10-troubleshooting)
-11. [Related scripts reference](#11-related-scripts-reference)
+10. [Performance tuning](#10-performance-tuning)
+11. [Monitoring during a run](#11-monitoring-during-a-run)
+12. [Troubleshooting](#12-troubleshooting)
+13. [Related scripts reference](#13-related-scripts-reference)
 
 ---
 
@@ -696,7 +698,140 @@ Older scripts (`sweep_zoom_av_*.py` documented in SWEEPS_INFO.md) rewrite `ORCH_
 
 ---
 
-## 10. Troubleshooting
+## 10. Performance tuning
+
+This section documents the current tuned defaults and the reasoning behind them.
+All values can be overridden in `.env` without touching `docker-compose.yml`.
+
+### Per-experiment timing budget (target ~90s)
+
+| Phase | Old default | New default | Saving |
+|---|---|---|---|
+| Sync-to-boundary wait (`ORCH_SYNC_BOUNDARY_SECONDS`) | 60s (avg ~30s) | 10s (avg ~5s) | ~25s |
+| Phase jitter (`ORCH_SYNC_PHASE_JITTER`) | `false` | `true` | de-herds 50 receivers |
+| Worker startup sleep (`ORCH_WORKER_STARTUP_WAIT_SECONDS`) | 15s | 5s | 10s |
+| Workflow wait after meeting-ID submit | 3s | 2s | 1s |
+| Workflow wait after preview-join click | 5s | 3s | 2s |
+| **Total fixed overhead reduction** | | | **~38s** |
+
+The capture window (`ZOOM_WAIT_SECONDS=30`, tshark `-a duration:30`) and the
+ephemeral Docker container warmup (Chromium start + netns setup) remain the
+dominant costs. The container warmup is ~15–25s and cannot be eliminated without
+switching to a persistent worker pool (not done here — kept ephemeral for
+isolation and clean netns per experiment).
+
+### Key tunable env vars
+
+| Variable | Default (new) | Where set | Purpose |
+|---|---|---|---|
+| `ORCH_SYNC_BOUNDARY_SECONDS` | `10` | `docker-compose.yml:960` | Next-Ns boundary; smaller = less dead wait |
+| `ORCH_SYNC_PHASE_JITTER` | `true` | `docker-compose.yml:963` | Spread 50 receivers across the window |
+| `ORCH_WORKER_STARTUP_WAIT_SECONDS` | `5` | `docker-compose.yml` (all room orch) | Fixed sleep after container start |
+| `GUNICORN_TELEMETRY_WORKERS` | `16` | `docker-compose.yml:318` | Gunicorn worker processes |
+| `GUNICORN_TELEMETRY_THREADS` | `8` | `docker-compose.yml:319` | Threads per worker (gthread class) |
+| `GUNICORN_TELEMETRY_TIMEOUT` | `300` | `docker-compose.yml:320` | Request timeout; was 5000 (masked stalls) |
+| `SQLALCHEMY_POOL_SIZE` | `5` | `services/telemetry-service/config.py` | Connections per worker process |
+| `SQLALCHEMY_MAX_OVERFLOW` | `10` | same | Burst headroom above pool_size |
+| `S3_READ_TIMEOUT_SECONDS` | `120` | same | MinIO data-read timeout per request |
+
+### Telemetry concurrency math
+
+With 16 workers × 8 threads = **128 simultaneous in-flight requests** (gthread
+worker class, I/O-bound uploads benefit from threads). Pool per worker: 5 + 10
+overflow = 15 max connections; 16 workers × 15 = 240 potential connections well
+within the raised Postgres `max_connections=300`.
+
+Total Postgres connection budget (worst case):
+- telemetry: 16 × 15 = 240
+- experiment-api, orchestration rooms (10 × 4 uvicorn), netgent: ~60
+- **Total ≤ 300** — sized to the new Postgres limit.
+
+To raise further: increase `GUNICORN_TELEMETRY_WORKERS` and `max_connections`
+in lockstep. Raise Postgres `max_connections` via the `command:` entry in
+`docker-compose.yml` under `postgres:` (already set to 300).
+
+---
+
+## 11. Monitoring during a run
+
+### Quick health checks
+
+```bash
+# All critical services up?
+curl -sf http://localhost:8004/health && echo " telemetry ok"
+curl -sf http://localhost:8016/health && echo " orch-room1 ok"
+curl -sf http://localhost:8017/health && echo " orch-room2 ok"
+
+# How many receivers are still alive?
+pgrep -af room_receiver.py | wc -l
+
+# Count terminal statuses across a run (replace prefix as needed)
+python3 - <<'PY'
+import glob, json
+from collections import Counter
+done = Counter()
+for path in glob.glob("run_files/logs/scale25_10m100ms_*.jsonl"):
+    latest = {}
+    for line in open(path):
+        if line.strip():
+            r = json.loads(line)
+            ctp = r.get("ctp_name")
+            if ctp:
+                latest[ctp] = r.get("status")
+    for st in latest.values():
+        done[st] += 1
+print(dict(done))
+PY
+```
+
+### Watch for PCAP upload failures
+
+```bash
+# Live: watch for "PCAP NOT persisted" across all room orchestrators
+docker compose logs -f --no-log-prefix orchestration-room1 orchestration-room2 \
+  | grep -i "pcap not\|upload failed\|telemetry error"
+
+# Count failed saves in a slot log
+grep "PCAP NOT" run_files/logs/scale25_10m100ms_room1_slot1.log | wc -l
+```
+
+### Telemetry / MinIO saturation indicators
+
+```bash
+# Postgres connection count (should stay well below max_connections=300)
+docker exec $(docker ps -qf name=postgres) \
+  psql -U ${DB_USER:-postgres} -c "SELECT count(*) FROM pg_stat_activity;"
+
+# MinIO disk usage + free space
+docker exec $(docker ps -qf name=minio) df -h /data
+
+# Host disk — MinIO data dir must stay below capacity
+df -h / /mnt/md0
+
+# Telemetry gunicorn worker saturation (gunicorn does not expose a /metrics
+# endpoint by default; check response time proxy instead)
+time curl -sf http://localhost:8004/health
+```
+
+### Interpreting `elapsed_s` in JSONL logs
+
+Each slot JSONL (`logs/scale25_*_room*_slot*.jsonl`) records `elapsed_s` per
+CTP. Expected ranges with new tuning:
+
+| Phase combo | Expected elapsed_s |
+|---|---|
+| Normal (container warmup + 30s capture + upload) | 60–100s |
+| Slow join (Zoom web client cold load over shaped link) | 100–140s |
+| Upload retry fired once | +15–30s |
+| Timeout (stuck browser or telemetry down) | = `TIMEOUT_SECONDS` (600s) |
+
+If you see a cluster of 600s entries, check telemetry health and MinIO disk
+first. If entries are consistently >140s, consider reducing
+`ORCH_SYNC_BOUNDARY_SECONDS` further (e.g. to 5) or profiling browser join time.
+
+---
+
+## 12. Troubleshooting
 
 | Symptom | Likely cause | What to check |
 |---------|--------------|---------------|
@@ -706,12 +841,16 @@ Older scripts (`sweep_zoom_av_*.py` documented in SWEEPS_INFO.md) rewrite `ORCH_
 | Receivers not in Zoom | Broadcasters not live yet, or bad creds | Start broadcasters first; check receiver slot logs |
 | CTP not found / skipping CTP | Missing PCAP under `ORCH_LOCAL_CTP_ROOT` | Verify `download/` + `upload/` pair for CTP name |
 | Wrong CTP shard / duplicates | `NUM_ROOMS` or `SLOTS_PER_ROOM` mismatch | All processes in a run must use the same values |
+| Missing PCAPs in telemetry (`PCAP NOT persisted`) | Telemetry overloaded — all 16 workers busy | Check `docker compose logs telemetry-service` for 503/timeout; raise `GUNICORN_TELEMETRY_WORKERS` further or add jitter |
+| MinIO upload stalls (worker pinned >120s) | No `read_timeout` on S3 client (now fixed at 120s) | After 120s the orchestrator retries; if still failing check MinIO health and disk |
+| `FATAL: too many connections` in orchestration logs | Postgres `max_connections` exhausted | Check `pg_stat_activity` count; already raised to 300 — lower `SQLALCHEMY_POOL_SIZE`/`MAX_OVERFLOW` or raise `max_connections` further |
 | Missing PCAPs in telemetry | MinIO full (`XMinioStorageFull`) | Free disk on `/`; check telemetry container health |
 | `stop_receivers.sh` stops nothing | Timestamped pid dirs | Use `pkill -f room_receiver.py` |
+| `elapsed_s` consistently near 600s | Receivers timing out — browser join hung or telemetry down | Check `TIMEOUT_SECONDS`; look for `stuck` in slot log; restart affected slots |
 
 ---
 
-## 11. Related scripts reference
+## 13. Related scripts reference
 
 | Script | Purpose |
 |--------|---------|

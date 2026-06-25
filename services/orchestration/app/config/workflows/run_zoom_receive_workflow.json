@@ -38,7 +38,7 @@
         {
           "type": "wait",
           "params": {
-            "seconds": "3"
+            "seconds": "2"
           }
         },
         {
@@ -64,7 +64,7 @@
         {
           "type": "wait",
           "params": {
-            "seconds": "5"
+            "seconds": "3"
           }
         },
         {

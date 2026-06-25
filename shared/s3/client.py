@@ -17,6 +17,10 @@ class S3Client:
                 "max_attempts": Config.S3_CONNECTION_RETRIES,
             },
             connect_timeout=Config.S3_CONNECTION_TIMEOUT_SECONDS,
+            # read_timeout caps how long a stalled MinIO data transfer can hold
+            # a gunicorn worker. Uses getattr so services that don't define
+            # S3_READ_TIMEOUT_SECONDS (e.g. substrate-worker) still work.
+            read_timeout=getattr(Config, "S3_READ_TIMEOUT_SECONDS", 120),
         )
 
         self.client = boto3.client(

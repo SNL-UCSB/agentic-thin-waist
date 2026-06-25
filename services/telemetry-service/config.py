@@ -18,3 +18,17 @@ class Config:
     S3_CONNECTION_TIMEOUT_SECONDS = int(
         os.environ.get("S3_CONNECTION_TIMEOUT_SECONDS", "60")
     )
+    # Separate read timeout so a stalled MinIO data transfer fails fast
+    # rather than pinning a gunicorn worker for up to the request timeout.
+    S3_READ_TIMEOUT_SECONDS = int(os.environ.get("S3_READ_TIMEOUT_SECONDS", "120"))
+
+    # SQLAlchemy connection-pool tuning. pool_pre_ping validates connections
+    # before use (prevents stale-connection errors after Postgres restarts).
+    # Size is intentionally modest — gunicorn uses sync gthread workers so
+    # each worker thread gets its own connection from the pool.
+    SQLALCHEMY_ENGINE_OPTIONS = {
+        "pool_pre_ping": True,
+        "pool_size": int(os.environ.get("SQLALCHEMY_POOL_SIZE", "5")),
+        "max_overflow": int(os.environ.get("SQLALCHEMY_MAX_OVERFLOW", "10")),
+        "pool_recycle": int(os.environ.get("SQLALCHEMY_POOL_RECYCLE", "1800")),
+    }
