@@ -1,3 +1,0 @@
-[submodule "shared/clients/netgent"]
-	path = shared/clients/netgent
-	url = https://github.com/EugeneVuong/netgent.git

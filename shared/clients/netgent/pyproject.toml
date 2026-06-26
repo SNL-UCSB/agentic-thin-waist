@@ -1,0 +1,47 @@
+[project]
+name = "agentic-thin-waist-shared"
+version = "0.1.0"
+description = "Shared library and scripts for agentic-thin-waist (NetGent client, models, S3, DB)."
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "boto3>=1.42.65",
+    "pydantic>=2.9.0",
+    "pydantic-settings>=2.5.2",
+    "playwright>=1.58.0",
+    "Pillow>=11.2.1",
+    "psycopg[binary]>=3.2.6",
+    "python-dotenv>=1.2.2",
+    "sqlalchemy>=2.0.36",
+    # NOTE: langchain stack pinned to 0.3.x so it stays compatible with
+    # browser-use==0.5.11 (which pins anthropic==0.58.2). Don't bump these
+    # without also bumping browser-use to a version that accepts a newer
+    # anthropic — the 0.3 → 1.x langchain transition is a hard ABI break.
+    "langgraph>=1.0.0,<2",
+    "langgraph-sdk>=0.2.0,<0.3",
+    "langchain-google-genai>=2.1.0,<3",
+    "langchain-anthropic>=0.3.0,<1",
+    "langchain-community>=0.3.0,<0.4",
+    "langchain-core>=0.3.0,<1",
+    "langchain>=0.3.0,<1",
+    "browser-use==0.5.11",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=7.4.3",
+    "pytest-cov>=4.1.0",
+    "ruff>=0.8.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests", "scripts"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP", "B"]
