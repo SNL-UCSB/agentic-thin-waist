@@ -15,11 +15,9 @@ graph TD
 
     RDV["Rendezvous Channel<br/>T1: local scheduler, no broker<br/>T2/T3: broker shipped with pool"]
 
-    subgraph PUBS["Capability publishers"]
-        NG["NetGent<br/>workflow repo"]
-        NR["NetReplica<br/>static knobs"]
-        CTP["CTP Service<br/>queryable profile DB"]
-    end
+    NG["NetGent workflow registry<br/>(capability publisher, static)"]
+    NR["NetReplica knobs<br/>(capability publisher, static)"]
+    CTP["CTP Service<br/>(capability publisher, live:<br/>query schema + profile DB)"]
 
     subgraph EXEC["Execution substrate"]
         POOL["Persistent Worker Pool<br/>substrate workers, pool-of-1 recycling"]
@@ -36,9 +34,9 @@ graph TD
     MATCH --> PLAN
     PLAN --> SPEC
     SPEC --> SCHED
-    KB -.->|"pull capabilities at bootstrap"| NG
-    KB -.->|"pull capabilities at bootstrap"| NR
-    KB -.->|"query schema"| CTP
+    KB -.->|"BOOTSTRAP: pull signed capability file"| NG
+    KB -.->|"BOOTSTRAP: pull signed capability file"| NR
+    KB -.->|"BOOTSTRAP: pull query schema"| CTP
     MATCH -->|"live CTP query, pointers back"| CTP
     PLAN -->|"get_nodes / deploy"| CONN
     CONN -.->|"materialize pool + nodes"| POOL
@@ -47,6 +45,6 @@ graph TD
     POOL -->|"dial out: claim work, heartbeat"| RDV
     POOL ==>|"publish results, async"| RDV
     RDV ==>|"results"| TEL
-    POOL ==>|"fetch CTPs by pointer"| CTP
-    POOL ==>|"pull workflows"| NG
+    POOL ==>|"RUNTIME data plane: fetch CTP payload by pointer"| CTP
+    POOL ==>|"RUNTIME data plane: fetch workflow by pinned sha"| NG
     POOL ==>|"app traffic"| NODE
