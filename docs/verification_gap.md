@@ -36,6 +36,31 @@ The **Spec → Substrate** layer is the most tractable and gives the strongest b
 - The harder layers (Intent → Spec, Result → Claim) are where the agentic story lives but have no clean analogs in the reference corpus — flag as open problems rather than overclaim.
 - When evaluating future Pramana architectural changes, ask whether the change opens or closes any of these four layers.
 
+## Formal-tool map (added 2026-07-02 — educational, not prioritized)
+
+Intent→Spec decomposes into three sub-problems with different formal status:
+
+| Sub-problem | Formal status | Tool class |
+|---|---|---|
+| Syntactic validity of model output | **guaranteed by construction** | grammar-constrained decoding (Outlines, llguidance, structured outputs) |
+| Semantic well-formedness / capability satisfiability | **decidable** | SMT (Z3/CVC5) over spec+capability constraints — unsat cores become backflow questions; or CUE as the spec language (invalid = unrepresentable) |
+| Translation fidelity (spec ≡ intent) | **formally unbridgeable** (NL has no formal semantics) | translation-validation pattern (Pnueli '98; the intent echo is this with a human judge) + metamorphic/property-based testing (paraphrase invariance, monotonicity, unit invariance) + NLI entailment as statistical signal — never presented as verification |
+
+Better formal-methods fits elsewhere in the stack:
+
+- **Spec→Substrate & CTP realization:** Signal Temporal Logic runtime monitors
+  (RTAMT, Breach) — regime as temporal formulas over measured series; verdict +
+  robustness margin upgrades `verified: true` to a quantitative satisfaction
+  degree. The technology that would make "formally verified realized conditions"
+  a true sentence.
+- **Workflow safety:** NetGent workflows are finite NFAs — decidable model
+  checking (domain allow-lists, secret-flow-only-into-declared-fields); makes the
+  repo-entry gate partially mechanical.
+- **Pool lifecycle protocol:** TLA+/TLC on the claim/heartbeat/reap/retry state
+  machine (no-lost-work, no-silent-duplicate, cancellation-reaches-all) — a few
+  pages of PlusCal; the highest-ROI formal target since the protocol has no
+  implementation to anchor on yet.
+
 ## Related artifacts
 
 - `docs/lit-survey/papers/2026_zhou_netarena.md` — emulator-in-the-loop verification primitive
