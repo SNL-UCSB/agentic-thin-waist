@@ -110,3 +110,56 @@ was abstract-only). Claims checked with quote-demanding queries:
 | ~8 parallel regimes before netem degradation | **Confirmed in v2 only** (§5.5/A4: "eight parallel tasks", JSD < 0.14; limiting factor = "kernel scheduling in netem", not "timer granularity" — wording corrected in spec + abstraction). Not present in v3. |
 | NetGent compiles NL rules → NFA; LLM-free cache-first replay | **Confirmed verbatim** (abstract + cache-hit/miss passage). |
 | NetGent application count | **Corrected**: paper claims "50+ workflows spanning five domains"; public registry holds 16. Both numbers now stated (supersedes the bare A15 fix). |
+
+## SE — Software-engineering best-practices review (same day; 3 lenses, 47 findings)
+
+Lenses: **DS** distributed systems (16), **AP** API/platform/DevEx (18), **PR**
+pragmatist build-vs-buy (13). Full texts in session record; dispositions below.
+Owner resolutions **E1–E6** (design spec §14) settled the contradictions.
+
+**Adopted (changes applied in DESIGN_SPEC v1.1):**
+DS-1/2 one lifecycle owner — Procrastinate out of the execution path, netgent-
+runner synchronous in /work (also fixes the worker trio's central-Postgres T2
+break) · DS-3 fencing tokens in A6–A9, telemetry stale-fence rejection, worker
+self-termination · DS-4 A6 in Postgres via shared/db with CAS (orchestration_
+store's persist-via-telemetry retired) · DS-5 SKIP LOCKED + psycopg_pool +
+statement_timeout · DS-7 idempotent-accept /work, persistent client, deadlines,
+backoff, circuit breaker, jitter · DS-8 crash-only Core + acceptance criterion 8
+· DS-9 correlation IDs, structured logs, /metrics; "tracing falls out of
+interfaces" softened · DS-11 per-iteration resume · DS-12 one liveness direction
+per binding, corroborated reap, mass-reap brake · DS-14 service-node liveness
+policy + prepare-phase heartbeats · DS-15 transitions keyed by (fence,state);
+PlusCal scope includes attempt+fence · AP-1 Pydantic v2 as schema source of
+truth, JSON Schema as build artifact · AP-2 RFC 8785 JCS, one shared function,
+golden vectors · AP-4 provenance as JSON-Pointer sidecar map · AP-5 strict at
+gate / must-ignore below; additive fields never bump versions · AP-7 /v1 prefix,
+RFC 9457 errors, cursor pagination · AP-8 idempotent POST semantics · AP-10
+pydantic-settings env>file>defaults · AP-11 secrets perms enforced + env
+override · AP-12 lockfile-shaped capability_pins incl. lexicon · AP-13 mypy
+strict + ruff on shared/ (non-negotiable) · AP-14 uv workspace, single lock ·
+AP-15 FastAPI standardization; Flask claim corrected (CLAUDE.md stale) · AP-16
+CLI machine conventions incl. exit code 3 = backflow · AP-18 jitter · PR-1
+evidence path ≠ build path (E1; P-EVIDENCE) · PR-2 signing → v2, git+PR is the
+v1 gate (composed with AP-6: when it lands, minisign/SSHSIG + TUF freshness,
+never DIY) · PR-3 KB → ~100-line loader · PR-4 shared/models first, owned,
+frozen (migration M-1) · PR-5 PlusCal decoupled from implementation gate ·
+PR-6 planner ships greedy behind full signature · PR-7 provenance derived at
+Match · PR-8 batched single clarification round v1 (E3; amends I1) · PR-9 two
+LLM providers · PR-11 testing strategy section (spec §13) · PR-13 experiment-api
+deleted in one commit · PR-12 lexicon + scoped probe kept (explicitly endorsed).
+
+**Kept-with-justification:** DS-6 bespoke scheduler — conditioned: one owner
+(done), PlusCal in parallel, **~500-line budget; exceeding it reopens the
+decision** (E4) · DS-16 set-FIFO head-of-line accepted · AP-3 tiny units grammar
+(pint float behavior would leak into identity) · AP-9 push-dispatch at T1/T2
+with the Procrastinate-overlap note · DS-10/AP-17 superseded then re-settled by
+E5-revised: T2 keeps the implemented SG-scoped direct model; S3-for-artifacts
+and pinned-cert encryption are recorded v1.1 options, not v1 components.
+
+**Owner resolutions:** E1 split paths · E2 T2 committed in summer scope ·
+E3 batched backflow v1 · E4 bespoke capped+fenced scheduler · E5 (revised)
+current SG transport, no mesh/tunnels/broker · E6 dependency manifest + Tier-1-
+only execution path rule (spec §15).
+
+**Rejected:** none outright; PR-10's cut of T2 was overridden by owner decision
+E2 (T2 stays, on the existing transport).
