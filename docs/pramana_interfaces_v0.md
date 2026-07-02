@@ -25,9 +25,11 @@ what modules exchange, over which seams, and who owns what state.**
    `shared/models/` as JSON Schema + generated dataclasses. Services validate at
    their boundary and reject, never coerce. (This fills the currently-empty
    `shared/models/__init__.py` with the thing it was always meant to hold.)
-6. **Interfaces are profile-invariant.** The laptop and scale profiles swap
-   *implementations* (direct upload vs. RabbitMQ), never *interfaces*. If a profile
-   needs a different call signature, the abstraction is wrong.
+6. **Interfaces are profile-invariant; transports are bindings.** (clarified 07-02)
+   The laptop and scale profiles swap *transport bindings* (localhost HTTP vs. a
+   remote broker), never *call signatures*. Worker code says `claim()`/`publish()`
+   everywhere; which channel carries them is configuration. Invariance applies at
+   the interface level, not the wire level.
 7. **Every seam is inspectable.** Each artifact is JSON-serializable and logged at
    the seam with a timestamp — stage-level tracing (§7 of the architecture spec)
    falls out of the interfaces, not out of instrumentation added later.
@@ -149,7 +151,7 @@ Scale profile: implementation = RabbitMQ producer. Same signature (rule 6).
 | S2 Parser → Match → Planner → SpecGen | in-process typed calls passing A1 → draft spec → A5; **not** HTTP | modules of one service; the artifact types are the interface |
 | S3 KB ⇄ publishers | `GET capability file` (+ `ETag`/`If-None-Match` for refresh) | pull @ bootstrap + explicit refresh; never per-experiment |
 | S4 Match ⇄ CTP | `POST /ctp/query {criteria}` → `{pointers[], available, requested}` | partial counts are valid answers, not errors |
-| S5 Scheduler ⇄ workers | A7 claim + A8 status (pull; workers initiate everything) | replaces orchestrator→container push; NAT-proof by construction |
+| S5 Scheduler ⇄ workers | A7 claim + A8 status through a **rendezvous channel**: both sides dial *out* to a mutually reachable point. T1 binding = the local scheduler (localhost HTTP, no broker). T2/T3 binding = a broker provisioned *with* the pool by its connector (`deploy()` returns worker handles + channel endpoint); the channel carries both work items and results (unifies with S8/D3). | **Key constraint (Arpit, 07-02): the orchestrator lives on a laptop with no public IP** — netUnicorn could assume a publicly reachable core/gateway; Pramana cannot. At T3 *neither* side is reachable, so a rendezvous is the only universal pattern. No standing server is ever required: the rendezvous ships and dies with its pool. |
 | S6 Orchestrator ⇄ connectors | `get_nodes() → PoolSpec/NodeDescriptors` · `deploy(pool_spec)` · `execute(worker, bootstrap_cfg)` · `stop(worker)` | netUnicorn's protocol verbatim; one connector = one plug-in |
 | S7 Worker ⇄ CTP/NetGent | `GET` by pointer (CTP payload, workflow file), local cache, skip-if-cached | data plane; outside shaped namespaces |
 | S8 Worker ⇄ Telemetry | `publish(ResultEnvelope)` | profile-swappable implementation |
@@ -197,9 +199,11 @@ read CTP contents, the feature belongs elsewhere.
 
 ## 6. Open interface questions
 
-| # | Question |
+All four resolved 2026-07-02 (Arpit):
+
+| # | Resolution |
 |---|---|
-| I1 | Clarification session shape: single round (all questions at once, netUnicorn-style fail-fast) vs. iterative rounds? Lean: single batched round per compile attempt. |
-| I2 | WorkItem transport in the scale profile: same RabbitMQ instance as results, or plain HTTP polling against the scheduler everywhere? Lean: HTTP polling everywhere (S5 stays profile-invariant), broker for results only. |
-| I3 | Where does the spec hash → already-collected-data dedupe check live: Planner (skip dispatch) or Telemetry (reject duplicate)? Lean: Planner asks Telemetry (`GET /results?spec_hash=`), keeping Telemetry passive. |
-| I4 | Does `verify.tolerance` failure fail the iteration or annotate it? Lean: annotate + flag; the researcher decides — hard-fail is a paper-killer if tolerances are miscalibrated. |
+| I1 | **Iterative Q&A** for clarification — conversational, one question at a time, recompile as answers land. Riders: a round cap with batch-the-rest fallback (LLM-cost guard, per the Zoom-sweep API-credit lesson) and a "use defaults for everything else" escape hatch. Match is stateful per session. |
+| I2 | **Rendezvous channel** (supersedes both original options). Interface: `claim()/heartbeat()/publish()` everywhere; binding varies — T1: local scheduler over localhost HTTP (no broker); T2/T3: broker provisioned *with* the pool by its connector, carrying both dispatch and results. Driven by the no-public-IP constraint: the laptop orchestrator can never be assumed reachable (netUnicorn assumed a public core; Pramana must not). No standing infrastructure — the rendezvous ships and dies with its pool. |
+| I3 | **User-level dedupe tool** — no automatic skipping; a CLI diffs a spec against telemetry (`spec ∩ existing = residual spec`) so intentional repeats are always possible. Rider: the planner may *warn* on overlap (never auto-skip); the tool must be prominent, or the 07-01 "don't repeat data" requirement becomes empty discipline. |
+| I4 | **Annotate, never discard** — every ResultEnvelope carries measured-vs-requested + `within_tolerance`; collection always completes; filtering is analysis-time. Riders: the flag must be loud in exports, and the scheduler alarms on per-worker tolerance-failure *rates* (a systematically broken worker must not annotate garbage all night). |
