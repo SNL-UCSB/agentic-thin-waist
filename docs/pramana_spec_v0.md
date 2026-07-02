@@ -1,52 +1,74 @@
-# Pramana Architectural Spec — v0 (Convergence Draft)
+# Pramana Architectural Spec — v0.1 (Convergence Draft)
 
-**UCSB SNL · 2026-07-01 · Status: DRAFT for team convergence**
+**UCSB SNL · 2026-07-01 · Status: CONVERGED DRAFT — 7 of 9 forks resolved; 2 remain
+open with accepted leans (§9). Ready as agenda for the team spec meeting.**
 
-Synthesized from: 07-01 meeting (orchestrator architecture, persistent worker pool, Zoom
-data collection), `docs/vision.md` (April 1), `docs/thin_waist_one_pager.md` (April 10),
-`docs/verification_gap.md` (May 12), and the current implementation state of this repo.
+Synthesized from: the 07-01 architecture meeting (Arpit, Jaber, Haarika, Manni;
+transcript in #pramana-v2), the March–April taskforce decisions
+(#agentic-thin-waist-taskforce), `docs/vision.md`, `docs/thin_waist_one_pager.md`,
+`docs/verification_gap.md`, the HotNets draft (`Pramana_Hotnets`), the SIGCSE draft
+(`SIGSCE_Pramana`), and an implementation audit of this repo.
 
-Purpose: this is the "very complete spec of what the software needs to do" that the
-meeting closed on. Sections marked **[OPEN]** are unresolved forks that need an explicit
-team decision — they are collected in §9.
+Purpose: the "very complete spec of what the software needs to do" that the 07-01
+meeting closed on. **[OPEN]** marks unresolved forks, collected in §9.
+**[RESOLVED 07-01]** marks decisions made during convergence review of this draft.
 
 ---
 
-## 1. Design principles (re-affirmed 07-01)
+## 0. Decision lineage (how we got here)
 
-1. **Dumb services, smart controller.** All intelligence lives in the orchestrator's
-   intent-facing layer. Every downstream service is a deterministic executor.
-2. **LLM only at the intent boundary.** The intent parser may use an LLM. The planner,
-   scheduler, and all execution paths are deterministic code ("we can use LLM to
-   generate the code, but I want deterministic code at any case").
-3. **Orchestrator facilitates communication, never carries data.** Bulk data (pcaps,
-   CTPs, workflows) moves directly between services; the orchestrator moves pointers.
-   *(Known deviation today: pcaps flow through the orchestrator — see §6.3.)*
-4. **API-optional operation.** The system must be drivable without any LLM/API call:
-   a user (or a for-loop) can submit fully-specified experiment JSONs directly. The
-   LLM path is a convenience layer on top, never a dependency of the execution path.
-5. **No spec the orchestrator doesn't understand.** If required information is missing
-   (credentials, meeting codes, server endpoints), the orchestrator must ask the user —
-   backflow — rather than emit a spec that will fail downstream.
-6. **Disaggregation with chosen granularity, not maximal disaggregation.** Per-iteration
-   teardown is an extreme point of the design space we explicitly reject.
+| Date | Decision | Status |
+|---|---|---|
+| Mar 30 | Only two persistent services (orchestrator + CTP); **ephemeral per-iteration data-gen Dockers**; push-based status; telemetry co-located with orchestrator. | Ephemeral part **reversed 07-01** |
+| Apr 1 | Seven design principles (§1); local-first beats full-cloud; NetGent demoted to dumb executor. | Standing |
+| Apr 2 | Hub-and-spoke: every service talks only to the orchestrator; services location-agnostic; NetGent = "a registry of capabilities… a catalog of CLI tools." | Standing (data-plane exception §6.3) |
+| Apr 7 | From Osprey analysis: adopt typed events, retriable errors, connector abstraction; **never** LLM-generated code in the execution path. | Standing |
+| Jul 1 | Persistent worker pool ("a bit of a no-brainer — these dockers don't need to be ephemeral" — Arpit); orchestrator decomposition (§3); taxonomy (§2); capability publishing (§4); telemetry decoupling (§6.2). | This spec |
+
+## 1. Design principles
+
+The seven taskforce principles (Apr 1, verbatim) remain the constitution:
+
+1. Mininet bar for onboarding
+2. Minimal long-term maintenance dependencies
+3. All intelligence in orchestrator, everything else is dumb
+4. Separation of concerns (dev workflows ≠ production service)
+5. No data through orchestrator
+6. Portability via configuration, not code changes
+7. User simplicity > implementation simplicity
+
+Refinements re-affirmed or added 07-01:
+
+- **LLM only at the intent boundary.** The intent parser may use an LLM. Planner,
+  scheduler, and all execution paths are deterministic ("we can use LLM to generate
+  the code, but I want deterministic code at any case" — Arpit). Corollary of the
+  Apr 7 rule: never LLM-generated code in the execution path.
+- **API-optional operation.** The system must be drivable without any LLM/API call: a
+  user (or a for-loop) can submit fully-specified experiment JSONs directly. The LLM
+  path is a convenience layer, never a dependency of execution (Jaber's opening item).
+- **No spec the orchestrator doesn't understand.** If required information is missing
+  (credentials, meeting codes, endpoints), the orchestrator must ask the user
+  (backflow) rather than emit a spec that will fail downstream (Arpit).
+- **Disaggregation with chosen granularity.** Per-iteration teardown is "an extreme
+  point in the design space, we should not go [to]" (Arpit). Persistence level is a
+  parameter, not a fixed property.
 
 ## 2. Taxonomy (agreed 07-01)
 
 | Term | Definition |
 |---|---|
 | **Intent** | User's natural-language or structured request. May expand into an experiment set. |
-| **Experiment set** | The set of experiments produced by one intent. Tree-structured; internal nodes are parameter sweeps. |
-| **Experiment** | A leaf node: one unique combination of *static context* (NetReplica knobs: capacity, latency, buffer, AQM, CC) + *application context* (one NetGent workflow + args) + *dynamic context* (one CTP). Same spec ⇒ same experiment. Different application ⇒ different experiment. |
-| **Iteration** | A repeated run of the same experiment (`num_iterations` field in the experiment JSON). No teardown between iterations. |
-| **Spec** | The compiled, fully-concrete artifact: a list of experiment JSONs (the "filled-out form"). Post-spec execution requires no AI assistance. |
+| **Experiment set** | The set of experiments produced by one intent. Tree-structured; internal nodes are parameter sweeps; leaves are experiments. |
+| **Experiment** | A leaf: one unique combination of *static context* (NetReplica knobs: capacity, latency, buffer, AQM, CC) + *application context* (one NetGent workflow + args) + *dynamic context* (one CTP). Same spec ⇒ same experiment. Different application ⇒ different experiment. |
+| **Iteration** | A repeated run of the same experiment (`num_iterations` in the experiment JSON). No teardown between iterations. |
+| **Spec** | The compiled, fully-concrete artifact: a list of experiment JSONs plus node declarations (§5.2) — "that filled-out form doesn't need any AI assistance… whatsoever" (Manni). |
 
 ## 3. Intent plane — module decomposition
 
 User-facing flow (order is normative):
 
 ```
-User ──> UI (REST: /intent, /experiment-status, ...)
+User ──> UI (REST: /intent, /experiment-status, ...)   ── UI is NOT the orchestrator
            │
            v
    ┌──────────────────── Orchestrator ────────────────────┐
@@ -57,47 +79,57 @@ User ──> UI (REST: /intent, /experiment-status, ...)
    │ 3. Match           (intent vs. capabilities → yes/no │
    │       + backflow queries to user for missing info)   │
    │ 4. Planner         (deterministic; grouping,         │
-   │       worker-pool assignment, prefetch plan)         │
-   │ 5. Spec Generator  (emits experiment-set spec:       │
-   │       list of experiment JSONs from spec template)   │
+   │       node/worker assignment, prefetch plan)         │
+   │ 5. Spec Generator  (emits experiment-set spec from   │
+   │       the spec template)                             │
    │ 6. Scheduler       (dispatch experiments to worker   │
    │       pool; simple queue + semaphore)                │
    └───────────────────────────────────────────────────────┘
 ```
 
-Notes:
-
-- **UI is not the orchestrator.** The current implementation overloads "orchestrator"
-  to mean UI + controller + everything. These are separate modules even if co-deployed.
-- **Match is a distinct module** producing (a) a boolean per requirement, (b) concrete
-  values filled into the spec template, (c) a query list for the user (backflow) when
-  required parameters are unknowable (passwords, meeting codes, endpoints).
-- **Planner is rule-based v1.** Grouping rules: iterations of an experiment always
-  colocate sequentially on one worker (no teardown); experiments sharing sticky context
-  (same CTP batch, same static config) group for prefetch benefit. No dynamic/LLM
-  planning yet.
+- The current implementation overloads "orchestrator" to mean UI + controller +
+  everything ("our orchestrator is essentially an orchestrator and controller in the
+  same" — Manni). These are separate modules even if co-deployed.
+- **Match** produces (a) a boolean per requirement, (b) concrete values filled into
+  the spec template, (c) a query list for the user (backflow) when required parameters
+  are unknowable (passwords, meeting codes, endpoints).
+- **[RESOLVED 07-01] Secrets live in a local, gitignored secrets file** on the user's
+  machine, referenced from the spec by key (e.g. `$secrets.netflix_password`).
+  Backflow asks once, writes locally; specs stay shareable; nothing credential-shaped
+  is ever persisted server-side or in telemetry. NetGent continues masking secret
+  params in logs.
+- **Planner is rule-based v1**: iterations of an experiment colocate sequentially on
+  one worker; experiments sharing sticky context (CTP batch, static config) group for
+  prefetch. No dynamic/LLM planning.
 - **Scheduler v1 = FIFO over the worker pool with a semaphore.** Whoever finishes takes
-  the next experiment. **[OPEN — §9.Q1]** queuing policy beyond v1.
+  the next experiment. Policy beyond v1: **[OPEN — §9.Q1]**.
+- Vocabulary note: the team's operative framing is **hub-and-spoke + disaggregation**;
+  the Intent/Representation/Execution "planes" wording in `CLAUDE.md` appears nowhere
+  in the papers or Slack and should be retired in favor of the paper vocabulary
+  (*generative empirical backend*; *empirical thin waist*; the **intent specification**
+  is the waist).
 
 ## 4. Knowledge base & capability publishing
 
 Each downstream service publishes a **capability file**; the knowledge base ingests all
-of them at bootstrap and refreshes by **pull** (NAT forbids broadcast to workers; a
-persistent connection may later enable push, but pull is the v1 contract).
+of them at bootstrap and refreshes by **pull** (workers behind NAT forbid broadcast;
+a persistent connection may later enable push, but pull is the v1 contract).
 
 | Service | Capability representation | Refresh model |
 |---|---|---|
-| **NetGent** | Per-workflow metadata: application, client/server workflow files, CLI-style parameters (duration, video, resolution, …), which are mandatory vs. optional + defaults, and *prerequisites* (account, meeting code, password, server endpoint). | Public repo/service; pull at bootstrap, re-pull on demand. Substrate workers pull workflow files directly by URL derived from the index. |
-| **NetReplica** (static knobs) | Static file: supported knobs and value ranges (capacity, latency, buffer, AQM, CC). Ships with the substrate; pulled from master at bootstrap. Changes at low cadence. | One-time at bootstrap. |
-| **CTP Service** | *Not* a static file — a **pointer to a queryable database**. Capability = the query schema (criteria: throughput range, active users, burstiness, direction, cluster id, transformed-or-not). Match queries it live; responses are pointers, possibly partial ("3,000 of the 10,000 you asked for"). | Live query at match time. |
+| **NetGent** | Per-workflow metadata: application, role workflows (§5.2), CLI-style parameters (duration, video, resolution, …), mandatory vs. optional + defaults, and *prerequisites* (account, meeting code, password, server endpoint). | Public repo/service; pull at bootstrap, re-pull on demand. Workers pull workflow files directly by URL derived from the index. |
+| **NetReplica** (static knobs) | Static file: supported knobs and value ranges (capacity, latency, buffer, AQM, CC). Ships with the substrate; pulled from master at bootstrap. Low cadence. | One-time at bootstrap. |
+| **CTP Service** | *Not* a static file — a **pointer to a queryable database**. Capability = the query schema (throughput range, active users, burstiness, direction, cluster, transformed-or-not). Match queries it live; responses are pointers, possibly partial ("3,000 of the 10,000 you asked for" is a valid answer, not an error). | Live query at match time. |
 | **Telemetry** | Storage/query API; capacity constraints (disk, connection pool). | Static config. |
 
 Rules:
 
-- Capability sync is **not** in the per-experiment runtime path. Runtime never blocks on
-  capability discovery; it happens at bootstrap and on explicit refresh.
-- The capability file is authored by the service developer today (the "capability doc");
-  automated synthesis is future work.
+- Capability sync is **never** in the per-experiment runtime path ("you should not be
+  bloating up the runtime workflow with things that don't need actions" — Arpit).
+  Bootstrap + explicit refresh only. The current per-request `index.json` fetch is the
+  named anti-pattern.
+- Capability files are hand-authored by service developers for now; automated
+  synthesis is future work.
 - The knowledge base has a per-service **parser**; adding a service means adding a
   parser + capability file, not modifying match/planner.
 
@@ -106,116 +138,181 @@ Rules:
 ### 5.1 Persistent worker pool (the headline change)
 
 - Substrate workers are **persistent Docker containers created at bootstrap**, not
-  ephemeral per-experiment containers. Pool size is a bootstrap parameter with a sane
-  default derived from host resources; user-configurable, never exceeded.
-- Docker images are **prebuilt and pulled from a registry** (Docker Hub / ECR). Build
-  happens at most once at bootstrap if no image is available. Build is never in the
+  ephemeral per-experiment containers. Pool size is a bootstrap parameter with a
+  resource-derived default (laptop ≈ 10, server up to ~1000); user-configurable,
+  never exceeded silently.
+- Docker images are **prebuilt and pulled from a registry** (Docker Hub `snlhub/*` /
+  ECR). Build happens at most once at bootstrap if no image is available; never in the
   runtime path.
-- Measured motivation: per-experiment overhead today is 150–200 s of a 250–300 s
-  container lifetime (Zoom: 30 s of useful experiment). Ephemeral→persistent is the
-  single biggest efficiency win identified.
-- **Ephemeral mode** may remain behind a flag for isolation-critical studies.
-  **[OPEN — §9.Q2]**
-- Single-user model for v1. Interference between concurrent experiment sets on one pool
-  is acknowledged and not solved in v1.
+- Measured motivation: 150–200 s non-experiment overhead per 250–300 s container
+  lifetime (Zoom: 30 s useful experiment; Docker daemon overload at 50–100 concurrent
+  containers). Expected ~3× speedup.
+- **[RESOLVED 07-01] Ephemeral mode is deleted, not flagged.** Isolation-critical
+  studies get *fresh-worker-per-experiment* as a **pool recycling policy** (pool-of-1
+  semantics): one dispatch path, persistence level expressed in the spec, no second
+  code path.
+- Single-user model for v1. Cross-experiment interference on a shared pool is
+  acknowledged and not solved in v1.
 
-### 5.2 Worker categories & service nodes (netUnicorn node abstraction)
+### 5.2 Node abstraction **[RESOLVED 07-01: adopt netUnicorn nodes now]**
 
-Worker pools are **typed by persistence level**: a worker can be bound at the
-*iteration*, *experiment*, or *experiment-set* level. This is expressible in the spec.
+The spec template adopts the **netUnicorn node/pipeline abstraction** immediately,
+rather than a minimal client/server annotation:
 
-Long-running **service endpoints** (Zoom broadcaster, Puffer server, iperf server) are
-*not* pool workers. They are separate **nodes** with their own workflow specification
-(netUnicorn's node/pipeline decoupling), persistent for the lifetime of the experiment
-set that declares them. Client workflows reference them by endpoint parameter.
+- A **node** is any execution endpoint: a pool worker, a long-running service endpoint
+  (Zoom broadcaster, Puffer server, iperf server), or a remote host.
+- Every node carries a **pipeline** (an ordered list of NetGent workflows + parameters)
+  and a **persistence level** (`iteration` | `experiment` | `experiment_set`).
+- The spec declares nodes and a **mapping** of pipelines → nodes → substrate
+  (connectivity backend). Client workflows reference service nodes by name; the
+  orchestrator resolves name → endpoint at dispatch.
+- This subsumes the client/server question (client+server = two nodes; multi-party
+  conferencing = N nodes; peer-to-peer = symmetric nodes: "the one who is listening
+  and waiting would be considered the server" — Jaber). A DAG-structured workflow
+  language remains rejected as overkill; ordering needs are covered by pipeline order
+  within a node plus node startup precedence (service nodes start before pool
+  dispatch).
+- Sketch:
 
-- Every application capability declares which roles it needs: client-only, or
-  client+server. (Peer-to-peer reduces to "the listener is the server".)
-  Two workflows per application is the v1 ceiling; a DAG-structured workflow spec was
-  considered and rejected as overkill for now. **[OPEN — §9.Q3]**
-- Server/broadcaster workflows live in the official NetGent repo like any other
-  workflow ("anything you do on a host from a workflow perspective is NetGent").
-- How the persistent node is *declared in the spec template* is unresolved.
-  **[OPEN — §9.Q4]**
+```yaml
+experiment_set:
+  nodes:
+    - name: broadcaster
+      pipeline: [zoom_broadcaster_av]
+      persistence: experiment_set
+      params: {meeting_code: $ASK_USER, video: local_loop.mp4}
+    - name: pool
+      count: 50
+      persistence: experiment        # recycle per experiment; pool-of-1 => iteration
+      pipeline: [zoom_client]        # + ctp_replay applied by substrate
+  mapping:
+    pool: local_docker
+    broadcaster: snl-server-5
+  experiments:                        # leaves; each fills the spec template
+    - static: {capacity: 10mbps, latency: 10ms, aqm: codel}
+      application: {workflow: zoom_client, server: broadcaster, duration: 30s}
+      ctp: [c303, c304, ...]          # pointer list, batch-prefetched
+      iterations: 1
+```
+
+- Rationale for going straight to nodes: it is the abstraction netUnicorn already
+  validated ("we already had that implemented in NetUnicorn. All we have to think
+  about is how do we integrate" — Arpit), it kills the 1M-second-experiment
+  broadcaster hack, and it prevents a second spec-schema migration two months from
+  now.
+- Server/broadcaster workflows live in the official NetGent repo like any workflow
+  ("anything you do on a host from a workflow perspective is NetGent"). Haarika's
+  broadcaster A/V workflow gets upstreamed.
 
 ### 5.3 Per-experiment execution sequence (worker-local)
 
 1. Receive experiment JSON (pointerized: CTP pointers, workflow URL, static knobs).
-2. Prefetch: download CTP batch **outside the shaped namespace** (unshaped path);
-   cache locally (Redis or plain disk cache). Prefetch is plannable ahead of dispatch
-   because the planner pre-assigns experiments to workers.
+2. **Prefetch**: download CTP batch outside the shaped namespace (unshaped path);
+   cache locally. Plannable ahead of dispatch because the planner pre-assigns
+   experiments to workers.
 3. Network setup: apply static knobs inside the namespaces (~1 s; cheap).
 4. Pull NetGent workflow by URL (cheap, cacheable).
 5. Run iterations 1..N with no teardown between them; CTP replay per iteration.
-6. Buffer telemetry locally (provisioned disk); publish results asynchronously (§6).
-7. Reset network config between experiments; container persists.
+6. Buffer telemetry locally (provisioned disk); publish asynchronously (§6.2).
+7. Reset network config between experiments; container persists per its persistence
+   level.
 
 ## 6. Representation plane
 
 ### 6.1 CTP service — two-step contract
 
-- **Step 1 (match):** query by criteria → pointers + availability count (may be
-  partial; partial counts are a valid response, not an error).
+- **Step 1 (match):** query by criteria → pointers + availability count (partial
+  counts are valid responses).
 - **Step 2 (fetch):** worker downloads CTP payloads directly by pointer.
-- A **local CTP source** must be an officially supported step-1 bypass (pointer to a
-  local/user-provided corpus) — currently a Zoom-sweep hack, to be promoted to a
-  feature.
-- Batch semantics: an experiment set carries the full CTP pointer list; workers download
-  in batches (e.g., 100 at a time), not one-per-iteration.
+- A **local CTP source** is an officially supported step-1 bypass (pointer to a
+  local/user-provided corpus) — promoted from Haarika's Zoom-sweep hack.
+- Batch semantics: the experiment set carries the full CTP pointer list; workers
+  download in batches (e.g., 100 at a time), never one-per-iteration.
 
-### 6.2 Telemetry service
+### 6.2 Telemetry service **[RESOLVED 07-01: RabbitMQ]**
 
 - Non-ephemeral, user-accessible; never torn down as part of experiment lifecycle.
-- Worker-side results are deleted only after confirmed upload (no duplicates kept).
-- **Decoupled upload:** telemetry transfer is asynchronous to experiment execution via a
-  pub/sub queue (Kafka/RabbitMQ class; exact choice open **[OPEN — §9.Q5]**). Sync
-  point is end-of-experiment-set, not end-of-experiment. Horizontally scalable uploader.
-- Provisioning is spec-relevant: Postgres connection pool sized ~10–20× concurrent
-  experiment count; disk sized for the experiment set; experiments must fail fast if
-  storage is insufficient (no silent stall).
+- **Decoupled upload via RabbitMQ**: workers publish result-ready events + artifacts
+  to a queue; a horizontally-scalable uploader consumes and persists to telemetry
+  (Postgres + S3/MinIO). Execution never blocks on upload; sync point is
+  end-of-experiment-set, not end-of-experiment. Durability across worker death is the
+  reason a real broker won over buffer-and-retry.
+- Worker-side results are deleted only after confirmed upload.
+- Provisioning is spec-relevant: Postgres connection pool ~10–20× concurrent
+  experiment count; disk sized for the experiment set; experiments fail fast if
+  storage is insufficient (no silent stall — the observed telemetry-full hang is a
+  bug class this eliminates).
 
-### 6.3 Known deviation
+### 6.3 Known deviation (data plane)
 
-Today pcaps flow substrate→orchestrator→telemetry (NAT-driven). Target: substrate
-publishes directly to the telemetry queue; orchestrator only carries the pointer.
+Today pcaps flow substrate→orchestrator→telemetry (NAT-driven), violating principle 5.
+Target: substrate publishes directly to the RabbitMQ/telemetry path; the orchestrator
+only ever carries pointers.
 
 ## 7. Observability & verification
 
-- **Stage-level tracing is mandatory**, not best-effort: docker-up, host-setup,
-  CTP-fetch, net-setup, workflow-pull, run, telemetry-publish, teardown — each
-  timestamped so waterfall diagrams fall out of logs. (Today's numbers are ±10 s
-  polling estimates; that is not acceptable for the optimization loop.)
-- Success metric: **non-experiment overhead ≪ experiment duration** per experiment.
-- Spec→Substrate verification (per `docs/verification_gap.md`): post-hoc active probing
-  that the requested bottleneck regime was realized, implemented inside the substrate
-  worker. This is the tractable first verification layer and should be in the spec now.
-- Intent→Spec verification: the match/backflow mechanism (§3) is the v1 answer; deeper
-  verification is a named open problem, not overclaimed.
+- **Stage-level tracing is mandatory**: docker-up, host-setup, CTP-fetch, net-setup,
+  workflow-pull, run, telemetry-publish, teardown — each timestamped by the component
+  doing the work, so waterfall diagrams fall out of logs. (Today's ±10 s pre-up/post-
+  down polling is not acceptable for the optimization loop.)
+- Success metric: **non-experiment overhead ≪ experiment duration**.
+- **Spec→Substrate verification** (per `docs/verification_gap.md`):
+  **[RESOLVED 07-01: in summer scope, minimal form.]** Systematize what `/shape`
+  already half-does: after network setup, actively probe capacity/latency/queue,
+  record `verified` + measured-vs-requested values into telemetry with **every**
+  experiment. Every dataset then ships with realized-regime ground truth — the
+  cheapest credibility primitive available for HotNets/NSDI. The full verification
+  layer (per-stage checks, tolerance policies, failure semantics) stays post-HotNets.
+- **Intent→Spec verification**: the match/backflow mechanism (§3) is the v1 answer —
+  it directly addresses the classroom-reported intent/spec mismatch. Deeper
+  verification is a named open problem (do not overclaim in papers).
 
-## 8. Data-collection commitments (context, from 07-01)
+## 8. Commitments, owners, deadlines (07-01)
 
-- Zoom: 20k data points (10 Mbps × {10 ms, 100 ms}; capacity sweep dropped), ~10k
-  already collected; 3 servers in parallel; data by **Monday 07-06**, hard by mid-week.
-  Persistent-worker patchwork proceeds in parallel on a branch — no holistic rewrite
-  on the critical path.
-- Puffer: India team runs collection (~8k/8 h); sanity-check their upstream bandwidth;
-  embeddings come back to us, raw data stays there.
-- Undergrad track (off critical path): more applications, CTP service maturation,
-  telemetry features (queue occupancy, QoE extraction), analysis tooling.
-
-## 9. Open questions for convergence **[the ask]**
-
-| # | Question | Options / current lean |
+| Track | Owner | Deadline |
 |---|---|---|
-| Q1 | Scheduler policy beyond v1 FIFO: do users ever need completion-order control (per-experiment-set priority, fair-share)? | Lean: FIFO + semaphore is enough for single-user v1; revisit only with evidence. |
-| Q2 | Keep ephemeral mode behind a flag, or delete it to simplify? ("the code is insane") | Meeting leaned keep-a-flag (Jaber) vs. delete (Eugene). Unresolved. |
-| Q3 | Is client+server (2 workflows/app) sufficient, or do we need N-role workflows now (multi-party conferencing with heterogeneous roles)? | Lean: 2 roles for v1; broadcaster+receivers already fits (broadcaster=server-role). |
-| Q4 | Spec-template syntax for persistent nodes: how does the spec declare "this node runs workflow W for the lifetime of the experiment set"? (Today: hacked via 1M-second experiment duration.) | Undesigned. Needs a proposal — likely a `services:` block at experiment-set scope. |
-| Q5 | Telemetry transport: RabbitMQ, Kafka, Redis streams, or plain S3-multipart + retry? | Undecided; "don't over-engineer" was voiced. |
-| Q6 | Who sizes fan-out (rooms, server instances): user-supplied via UI prompt, or planner heuristic? | Meeting: push to user for v1 (e.g., Zoom max 2 rooms/account). |
-| Q7 | Credentials/secrets: in-intent (masked), a secrets file, or env-var store? Constraint: never persist user credentials server-side. | Undecided; NetGent already masks passwords as workflow params. |
-| Q8 | Rewrite vs. patchwork trajectory: after the worker-pool patch, what is the sequence for decomposing the orchestrator into §3's modules? | Meeting deferred; needs an ordered migration plan with owners. |
-| Q9 | Verification scope for v1: is Spec→Substrate active probing in or out of the summer scope? | `verification_gap.md` argues in; not discussed 07-01. |
+| Zoom data: 20k points (10 Mbps × {10 ms, 100 ms}; capacity sweep dropped; ~10k done), ~3 servers in parallel, on the current suboptimal system | Haarika | **Mon Jul 6** (hard: mid-week) |
+| Persistent worker pool patchwork, on a branch, no holistic rewrite on the critical path | Manni | with/just after Zoom data |
+| Orchestrator code cleanup (dead code, comments) after eval write-up | Haarika | ~Jul 2–3 |
+| Puffer: India team collects (~8k/8h); sanity-check their upstream bandwidth; embeddings come back, raw data stays | Jaber (liaison: Haarika) | before HotNets analysis |
+| SIGCSE paper: submit current draft on EasyChair, pull latest from GitHub before compiling | Jaber | **Jul 3** |
+| Undergrad track (off critical path): more applications, CTP service maturation, telemetry features (queue occupancy, QoE), analysis tooling | Jaber coordinates | summer |
+| This spec: converge, then "identify in the spec who needs to do what" | all | next architecture meeting |
+
+**[RESOLVED 07-01] Summer scope = all four tracks**, sequenced so the pool patchwork
+never blocks data collection:
+
+1. **Persistent worker pool** (patchwork, branch) — Manni.
+2. **Capability files + knowledge base** (author NetGent/NetReplica capability files;
+   bootstrap ingest replaces runtime index.json queries).
+3. **Match + backflow** (split the experiment checker; missing-info queries to the
+   user instead of "specification not provided" failures).
+4. **Telemetry decoupling via RabbitMQ** (§6.2).
+
+**[RESOLVED 07-01]** Owners for tracks 2–4 are assigned at the next team spec meeting
+— first agenda item, with this document as the agenda. (Capability-file authoring
+naturally splits per service owner.)
+
+## 9. Decision register
+
+Resolved during convergence review (2026-07-01, Arpit):
+
+| # | Fork | Decision |
+|---|---|---|
+| D1 | Persistent-node declaration in the spec template | **Adopt netUnicorn node/pipeline abstraction now** (§5.2) — not a minimal `services:` annotation, not the duration hack. |
+| D2 | Summer decomposition scope | **All four tracks** (§8): worker pool, capability files + KB, match + backflow, telemetry decoupling. |
+| D3 | Telemetry transport | **RabbitMQ** (§6.2) — durability across worker death won over buffer-and-retry. |
+| D4 | Ephemeral mode | **Delete; pool-of-1 recycling policy** covers isolation (§5.1). One dispatch path. |
+| D5 | Secrets | **Local gitignored secrets file**, spec references by key (§3). |
+| D6 | Spec→Substrate verification | **In summer scope, minimal form** (§7). |
+| D7 | Track 2–4 ownership | **Assign at next meeting**; this doc is the agenda. |
+
+Remaining open, with accepted leans (revisit only with evidence):
+
+| # | Question | Accepted lean |
+|---|---|---|
+| Q1 | Scheduler policy beyond v1 FIFO (per-set priority, fair-share)? | FIFO + semaphore suffices for single-user v1. |
+| Q2 | Fan-out sizing (rooms/server instances per experiment set): user or planner? | Push to user via UI for v1 (Zoom caps 2 rooms/account anyway); the node abstraction makes the count an explicit spec field. |
 
 ## 10. Delta vs. current implementation
 
@@ -223,42 +320,46 @@ Audit of this repo (2026-07-01). Legend: ✅ done · 🟡 partial · ❌ missing
 
 | Spec element (§) | Current state | Δ |
 |---|---|---|
-| Intent parser (§3.1) | LangGraph agent in `services/orchestration` (`parse_intent → generate_experiments → execute_experiments → respond`); 21 test files; the most mature module. | ✅ |
-| UI ≠ orchestrator (§3) | One service does UI+controller+everything; `orch_cli.py` is the only separate surface. Meanwhile `services/experiment-api` (:8000) — the "smart controller" of CLAUDE.md — is a 65-line in-memory stub whose role was absorbed by orchestration (:8005). | 🟡 |
-| Knowledge base + capability publishing (§4) | ❌ as designed. Workflow discovery queries `netgent-workflow/index.json` **at runtime per request** (exactly the anti-pattern the meeting rejected); no capability files, no bootstrap ingest, no per-service parsers. NetReplica knobs are hardcoded in orchestration knowledge/prompt files. | ❌ |
-| Match + backflow (§3, §7) | Monolithic "experiment checker"; on missing info it **fails** ("specification not provided") instead of querying the user. Classroom-reported mismatch between intent and generated spec, no verification loop. | 🟡 |
-| Planner (§3) | Does not exist. No grouping, no prefetch planning, no worker pre-assignment. | ❌ |
-| Spec generator (§2, §3) | `experiment_generator` emits list of experiment JSONs; deterministic `context` overrides supported. No stable, versioned spec-template schema; no persistent-node declaration; no ordering/roles. | 🟡 |
-| Scheduler + **persistent worker pool** (§5.1) | ❌. `ConnectivityManager.create_worker()`/`destroy_worker()` is strictly ephemeral per-spec; parallelism = `ThreadPoolExecutor(max_parallel_workers)`. No `worker_pool` concept anywhere in code. This is the agreed patchwork priority. | ❌ |
-| Worker categories / service nodes (§5.2) | ❌. Zoom broadcaster hack = 1M-second experiment blocking a worker; not in main. | ❌ |
-| Prebuilt images, no runtime build (§5.1) | `docker-compose.public.yml` overlay with `snlhub/*` prebuilt images just landed (PR #157). | ✅ |
-| CTP two-step + local-source flag (§6.1) | CTP service substantially implemented (extract/select/transform/merge); orchestration treats CTP as opt-in and defaults to a **hardcoded global instance** (`128.111.5.236:8001`). Local-corpus bypass is Haarika's Zoom hack, unsupported officially. Batch prefetch ❌. | 🟡 |
-| Telemetry decoupled upload (§6.2, §6.3) | ❌ as designed: orchestrator **pulls** pcaps from substrate and pushes to telemetry (`telemetry_capture_pull`) — the acknowledged deviation. No queue, no async uploader, sync is per-experiment. Telemetry service itself is solid (6 test files, migrations, S3 artifacts) but `GET /results` can't filter by `orchestration_id`. | ❌ |
-| Stage-level tracing (§7) | 🟡. `/qtrace` queue-occupancy tracing landed (CCAnalyzer-style analysis notebook); but lifecycle stage timing is still pre-up/post-down polling (±10 s) — no per-stage timestamps. | 🟡 |
-| Spec→Substrate verification (§7) | 🟡 seed exists: substrate `/shape` does post-hoc iperf3/ping verification (`verified`/`verification_log`). Not systematized per `verification_gap.md`. | 🟡 |
-| API-optional operation (§1.4) | 🟡. Deterministic overrides + per-request `workflow_source`/`workflow_id` + CLI exist, but there is no documented "submit a fully-formed spec, skip the LLM" entry point; classroom sweeps required hacking parsing out. | 🟡 |
+| Intent parser (§3.1) | LangGraph agent in `services/orchestration` (`parse_intent → generate_experiments → execute_experiments → respond`); 21 test files; the most mature intent-plane module. | ✅ |
+| UI ≠ orchestrator (§3) | One service does UI+controller+everything; `orch_cli.py` is the only separate surface. `services/experiment-api` (:8000) — the "smart controller" of CLAUDE.md — is a 65-line in-memory stub whose role was absorbed by orchestration (:8005). | 🟡 |
+| Knowledge base + capability publishing (§4) | ❌ as designed. Workflow discovery queries `netgent-workflow/index.json` **at runtime per request** (the named anti-pattern); no capability files, no bootstrap ingest, no per-service parsers. NetReplica knobs hardcoded in prompt/knowledge files. | ❌ |
+| Match + backflow (§3, §7) | Monolithic "experiment checker"; on missing info it **fails** ("specification not provided") instead of querying the user. Classroom-reported intent/spec mismatch; no verification loop. | 🟡 |
+| Planner (§3) | Does not exist. No grouping, no prefetch planning, no pre-assignment. | ❌ |
+| Spec generator (§2, §3) | `experiment_generator` emits experiment JSONs; deterministic `context` overrides supported. No stable versioned spec-template schema; no node declarations; no roles/ordering. | 🟡 |
+| Scheduler + **persistent worker pool** (§5.1) | ❌. `ConnectivityManager.create_worker()`/`destroy_worker()` is strictly ephemeral per-spec; parallelism = `ThreadPoolExecutor(max_parallel_workers)`. No `worker_pool` concept anywhere in code. The agreed patchwork priority. | ❌ |
+| Node abstraction (§5.2) | ❌. Zoom broadcaster hack = 1M-second experiment blocking a worker; lives on `Haarika-zoom` branch, not main. | ❌ |
+| Prebuilt images, no runtime build (§5.1) | `docker-compose.public.yml` overlay with `snlhub/*` prebuilt images landed (PR #157). | ✅ |
+| CTP two-step + local-source flag (§6.1) | CTP service substantially implemented (extract/select/transform/merge); orchestration treats CTP as opt-in and defaults to a **hardcoded global instance** (`128.111.5.236:8001`). Local-corpus bypass is the unsupported Zoom hack. Batch prefetch ❌. | 🟡 |
+| Telemetry decoupled upload (§6.2, §6.3) | ❌ as designed: orchestrator **pulls** pcaps from substrate and pushes to telemetry (`telemetry_capture_pull`) — the acknowledged deviation. No queue, no async uploader; sync is per-experiment. Telemetry service itself solid (6 test files, migrations, S3 artifacts) but `GET /results` can't filter by `orchestration_id`. | ❌ |
+| Stage-level tracing (§7) | 🟡. `/qtrace` queue-occupancy tracing landed (CCAnalyzer-style notebook); lifecycle timing is still pre-up/post-down polling (±10 s) — no per-stage timestamps. | 🟡 |
+| Spec→Substrate verification (§7) | 🟡 seed: substrate `/shape` does post-hoc iperf3/ping verification (`verified`/`verification_log`). Not systematized per `verification_gap.md`. | 🟡 |
+| API-optional operation (§1) | 🟡. Deterministic overrides + per-request `workflow_source`/`workflow_id` + CLI exist, but no documented "submit a fully-formed spec, skip the LLM" entry point; classroom sweeps required hacking parsing out. | 🟡 |
 | Substrate portability (paper claim) | `local_docker` ✅, `aws` hybrid 🟡, `gcp`/`remote` raise `NotImplementedError`. | 🟡 |
-| Shared contracts (`shared/`) | `shared/models/__init__.py` is **empty** and `shared/clients/` is a docstring, versus 500-line READMEs specifying `Experiment`, `BaseHTTPClient`, etc. Each service defines its own schemas — no single spec-template source of truth. | ❌ |
-| Substrate worker execution (§5.3) | Strongest execution-plane component: 15-CCA support with LD_PRELOAD shim + strict CI sweep, namespaces, capture, replay, qtrace. Recent work concentrated here. | ✅ |
+| Shared contracts (`shared/`) | `shared/models/__init__.py` is **empty** and `shared/clients/` is a docstring, versus 500-line READMEs specifying `Experiment`, `BaseHTTPClient`, etc. Each service defines its own schemas — no single spec-template source of truth. The spec template (§5.2) should land here. | ❌ |
+| Substrate worker execution (§5.3) | Strongest component: 15-CCA support with LD_PRELOAD shim + strict CI sweep, namespaces, capture, replay, qtrace. Recent work concentrated here. | ✅ |
 
 **Reading of the delta:** the *execution* half of the thin waist (substrate worker,
 CTP ops, telemetry storage, NetGent workflows) is in decent shape; the *intent* half
-matches the papers' narrative but not the meeting's module decomposition — knowledge
-base, match-with-backflow, planner, scheduler-over-pool are all missing or fused into
-one hard-to-modify service. The persistent worker pool is both the biggest measured win
-(150–200 s overhead per 30 s experiment) and the smallest architectural step, which is
-why it is the agreed patchwork.
+matches the papers' narrative but not this spec's module decomposition — knowledge
+base, match-with-backflow, planner, and scheduler-over-pool are missing or fused into
+one hard-to-modify service ("this is a mega effort… essentially removing all of what
+orchestrator does right now" — Manni). The persistent worker pool is both the biggest
+measured win (150–200 s overhead per 30 s experiment) and the smallest architectural
+step — hence the patchwork-first sequencing.
 
 ### Naming/terminology alignment (papers ↔ code)
 
-- Papers (HotNets draft `Pramana_Hotnets`, SIGCSE `SIGSCE_Pramana`) call the system
-  **Pramana**, a *generative empirical backend*; "empirical thin waist" is the shape,
-  and the waist artifact is the **intent specification**. The codebase should adopt
-  "intent spec / experiment spec" naming to match.
-- Papers credit **NetReplica** as the conditions layer; the code implements it as
-  CTP Service + Substrate Worker and never says NetReplica. The capability file for
-  static knobs (§4) should be named NetReplica capabilities to keep the vocabulary
-  consistent with the writing.
-- The paper's six-service table says "only the orchestrator holds intelligence" — the
-  meeting's module decomposition (§3) is the *internal* structure of that one
-  intelligent box and does not contradict the published architecture.
+- Papers (HotNets `Pramana_Hotnets`, SIGCSE `SIGSCE_Pramana`) call the system
+  **Pramana** (Sanskrit: *evidence*), a *generative empirical backend*; "empirical
+  thin waist" is the shape; the waist artifact is the **intent specification**. Code
+  and docs should adopt this vocabulary ("we are pivoting to Pramana more
+  aggressively" — Arpit, 07-01).
+- Papers credit **NetReplica** as the conditions layer; the code implements it as CTP
+  Service + Substrate Worker and never says NetReplica. The static-knob capability
+  file (§4) should be named NetReplica capabilities to match the writing.
+- The papers' six-service table ("only the orchestrator holds intelligence") is
+  compatible with this spec: §3 is the *internal* structure of the one intelligent
+  box.
+- Related external artifacts: Eugene's design doc (Google Docs, MCP-based variant at
+  `EugeneVuong/agentic-thin-waist`) should be reconciled with or superseded by this
+  spec.
