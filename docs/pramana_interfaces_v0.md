@@ -148,6 +148,65 @@ outbound-only; replaces today's `telemetry_capture_pull`, which double-hops ever
 pcap through the laptop's uplink mid-experiment). T3 binding: broker, if ever
 needed. Same signature at every tier (rule 6).
 
+## 2.5 The Capability Protocol (S3, fully specified — 2026-07-02)
+
+The contract that lets NetGent, NetReplica, and CTP evolve independently.
+Four parts:
+
+1. **Describable-CLI convention.** Every (application, role) CLI answers
+   `--describe`, emitting machine-readable self-description: flags (name/flag/
+   type/required/default), prerequisites (with `kind: secret | secret_or_param`),
+   `node_requirements`, version. This is the *entire* integration burden on an
+   upstream project. (NetGent's `manifest.json` + `workflow.json.parameters`
+   already carry these facts; the synthesizer reads them directly today.)
+2. **Capability-document synthesizer** — a Pramana-provided tool run **in the
+   publisher's CI**, not in Pramana: enumerate CLIs/manifests → read
+   `--describe` → assemble capability file → schema-of-schemas validation →
+   human review + **signature** (H3: a model may draft, only a human signs).
+   Non-adopting publishers: Pramana runs the synthesizer against their public
+   surface at refresh time and a Pramana-side maintainer signs; the trust label
+   records the signer.
+3. **Capability file kinds.** `kind: static` (NetGent workflow entries with
+   per-entry `workflow_sha`; NetReplica knob ranges + realization modes + the
+   ≤8-regime ceiling) vs. `kind: live` (CTP: **query schema + endpoint only**,
+   never data — the KB holds a pointer to the database, not the database).
+4. **Well-known location + registry.** Each publisher serves
+   `capabilities.yaml` + detached signature at a fixed path (repo raw URL or
+   `GET /capabilities`). The KB's bootstrap **registry** is
+   `{name, url, pubkey, parser_version}` per publisher; adding a publisher is
+   one registry line + (at most) a parser — never a Core code change.
+
+### KB lifecycle: three phases
+
+- **BOOTSTRAP** (once): config-validate → image-ensure → pool deploy → KB
+  ingest (fetch → verify signature → schema-check → parse → **hash-addressed
+  snapshot**). Offline T1: a capability snapshot ships inside the images;
+  ingest degrades to use-bundled-refresh-later.
+- **REFRESH** (explicit `pramana refresh` or timer; **never** per-experiment):
+  conditional GET (ETag) → re-verify → **diff report to the user** ("netgent
+  2.3→2.4: +zoom_server; duration now optional") → atomic snapshot swap; old
+  snapshots retained (in-flight sets reference them by hash).
+- **RUNTIME**: Match/Planner/SpecGen read the snapshot only. The sole runtime
+  contacts with publishers: Match → CTP pointer queries (declared in CTP's
+  capability file), and workers fetching CTP payloads by pointer / workflows by
+  pinned sha over the data plane (U24: sha mismatch = refusal).
+
+### The three-channel model (what "starting Pramana pulls")
+
+| Channel | Content | Cadence |
+|---|---|---|
+| 1. Capability documents | small signed YAML → KB | bootstrap + explicit refresh |
+| 2. Code/engines | NetReplica logic **is** the substrate image; NetGent engine is the runner sidecar — baked at image build | image release → image-ensure at bootstrap |
+| 3. Artifacts | individual workflow JSONs + CTP payloads | runtime, lazily, by pinned sha/pointer only |
+
+**No codebase is ever cloned at startup.** (Rejects the pull-latest-submodule
+pattern; per-request `index.json` fetches are the named anti-pattern.)
+
+**Independent-evolution invariant:** *a publisher may change anything at any
+time; Pramana's behavior changes only at a refresh or image boundary, visibly
+(diff report / image tag), and never affects an in-flight experiment set
+(hash pinning).*
+
 ## 3. The seams (the verbs)
 
 | Seam | Contract (complete method set) | Notes |

@@ -236,6 +236,12 @@ Rules:
   synthesis is future work.
 - The knowledge base has a per-service **parser**; adding a service means adding a
   parser + capability file, not modifying match/planner.
+- **Full protocol (2026-07-02):** describable CLIs → synthesizer in the
+  publisher's CI → human signature → well-known path → KB registry; three-phase
+  lifecycle (bootstrap / explicit refresh with diff report / runtime reads
+  snapshot only); three pull channels (capability YAML → KB; engines via prebuilt
+  images; artifacts lazily by pinned sha/pointer). **No codebase is cloned at
+  startup.** Normative detail: `pramana_interfaces_v0.md` §2.5.
 
 ## 5. Execution plane
 
