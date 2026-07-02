@@ -11,36 +11,61 @@ implemented code of NetGent (fork + workflow registry), netforge (`controler.py`
 
 ## 0.0 The philosophy and the grammar (added same day, on convergence)
 
-**Design philosophy, one sentence:** spend intelligence at authoring time, never at
-run time — every concern of an experiment (behavior, conditions, placement) is
+**Design philosophy, one sentence:** spend intelligence **above the waist, never
+below it** — every concern of an experiment (behavior, conditions, placement) is
 progressively disaggregated into a compiled, parameterized, replayable artifact, so
-that running science is composition and replay, not authorship.
+that everything below the waist is composition and replay, not authorship. Model use
+above the waist splits into *offline authoring* (workflow generation, capability
+drafting — always human-gated) and exactly one *per-request* site, `compile()`.
 
-**The abstraction, as a grammar:**
+**The abstraction, as a grammar** (revised after adversarial review, see
+`pramana_adversarial_review_2026-07-02.md`):
 
 ```
 Evidence      = collect(ExperimentSet)                      ── SIGCSE: "a single function from
-ExperimentSet = compile(Intent)  |  user-written Spec           experiment description to a
-                                                                labeled measurement set"
-ExperimentSet = ⟨ nodes, mapping, leaves ⟩                  ── the waist artifact
-Experiment    = Workflow(params) ⊗ Regime ⊗ Node  × iterations   (leaf; content-hashed)
-
+ExperimentSet = fix(λA. compile(Intent, A))                     experiment description to a
+              | user-written Spec (same validation gate)        labeled measurement set"
+                where A grows by Clarification (backflow)   ── compile is an iterative
+                                                                fixpoint, not a pure call
+ExperimentSet = ⟨ nodes, mapping, secrets, leaves ⟩         ── the waist artifact; leaves
+                                                                are flat/fully expanded
+sweep         : Experiment × dim → ExperimentSet            ── expansion happens above the
+                                                                waist (CTP.select(n) is a
+                                                                sweep generator)
+Experiment    = ⟨ Workflow(params) ⊗ Regime ⟩ @ Roles       ── leaf; plus telemetry, verify,
+                × iterations                                    iterations as annotations
+identity(e)   = H(workflow@sha, params, static, dynamic)    ── nodes/mapping/iterations/
+                                                                attempts are OUTSIDE identity
+                                                                (⇒ cross-tier dedupe works)
+Roles         = ⟨ client: Node, server: Node? ⟩             ── the two-endpoint requirement,
+                                                                first-class
 Workflow      = CLI(app, role) ▸ NFA⟨states, {{params}}⟩    ── NetGent
 Regime        = Static⟨capacity↓↑, latency, queue⟩ ⊗ Dynamic⟨pressure⟩   ── NetReplica
 pressure      = replay(ctp)                                 ── open-loop (trace-mined)
               | load(Workflow* ↦ Node*)                     ── closed-loop (real apps as
               | replay(ctp) ⊕ load(…)                           cross-traffic; both allowed)
-ctp           ∈ closure(corpus; select, transform, merge)   ── the CTP algebra (closed)
-Node          = Pool.{active|latent}.filter(attrs).take(n) + persistence   ── netUnicorn++
-mapping       : pipelines → nodes → connectors              ── netUnicorn's map(), explicit
-collect       = deploy ∘ verify ∘ replay ∘ publish          ── deterministic; AI-free
+select        : criteria → ℘(corpus)                        ── a query, not an algebra op
+ctp           ∈ closure(corpus; transform, merge)           ── closed: transform/merge yield
+                                                                corpus CTPs (verified in
+                                                                ctp-service merge.py — our
+                                                                claim, not NetForge's)
+Nodes         = Pool.{active|latent}.filter(attrs).take(n)  ── netUnicorn++, with pool
+Node          ∈ Nodes;  persistence ∈ {set, experiment,         provenance and persistence
+                fresh-per-experiment}
+mapping       : nodes → connectors                          ── the only thing that changes
+                                                                across T1/T2/T3
+collect       = deploy ; prepare ; verify ; run ; publish   ── sequenced; deterministic;
+                                                                AI-free
+⊗             = independent late binding: factors bind at different times and never
+                constrain each other's identity
 ```
 
 Cleanliness properties: (1) every factor **late-bound** (params at dispatch, CTP at
-runtime, placement at mapping) — one spec, three tiers; (2) every factor **closed
-under its own operations** (CTP ops yield CTPs; sweeps yield sets; pools yield
-pools); (3) the **AI boundary is a production rule**, not a convention — `compile()`
-is the only place a model may appear.
+runtime, placement at mapping) — one spec, three tiers; (2) the conditions factor is
+**closed under its operations** (transform/merge yield CTPs; sweeps yield sets);
+(3) the **per-request AI boundary is a production rule**, not a convention —
+`compile()` is the only production that may invoke a model at request time; all
+other model use is offline authoring behind human-signed gates.
 
 Lineage in one line: *Pramana = netUnicorn's composition rule, with the pipeline
 production automated (NetGent) and a conditions production added (NetReplica/CTP
@@ -136,7 +161,9 @@ cloud platform, deployment, or trace" (NetForge §3.2). It has exactly two parts
   mode it **verifies** (realized vs. requested); in inhabited mode it
   **characterizes** (measure the regime you got and label the data with it —
   ground truth either way).
-- CCA is *not* a regime knob — it belongs to the endpoint's stack.
+- CCA is **declared in the static context** (it is part of experiment identity and
+  the substrate applies it at the endpoint), but it is *not* a property of the
+  bottleneck itself — it configures the endpoint's transport stack. [A2]
 
 ### 1.3 Pool and Node — the placement axis (from netUnicorn, made explicit)
 
@@ -193,7 +220,9 @@ exp = Experiment(workflow = Workflow("zoom", role="client",  # zoom-client ...
                  regime   = regime,
                  iterations = 1)
 
-es = ExperimentSet.sweep(exp, latency=["10ms", "100ms"])     # tree: 2 × 100 leaves
+es = ExperimentSet.sweep(exp, latency=["10ms", "100ms"])     # sweep dims: latency (2) x
+                                                              # ctp (CTP.select = sweep
+                                                              # generator, 100) -> 200 leaves
 es.map(pool).deploy().collect()                              # compose → verify → evidence
 ```
 

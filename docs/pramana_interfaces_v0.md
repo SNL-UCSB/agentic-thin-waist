@@ -14,10 +14,11 @@ what modules exchange, over which seams, and who owns what state.**
 2. **Pointers in the control plane, payloads in the data plane.** Anything that
    crosses the orchestrator is a pointer (CTP id, workflow URL, artifact key).
    Payload movement is always worker ⇄ publisher/telemetry, direct.
-3. **Pull at trust/NAT boundaries.** Wherever one side may be unreachable
-   (workers behind NAT, infrastructure services), the unreachable side initiates:
-   workers pull work and push results; the KB pulls capabilities. Push is allowed
-   only inside one machine/profile.
+3. **Outbound-initiation at trust/NAT boundaries (scoped, A3).** Whoever is
+   unreachable never needs to be dialed into. Concretely per binding: direct
+   binding (T1/T2) = the Core dials reachable workers (workers are HTTP servers);
+   broker binding (T3) = a sidecar pulls from the rendezvous. The KB always pulls
+   capabilities. "Workers pull work" holds only in the T3 binding.
 4. **Additive evolution.** Every artifact carries `schema_version`. Consumers ignore
    unknown fields; producers never repurpose a field. Removing a field is a major
    version and requires a capability-file announcement.
@@ -211,3 +212,25 @@ All four resolved 2026-07-02 (Arpit):
 | I2 | **Channel abstraction with three bindings** (revised again 07-02 after auditing `connectivity.py`/`aws_provisioner.py` — the current implementation already solves T2 reachability by *inverting* it: workers get public IPs + a security group scoped to the laptop's IP; the laptop is a pure outbound HTTP client). Bindings: **(a) direct** — scheduler dials reachable workers (localhost at T1, public-IP EC2 at T2; implemented today, worker stays an HTTP server); **(b) object-store rendezvous for results at T2** — workers write outbound to S3, laptop reads outbound from S3 (replaces `telemetry_capture_pull` double-hop through the laptop uplink; uses existing `shared/s3/`); **(c) broker rendezvous, T3 only** — for workers behind NAT (residential edge), implemented as a **sidecar poller** that claims from the broker and replays into the co-located worker's existing HTTP API, so worker code never changes. RabbitMQ's scope shrinks to binding (c) — possibly never needed. Implementation fixes required: the SG `0.0.0.0/0` fallback must hard-fail (privileged worker on the open internet), and the provisioner needs `refresh-ingress` for laptop IP changes. |
 | I3 | **User-level dedupe tool** — no automatic skipping; a CLI diffs a spec against telemetry (`spec ∩ existing = residual spec`) so intentional repeats are always possible. Rider: the planner may *warn* on overlap (never auto-skip); the tool must be prominent, or the 07-01 "don't repeat data" requirement becomes empty discipline. |
 | I4 | **Annotate, never discard** — every ResultEnvelope carries measured-vs-requested + `within_tolerance`; collection always completes; filtering is analysis-time. Riders: the flag must be loud in exports, and the scheduler alarms on per-worker tolerance-failure *rates* (a systematically broken worker must not annotate garbage all night). |
+
+## 7. Adversarial-review resolutions and glossary (2026-07-02)
+
+Twenty-five underspecification findings (U1–U25) and fifteen red-team defenses
+(H1–H15) were resolved normatively in
+`pramana_adversarial_review_2026-07-02.md`; the resolutions in that register are
+**binding on the schemas in this document** and land in `shared/models/` with the
+first implementation pass. Highest-order ones: advisory-with-affinity assignment
+(U1), reap⇒requeue with `attempt` (U2), secrets transit rules (U3), CLI flag
+mapping in A3 (U4), flat A5 with client-side `sweeps:` (U5), one CTP per leaf
+(U6), canonical content-hash ids (U7), idempotent telemetry upsert (U8),
+`service_ready` stage (U10), units grammar (U11), cancel endpoint (U15),
+two-axis completion (U16), workflow@sha + capability-hash pinning (U24),
+scheduler as sole A6 writer (U25), and the operational defaults table (U21).
+
+**Glossary (normative, one term per concept — review A19):**
+**workflow** — one NetGent artifact (never "pipeline"). **pipeline** — the ordered
+list of workflows a node can run. **regime** — static envelope ⊗ dynamic pressure
+(conditions only; the application context is *not* part of the regime).
+**context** (in results) — the full label set: static + dynamic + application.
+**iterations** — the A5 field name (never `num_iterations`). **Core** — the
+intelligent module set (never "orchestrator" in new text).

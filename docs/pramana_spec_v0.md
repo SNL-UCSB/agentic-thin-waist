@@ -38,8 +38,10 @@ decision is ordered by three usability tiers:
 
 - **T1 — Laptop (primary goal).** On a single laptop: `git clone` →
   `docker compose up` → a simple data-collection request → data, in minutes. No
-  cloud account, no API key required (the API-optional path is a T1 requirement,
-  not a convenience). The **laptop profile** runs the minimal service set; both
+  cloud account, no API key required — precisely: the **keyless T1 path is direct
+  spec submission** (`pramana run spec.yaml`, with example specs shipped in-repo);
+  the natural-language door additionally needs an LLM binding (cloud key or a local
+  model). The API-optional path is a T1 requirement, not a convenience. The **laptop profile** runs the minimal service set; both
   experiment endpoints can live inside one Docker via NetReplica's single-container
   namespace compilation (§5.2).
 - **T2 — Cloud scale-up.** The *same spec*, scaled: prebuilt images + a connectivity
@@ -114,10 +116,14 @@ platform specification/configuration profile. **Nothing the model emits is
 trusted.** The system is engineered so that a hallucinating model cannot produce a
 hallucinated experiment:
 
-1. **Closed-world generation.** The model may only fill spec fields with values
-   drawn from published capability files, the CTP corpus, or explicit user
-   answers. Free text never becomes configuration; there is no field a model can
-   invent.
+1. **Closed-world where enumerable, gated where not (restated per review A4/H1).**
+   Enumerable fields (workflows, knobs, AQMs, CTP criteria dimensions) are filled
+   only from published capability files and the corpus. Inherently free-form
+   fields (durations, URLs, hosts, display names) are **not** closed-world — they
+   are type/range-validated, resolved against allow-listed catalogs where they
+   name endpoints, or forced into backflow. Fuzzy quantifiers ("moderately
+   bursty" → PMR range) resolve through a versioned, published lexicon file, so
+   the mapping has provenance other than model judgment.
 2. **Match is a validation gate, not a suggestion.** Every model output is checked
    against schema + capability ranges before it exists as a spec. Out-of-range or
    unknown values are rejected into backflow — never coerced, never defaulted
@@ -129,10 +135,21 @@ hallucinated experiment:
 4. **The spec is surfaced before execution** (already the SIGCSE behavior: "the
    parser surfaces the parsed specification") — the user confirms the translation,
    not the transcript.
-5. **AI-free below the waist bounds the blast radius**: hallucination can only
-   enter at `compile()`; and the Spec→Substrate verification probe closes the last
-   gap by checking *realized* conditions against the spec — catching residual
-   mistranslation with measurements, not model judgment.
+5. **AI-free below the waist bounds the blast radius**: per-request hallucination
+   can only enter at `compile()`. The Spec→Substrate probe then checks *realized*
+   conditions against the spec — but `verified` is **scoped, never blanket**
+   (review H5): every result records which regime factors were verified (static
+   envelope), characterized (CTP realized intensity/burstiness, CCA negotiation
+   via the observer where available), and unverified (application-level content).
+   A result never claims more verification than was performed.
+6. **The offline AI surfaces are gated by humans (review H3/H4).** Capability
+   files are human-signed artifacts (schema-of-schemas validated, diff-reviewed);
+   a model may draft one, never sign one — the validation oracle is never
+   model-authored. Generated workflows enter the official repo only through a
+   golden-trace replay + human review, and are content-hash-pinned with reviewer
+   provenance. "Deterministic" bounds variance; the gate supplies correctness.
+   NetGent UI-drift at replay time fails the experiment and flags it — no runtime
+   LLM repair (v1).
 
 ## 2. Taxonomy (agreed 07-01)
 
@@ -140,8 +157,8 @@ hallucinated experiment:
 |---|---|
 | **Intent** | User's natural-language or structured request. May expand into an experiment set. |
 | **Experiment set** | The set of experiments produced by one intent. Tree-structured; internal nodes are parameter sweeps; leaves are experiments. |
-| **Experiment** | A leaf: one unique combination of *static context* (NetReplica knobs: capacity, latency, buffer, AQM, CC) + *application context* (one NetGent workflow + args) + *dynamic context* (one CTP). Same spec ⇒ same experiment. Different application ⇒ different experiment. |
-| **Iteration** | A repeated run of the same experiment (`num_iterations` in the experiment JSON). No teardown between iterations. |
+| **Experiment** | A leaf: one unique combination of *static context* (capacity, latency, buffer, AQM, and CC — CC is applied at the endpoint stack, not at the bottleneck) + *application context* (one NetGent workflow + args) + *dynamic context* (one CTP). Same spec ⇒ same experiment. Different application ⇒ different experiment. |
+| **Iteration** | A repeated run of the same experiment (`iterations` in the leaf). No teardown between iterations *by default*; a node's persistence level may override for isolation-critical studies (fresh worker per run). |
 | **Spec** | The compiled, fully-concrete artifact: a list of experiment JSONs plus node declarations (§5.2) — "that filled-out form doesn't need any AI assistance… whatsoever" (Manni). |
 
 ## 3. Intent plane — Core module decomposition
@@ -189,8 +206,10 @@ User ──> UI (REST: /intent, /experiment-status, ...)   ── UI is NOT the 
 - **Scheduler v1 = FIFO over the worker pool with a semaphore.** Whoever finishes takes
   the next experiment. Policy beyond v1: **[OPEN — §9.Q1]**.
 - Vocabulary note: the team's operative framing is **hub-and-spoke + disaggregation**;
-  the Intent/Representation/Execution "planes" wording in `CLAUDE.md` appears nowhere
-  in the papers or Slack and should be retired in favor of the paper vocabulary
+  the Intent/Representation/Execution "planes" wording in `CLAUDE.md` comes from
+  NetForge §4 (a paper term) but appears in neither the Pramana papers nor Slack;
+  retire it *for Pramana* — to avoid conflating the two systems' decompositions —
+  in favor of the paper vocabulary
   (*generative empirical backend*; *empirical thin waist*; the **intent specification**
   is the waist).
 
@@ -224,8 +243,10 @@ Rules:
 
 - Substrate workers are **persistent Docker containers created at bootstrap**, not
   ephemeral per-experiment containers. Pool size is a bootstrap parameter with a
-  resource-derived default (laptop ≈ 10, server up to ~1000); user-configurable,
-  never exceeded silently.
+  resource-derived default: `min(cores − 2, 8)` concurrent in-container regimes per
+  host (the ~8 ceiling is NetReplica's measured netem-granularity limit, published
+  as a node attribute the planner enforces); larger pools require split-pair
+  placement or more hosts. User-configurable, never exceeded silently.
 - Docker images are **prebuilt and pulled from a registry** (Docker Hub `snlhub/*` /
   ECR). Build happens at most once at bootstrap if no image is available; never in the
   runtime path.

@@ -62,7 +62,8 @@ data points under a 10 Mbps / 10 ms bottleneck with realistic cross-traffic."
    regime = static knobs + CTP dynamic pressure — has no netUnicorn counterpart.
 2. **A workflow library as a service.** netUnicorn tasks are user-contributed Python
    (`netunicorn-library`); Pramana ships deterministic, pre-validated NetGent
-   workflows (~100 apps) discovered via capability files.
+   workflows (16 in the registry today, growing; generation amortizes per-app
+   authoring cost) discovered via capability files. [A15]
 3. **NL intent + match + backflow.** netUnicorn's user is a Python-writing expert.
    Pramana's intent parser, knowledge base, and ask-the-user backflow (never emit a
    spec the orchestrator doesn't understand) are all new layers.
@@ -81,11 +82,11 @@ data points under a 10 Mbps / 10 ms bottleneck with realistic cross-traffic."
    `NotImplementedError`s are the cost of not having it. Adopting the contract
    (`get_nodes/deploy/execute/stop`) would make the portability claim in the HotNets
    draft concrete.
-2. **Pull-based gateway for NAT.** Executors poll for work and POST results with
-   heartbeats + backoff; the core never needs inbound access to nodes. Worth
-   re-examining whether the worker-pool patchwork should adopt pull semantics at the
-   worker (worker polls scheduler queue) — it composes with RabbitMQ rather than
-   competing with it, and it is *less* infrastructure than broker-per-deployment.
+2. **Pull-based gateway for NAT — with a caveat [A11].** netUnicorn's pull model
+   works because its core is a reachable lab server; Pramana's laptop Core is not.
+   The stealable idea survives as the T3 sidecar-poller binding against a
+   connector-provisioned rendezvous (interfaces S5/I2), not as
+   worker-polls-the-scheduler.
 3. **TaskDispatcher-style per-node dispatch** — capability files answer "does the
    system support X"; dispatch answers "which implementation of X on *this* node"
    (Linux vs. Windows, arch-specific). The spec's capability model should absorb this.
