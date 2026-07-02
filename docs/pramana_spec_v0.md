@@ -107,6 +107,33 @@ several already decided:
   that provider differences (function calling vs. JSON mode) live entirely inside
   the binding.
 
+### 1.3 Hallucination immunity (added 07-02)
+
+AI is used for exactly one thing: understanding intent and translating it into a
+platform specification/configuration profile. **Nothing the model emits is
+trusted.** The system is engineered so that a hallucinating model cannot produce a
+hallucinated experiment:
+
+1. **Closed-world generation.** The model may only fill spec fields with values
+   drawn from published capability files, the CTP corpus, or explicit user
+   answers. Free text never becomes configuration; there is no field a model can
+   invent.
+2. **Match is a validation gate, not a suggestion.** Every model output is checked
+   against schema + capability ranges before it exists as a spec. Out-of-range or
+   unknown values are rejected into backflow — never coerced, never defaulted
+   silently.
+3. **Field-level provenance.** Every field in a compiled spec carries its origin:
+   `intent` (extracted), `capability_default`, or `user_answer`. A spec whose
+   fields cannot all be attributed fails compilation. This is what makes "no spec
+   the Core doesn't understand" checkable rather than aspirational.
+4. **The spec is surfaced before execution** (already the SIGCSE behavior: "the
+   parser surfaces the parsed specification") — the user confirms the translation,
+   not the transcript.
+5. **AI-free below the waist bounds the blast radius**: hallucination can only
+   enter at `compile()`; and the Spec→Substrate verification probe closes the last
+   gap by checking *realized* conditions against the spec — catching residual
+   mistranslation with measurements, not model judgment.
+
 ## 2. Taxonomy (agreed 07-01)
 
 | Term | Definition |
