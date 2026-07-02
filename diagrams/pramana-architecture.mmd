@@ -2,7 +2,7 @@ graph TD
     USER(["User / Agent"])
     UI["UI - REST API<br/>/intent, /experiment-status"]
 
-    subgraph ORCH["Orchestrator"]
+    subgraph ORCH["Core"]
         IP["1 - Intent Parser<br/>(LLM)"]
         KB["2 - Knowledge Base<br/>capability files"]
         MATCH["3 - Match"]

@@ -117,7 +117,11 @@ several already decided:
 | **Iteration** | A repeated run of the same experiment (`num_iterations` in the experiment JSON). No teardown between iterations. |
 | **Spec** | The compiled, fully-concrete artifact: a list of experiment JSONs plus node declarations (§5.2) — "that filled-out form doesn't need any AI assistance… whatsoever" (Manni). |
 
-## 3. Intent plane — module decomposition
+## 3. Intent plane — Core module decomposition
+
+*(Naming, R9: the module set below is the **Core** — netUnicorn's term — because
+"orchestrator" misleadingly suggests it does the communicating/executing itself.
+Historical quotes retain the old word.)*
 
 User-facing flow (order is normative):
 
@@ -125,7 +129,7 @@ User-facing flow (order is normative):
 User ──> UI (REST: /intent, /experiment-status, ...)   ── UI is NOT the orchestrator
            │
            v
-   ┌──────────────────── Orchestrator ────────────────────┐
+   ┌──────────────────── Core (né orchestrator) ──────────┐
    │ 1. Intent Parser   (LLM-backed; extracts application │
    │       workflow, network condition, CTP criteria)     │
    │ 2. Knowledge Base  (storage + process; per-service   │
@@ -435,6 +439,7 @@ Refinements from the netUnicorn comparison review (2026-07-02, Arpit —
 | R6 | CLI is the per-application contract (§4) | Each (application, role) has a concrete CLI; the **capability-document synthesizer** module bridges independent CLIs to the knowledge base. Server role only where meaningful (Zoom/Puffer/NDT, not YouTube). |
 | R7 | LLM is a pluggable binding (§1.2) | Narrow provider interface (`complete(prompt, schema) → JSON` + clarification call); cloud or self-hosted (OpenAI-compatible endpoints) chosen once at bootstrap; swappable without touching any other module. |
 | R8 | Setup & interaction UX to the standard of modern CLI tools (Claude Code / OpenClaw class); **CLI-only, no GUI** | The user surface is a terminal command, cross-platform (macOS/Linux/Windows): one-command install; first-run `pramana init` wizard (LLM provider, pull prebuilt images, secrets file scaffold); `pramana doctor` for self-diagnosis; `pramana "intent"` (+ `pramana run spec.yaml` for the API-direct path) as the entire T1 surface. No web UI is built — the architecture's "UI" box is this CLI plus the REST API it wraps. Time-to-first-data on a fresh laptop is a tracked metric. |
+| R9 | Rename: **Core**, not "orchestrator" | The intelligent module set (§3) is the Core — netUnicorn's term. "Orchestrator" misleads: it suggests the module does the communicating/executing itself, when it facilitates. Applied across spec, interfaces, abstraction docs and diagram; historical quotes keep the old word. |
 
 Remaining open, with accepted leans (revisit only with evidence):
 
