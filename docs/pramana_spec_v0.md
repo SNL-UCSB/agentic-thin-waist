@@ -79,6 +79,23 @@ Refinements re-affirmed or added 07-01:
   point in the design space, we should not go [to]" (Arpit). Persistence level is a
   parameter, not a fixed property.
 
+### 1.2 Minimum viable intelligence (added 07-02)
+
+The intelligence required from the LLM agent must be **as minimal as possible**, with
+enough harness that a simple — eventually self-hosted — model delivers effectively.
+No architectural function may *depend* on frontier-model capability. Consequences,
+several already decided:
+
+- The abstraction ladder (per-application CLIs → capability documents → knowledge
+  base → match → spec template) exists precisely so intent parsing reduces to
+  **constrained form-filling against a published schema**, not open-ended reasoning.
+- Backflow (ask the user) replaces cleverness (guess the user): a small model that
+  asks one question at a time (I1, iterative Q&A) beats a large model that infers.
+- Everything below the waist is AI-free (§2); the planner is deterministic rules;
+  workflow generation uses AI only at development time, never at run time.
+- API costs and API dependence are usability failures (the Zoom-sweep credit
+  exhaustion): the LLM path must degrade gracefully to direct spec submission.
+
 ## 2. Taxonomy (agreed 07-01)
 
 | Term | Definition |
@@ -143,7 +160,7 @@ a persistent connection may later enable push, but pull is the v1 contract).
 
 | Service | Capability representation | Refresh model |
 |---|---|---|
-| **NetGent** | Per-workflow metadata: application, role workflows (§5.2), CLI-style parameters (duration, video, resolution, …), mandatory vs. optional + defaults, and *prerequisites* (account, meeting code, password, server endpoint). | Public repo/service; pull at bootstrap, re-pull on demand. Workers pull workflow files directly by URL derived from the index. |
+| **NetGent** | **The CLI is the per-application contract (refined 07-02).** Each (application, role) pair exposes a concrete CLI — e.g. `youtube-client -v <url> -d 30s`; roles are client always, server only where meaningful (Zoom/Puffer/NDT yes; YouTube no). Applications own their CLIs independently — custom flags per usage pattern. The **capability-document synthesizer** is the named module that looks *across* all CLIs, understands their configurability (flags, types, mandatory/optional/defaults, prerequisites like accounts/meeting codes), and emits the capability file the KB ingests. Hand-authored today; the synthesizer automates it later. | Public repo/service; pull at bootstrap, re-pull on demand. Workers pull workflow files directly by URL derived from the index. |
 | **NetReplica** (static knobs) | Static file: supported knobs and value ranges (capacity, latency, buffer, AQM, CC). Ships with the substrate; pulled from master at bootstrap. Low cadence. | One-time at bootstrap. |
 | **CTP Service** | *Not* a static file — a **pointer to a queryable database**. Capability = the query schema (throughput range, active users, burstiness, direction, cluster, transformed-or-not). Match queries it live; responses are pointers, possibly partial ("3,000 of the 10,000 you asked for" is a valid answer, not an error). | Live query at match time. |
 | **Telemetry** | Storage/query API; capacity constraints (disk, connection pool). | Static config. |
@@ -403,6 +420,8 @@ Refinements from the netUnicorn comparison review (2026-07-02, Arpit —
 | R2 | Two endpoint configurations in the spec | In-Docker pair (NetReplica single-container namespaces — T1 default) vs. split pair (client-side bottleneck + external endpoint node, local or remote) (§5.2). Pipeline-per-node = NetGent workflow incl. pre/post actions; authorship automated, not manual. |
 | R3 | D3 scoped to the scale profile | RabbitMQ only in the scale profile; laptop profile uses local buffer + direct upload behind the same publish interface (§6.2). |
 | R4 | Adopt netUnicorn's connector contract for T2/T3 | `get_nodes/deploy/execute/stop` plug-ins; laptop ships `local_docker` only; evaluate pull-based executor semantics during the pool patchwork (§5.4). |
+| R5 | Minimum viable intelligence (§1.2) | LLM burden shrunk to schema-constrained form-filling; harness (CLIs → capability docs → KB → match → template) carries the complexity; target: a simple self-hosted model suffices. |
+| R6 | CLI is the per-application contract (§4) | Each (application, role) has a concrete CLI; the **capability-document synthesizer** module bridges independent CLIs to the knowledge base. Server role only where meaningful (Zoom/Puffer/NDT, not YouTube). |
 
 Remaining open, with accepted leans (revisit only with evidence):
 
