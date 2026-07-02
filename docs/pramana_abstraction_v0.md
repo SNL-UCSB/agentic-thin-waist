@@ -264,11 +264,18 @@ Two threads make this arc *defensible* rather than merely narratable:
 
 1. **Topology generality** — traded away; multi-bottleneck composition is claimed
    (NetForge v2 "chain bottlenecks") but unevaluated.
-2. **Wireless/cellular** — absent across the entire line, Mininet included.
-3. **Two fidelity regimes conflated in the line's history** — netUnicorn argued
-   *in-vivo* realism (real infrastructure), NetForge argues *replayed* realism
-   (controlled emulation + trace-mined pressure). Pramana supports both but every
-   claim must name which mode it attaches to.
+2. **Wireless/cellular/LEO — reframed (07-02), not discarded.** These are
+   *inhabited regimes* reached through connectors (§1.2): PINOT RPis on campus
+   wireless, Starlink terminals, cellular modems — with pressure injectable via
+   closed-loop `load(...)` on co-located nodes. What honestly remains open: no
+   inhabited-mode deployment has been *evaluated* yet, and the probe there
+   characterizes rather than verifies. Claim the design generality, not the
+   result.
+3. **Two fidelity modes, now explicit rather than conflated** — *imposed* regimes
+   (emulated, envelope set, probe verifies) vs. *inhabited* regimes (real links,
+   envelope measured, probe characterizes); open-loop `replay(ctp)` vs.
+   closed-loop `load(workflows)` pressure. Pramana supports all four quadrants by
+   construction; every published claim must name its quadrant.
 4. **Verification covers one of four layers** — Spec→Substrate only; Intent→Spec,
    Substrate→Result, Result→Claim remain open problems (`verification_gap.md`)
    and must be flagged as such, never implied solved.
