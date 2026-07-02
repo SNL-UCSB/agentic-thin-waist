@@ -39,6 +39,75 @@ services/substrate-worker/src/substrate/
 cli/pramana/                          # M-7 — NEW (typer app)
 ```
 
+## 1.5 Module & function outline (every public function, one line each)
+
+```python
+# shared/models/units.py
+parse(text: str) -> Quantity                 # "10mbps" -> Quantity(10.0,"mbps"); raises UnitError
+format(q: Quantity) -> str                   # canonical decimal string (hash-stable)
+
+# shared/models/hashing.py
+canonical_json(obj) -> bytes                 # RFC 8785; the ONLY call site, no reimplementation
+identity(exp: Experiment) -> str             # sha256 over {workflow_sha, params-sans-secrets,
+                                             #   static, dynamic}; excludes placement/iterations
+set_id(spec: ExperimentSet) -> str           # "es_<slug>_" + hash8 of canonical leaves
+
+# shared/models/capability.py
+load_dir(path) -> Snapshot                   # read capabilities/*.yaml, content-hash each
+Snapshot.pin() -> dict[str, Pin]             # pins for SpecGen
+Snapshot.workflow(id) -> WorkflowEntry       # raises UnknownWorkflow
+Snapshot.knob_range(name) -> Range
+
+# orchestration/app/engine/llm_binding.py        (M3a)
+class Provider(Protocol):
+    complete(prompt, output_schema) -> dict  # validate-retry-once inside
+    ask(context) -> list[Question]
+make_provider(cfg) -> Provider               # "anthropic" | "openai_compatible"
+
+# orchestration/app/engine/match.py             (M5)
+match(draft, snap, lexicon) -> MatchResult   # Ok(validated, provenance) | NeedsInput(questions)
+resolve_lexicon(phrase) -> CriteriaTemplate  # only source of fuzzy-word -> numbers
+check_secrets(leaf, snap) -> list[str]       # keys required but undeclared -> questions
+
+# orchestration/app/engine/spec_gen.py          (M6)
+compile(matched, snap) -> ExperimentSet      # expand, pin shas+capability hashes, assign ids
+echo(spec, provenance) -> str                # plain-language rendering + itemized defaults
+
+# orchestration/app/scheduler/store.py          (M8, owner Manni)
+create_all(spec) -> list[Deployment]
+claim_next(worker_id, attrs) -> Deployment | None      # SKIP LOCKED (SQL §5)
+transition(id, expected, next, fence, stamp) -> bool   # CAS; False = stale, drop
+requeue(id) -> Deployment                    # attempt+1, fence+1, start_iteration=durable+1
+mark_cancel(set_id) -> int
+
+# orchestration/app/scheduler/dispatch.py
+send_work(worker, item) -> DispatchResult    # idempotent-accept; breaker per worker
+poll(worker) -> StatusReply                  # deadline << poll interval; jittered
+
+# orchestration/app/scheduler/lifecycle.py
+fold(status: DeploymentStatus) -> None       # applies transition table (§3)
+reap_scan() -> None                          # 3 misses + corroboration + mass-reap brake
+# orchestration/app/scheduler/recovery.py
+recover() -> None                            # startup = load non-terminal rows, re-poll all
+
+# substrate/work.py                             (M10)
+POST /v1/work  -> accept_work(item)          # 202/200/409 semantics (§4)
+GET  /v1/status -> status()
+run_sequence(item)                           # prepare -> probe -> run -> publish -> reset
+# substrate/prepare.py
+fetch_ctp_batch(ptrs, source) -> paths       # outside shaped ns; skip-if-cached
+fetch_workflow(pinned) -> path               # sha verify, refuse mismatch
+# substrate/probe.py
+probe(static, tolerance) -> Verification     # 5s iperf3 x2 + 10 pings + 2s drain
+
+# cli/pramana/                                  (M7 CLI)
+init(), doctor(), run(path, yes: bool), status(id, json: bool), cancel(id)
+expand_sweeps(doc) -> ExperimentSet          # client-side; CTP criteria resolved via S4 query
+```
+
+Anything not listed here is module-private. A student implementing a card
+touches exactly the functions its INTERFACE block names — nothing else.
+
 ## 2. Model stubs (Pydantic v2 — normative field lists, A5–A9)
 
 ```python

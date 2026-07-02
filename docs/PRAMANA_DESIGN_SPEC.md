@@ -116,6 +116,94 @@ pipeline, frozen, bugfix-only; the *build track* — everything in this document
 — is the deliverable for the fall paper, the classroom, and beyond. Nothing in
 the build may block the data.
 
+
+## Part I.a — The architecture, in pictures
+
+Two views, deliberately separate so no arrow can be misread (SVG sources and
+editable versions live in `diagrams/`):
+
+**Control & bootstrap** — who decides, and what loads when:
+
+![Control and bootstrap view](../diagrams/pramana-control.svg)
+
+**Runtime data plane** — what actually moves during an experiment:
+
+![Data plane view](../diagrams/pramana-dataplane.svg)
+
+Text fallback (control plane, simplified):
+
+```
+User ──CLI/REST──► Core: Parser → Match ⇄ (one batched question round) ⇄ User
+                          │ validates against capability snapshots
+                          ▼            (loaded at BOOTSTRAP from
+                    Planner → SpecGen   capabilities/*.yaml, hash-pinned)
+                          ▼
+                    Scheduler ──dispatch + status polls──► Worker pool
+                                (Core always dials out)     + service nodes
+Workers fetch CTP payloads / workflows by pinned identity (data plane),
+run, and publish results to Telemetry (T1 direct; T2 the Core pulls).
+```
+
+## Part I.b — One user's story (nothing-to-data, step by step)
+
+Priya has never seen Pramana. She wants to know how CUBIC and BBR differ over
+a 10 Mbps bottleneck.
+
+1. `git clone … && docker compose up` — Postgres, MinIO, telemetry, the Core,
+   and two worker containers start on her laptop. (§5.4 bootstrap)
+2. `pramana init` — a wizard writes `~/.pramana/config.yaml`; she skips the
+   LLM step (no API key). Capability files load; `pramana doctor` is green.
+3. She copies `examples/wget_cca_compare.yaml` — a spec with one `sweeps:`
+   block: `static.cca: [cubic, bbr]` × `static.capacity_down: [10mbps]`.
+4. `pramana run wget_cca_compare.yaml` — the CLI expands the sweep into 2
+   flat experiments, submits; **Match** validates every field against the
+   NetReplica/NetGent capability files (M5). Nothing missing → no questions.
+5. The terminal prints the **echo**: "2 experiments: wget download for 30 s
+   over a 10 Mbps / 20 ms codel bottleneck, congestion control cubic then
+   bbr; no cross-traffic; pcap + transport metrics collected." She confirms.
+6. The **Planner** assigns both leaves to worker-1 (M7); the **Scheduler**
+   POSTs the first WorkItem to it (M8 → M10).
+7. Worker-1: sets up the namespaces and tc knobs, **probes** the link (5 s
+   iperf3 each way + pings — measured 9.7 Mbps, within the 5% tolerance),
+   fetches the pinned `wget` workflow, runs 30 s, publishes a ResultEnvelope,
+   resets, takes the second leaf.
+8. `pramana status es_…` shows `execution: done, ingested: 2/2` in ~3 min.
+9. Priya queries telemetry for the two runs; every sample carries its labels:
+   requested *and measured* conditions, CCA, workflow version. She plots
+   cwnd/throughput and sees the sawtooth vs. probe pattern.
+10. Next day she wonders about latency: edits one line
+    (`static.latency: [10ms, 100ms]` in `sweeps:`), reruns — 4 experiments,
+    2 already collected are flagged by their identity hashes if she asks
+    (`pramana diff-collected`, v1.1).
+
+The same story with the NL door: step 3–5 become
+`pramana "compare cubic and bbr at 10mbps over wget"` → parser fills the form
+→ same Match, same echo, same everything below. If she'd asked for Zoom, step
+5 would have included one batched question round: "meeting code?" — answered
+once, stored in her local secrets file.
+
+## Part I.c — The information flow (what artifact moves on each arrow)
+
+```
+ (A1 Intent text) ──► Parser ──(draft spec)──► Match
+ Match ──(A2 questions)──► User ──(A2 answers)──► Match      [≤1 round, v1]
+ Match ──(validated draft + provenance map)──► SpecGen
+ SpecGen ──(A5 ExperimentSet: flat leaves, capability pins,
+            identity hashes)──► store + echo to User
+ Scheduler ──(A7 WorkItem: leaf + fence + resolved secrets)──► Worker
+ Worker  ──(A8 status: state/stage/fence, polled)──► Scheduler
+ Worker  ──(fetch by pointer: CTP payload | workflow@sha)──► CTP svc / registry
+ Worker  ──(A9 ResultEnvelope: metrics + artifacts keys +
+            scoped verification + context labels)──► Telemetry
+ Scheduler ──(A6 Deployment rows: single writer, CAS)──► Postgres
+ User ──(status: execution axis + ingested axis)──► CLI
+```
+
+Rules that make the flow legible: natural language exists only above Match;
+everything below the A5 line is deterministic; bulk bytes never touch the
+Core; every artifact is defined field-by-field in
+`PRAMANA_INTERFACE_DEFINITIONS.md`.
+
 ---
 
 # Part II — Reference specification
