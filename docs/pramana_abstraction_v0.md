@@ -9,6 +9,40 @@ implemented code of NetGent (fork + workflow registry), netforge (`controler.py`
 
 ---
 
+## 0.0 The philosophy and the grammar (added same day, on convergence)
+
+**Design philosophy, one sentence:** spend intelligence at authoring time, never at
+run time — every concern of an experiment (behavior, conditions, placement) is
+progressively disaggregated into a compiled, parameterized, replayable artifact, so
+that running science is composition and replay, not authorship.
+
+**The abstraction, as a grammar:**
+
+```
+Evidence      = collect(ExperimentSet)                      ── SIGCSE: "a single function from
+ExperimentSet = compile(Intent)  |  user-written Spec           experiment description to a
+                                                                labeled measurement set"
+ExperimentSet = ⟨ nodes, mapping, leaves ⟩                  ── the waist artifact
+Experiment    = Workflow(params) ⊗ Regime ⊗ Node  × iterations   (leaf; content-hashed)
+
+Workflow      = CLI(app, role) ▸ NFA⟨states, {{params}}⟩    ── NetGent
+Regime        = Static⟨capacity↓↑, latency, queue⟩ ⊗ Dynamic⟨ctp⟩   ── NetReplica
+ctp           ∈ closure(corpus; select, transform, merge)   ── the CTP algebra (closed)
+Node          = Pool.{active|latent}.filter(attrs).take(n) + persistence   ── netUnicorn++
+mapping       : pipelines → nodes → connectors              ── netUnicorn's map(), explicit
+collect       = deploy ∘ verify ∘ replay ∘ publish          ── deterministic; AI-free
+```
+
+Cleanliness properties: (1) every factor **late-bound** (params at dispatch, CTP at
+runtime, placement at mapping) — one spec, three tiers; (2) every factor **closed
+under its own operations** (CTP ops yield CTPs; sweeps yield sets; pools yield
+pools); (3) the **AI boundary is a production rule**, not a convention — `compile()`
+is the only place a model may appear.
+
+Lineage in one line: *Pramana = netUnicorn's composition rule, with the pipeline
+production automated (NetGent) and a conditions production added (NetReplica/CTP
+algebra), so the sole remaining human production is the intent.*
+
 ## 0. The unifying theme
 
 Every predecessor system contributes one **separation**, and each separation is
