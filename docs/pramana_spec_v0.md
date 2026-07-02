@@ -95,6 +95,17 @@ several already decided:
   workflow generation uses AI only at development time, never at run time.
 - API costs and API dependence are usability failures (the Zoom-sweep credit
   exhaustion): the LLM path must degrade gracefully to direct spec submission.
+- **The LLM is a pluggable binding, configured once at bootstrap (R7).** The
+  orchestrator talks to models only through a narrow provider interface —
+  essentially `complete(prompt, output_schema) → validated JSON` plus the
+  clarification-question call — so cloud (Claude/Gemini) and self-hosted
+  (vLLM/Ollama via OpenAI-compatible endpoints) are interchangeable. Setup asks
+  once (`llm: {provider, endpoint, model, key_ref}` in bootstrap config, key via
+  the local secrets file); after that the user has full control — swap models,
+  point at a local endpoint, or run LLM-free — without touching any other module.
+  Because R5 keeps the task schema-constrained, the interface stays small enough
+  that provider differences (function calling vs. JSON mode) live entirely inside
+  the binding.
 
 ## 2. Taxonomy (agreed 07-01)
 
@@ -422,6 +433,8 @@ Refinements from the netUnicorn comparison review (2026-07-02, Arpit —
 | R4 | Adopt netUnicorn's connector contract for T2/T3 | `get_nodes/deploy/execute/stop` plug-ins; laptop ships `local_docker` only; evaluate pull-based executor semantics during the pool patchwork (§5.4). |
 | R5 | Minimum viable intelligence (§1.2) | LLM burden shrunk to schema-constrained form-filling; harness (CLIs → capability docs → KB → match → template) carries the complexity; target: a simple self-hosted model suffices. |
 | R6 | CLI is the per-application contract (§4) | Each (application, role) has a concrete CLI; the **capability-document synthesizer** module bridges independent CLIs to the knowledge base. Server role only where meaningful (Zoom/Puffer/NDT, not YouTube). |
+| R7 | LLM is a pluggable binding (§1.2) | Narrow provider interface (`complete(prompt, schema) → JSON` + clarification call); cloud or self-hosted (OpenAI-compatible endpoints) chosen once at bootstrap; swappable without touching any other module. |
+| R8 | Setup & interaction UX to the standard of modern CLI tools (Claude Code / OpenClaw class); **CLI-only, no GUI** | The user surface is a terminal command, cross-platform (macOS/Linux/Windows): one-command install; first-run `pramana init` wizard (LLM provider, pull prebuilt images, secrets file scaffold); `pramana doctor` for self-diagnosis; `pramana "intent"` (+ `pramana run spec.yaml` for the API-direct path) as the entire T1 surface. No web UI is built — the architecture's "UI" box is this CLI plus the REST API it wraps. Time-to-first-data on a fresh laptop is a tracked metric. |
 
 Remaining open, with accepted leans (revisit only with evidence):
 
