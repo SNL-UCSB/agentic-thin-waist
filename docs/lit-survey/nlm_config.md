@@ -4,7 +4,7 @@
 
 - **notebook_id:** `6f2b2b44-34c0-4918-8a22-aff2b035da53`
 - **title:** survey-agentic-systems-research
-- **sources ingested:** 15 (Glia, AI Scientist v2, AI Scientist v1, Agent Laboratory, POPPER, netUnicorn [abstract-only + full-text PDF added 2026-07-02], NetConfEval*, Confucius, NetArena, Learned Cloud Emulators, Mininet, Mininet-HiFi, NetForge v3, NetGent)
+- **sources ingested:** 22 (verification tools batch added 2026-07-02: Maler STL, RTAMT, Necula TV, SMT Handbook ch.26, Outlines, Segura MT survey, TLA+ at AWS; plus Glia, AI Scientist v2, AI Scientist v1, Agent Laboratory, POPPER, netUnicorn [abstract-only + full-text PDF added 2026-07-02], NetConfEval*, Confucius, NetArena, Learned Cloud Emulators, Mininet, Mininet-HiFi, NetForge v3, NetGent)
 - **NLM binary:** `nlm` on PATH (`/Users/profg-agent/.local/bin/nlm`)
 - **Access method:** CLI via Bash (MCP does not work)
 
