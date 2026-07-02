@@ -26,7 +26,10 @@ ExperimentSet = ⟨ nodes, mapping, leaves ⟩                  ── the waist
 Experiment    = Workflow(params) ⊗ Regime ⊗ Node  × iterations   (leaf; content-hashed)
 
 Workflow      = CLI(app, role) ▸ NFA⟨states, {{params}}⟩    ── NetGent
-Regime        = Static⟨capacity↓↑, latency, queue⟩ ⊗ Dynamic⟨ctp⟩   ── NetReplica
+Regime        = Static⟨capacity↓↑, latency, queue⟩ ⊗ Dynamic⟨pressure⟩   ── NetReplica
+pressure      = replay(ctp)                                 ── open-loop (trace-mined)
+              | load(Workflow* ↦ Node*)                     ── closed-loop (real apps as
+              | replay(ctp) ⊕ load(…)                           cross-traffic; both allowed)
 ctp           ∈ closure(corpus; select, transform, merge)   ── the CTP algebra (closed)
 Node          = Pool.{active|latent}.filter(attrs).take(n) + persistence   ── netUnicorn++
 mapping       : pipelines → nodes → connectors              ── netUnicorn's map(), explicit
@@ -112,9 +115,28 @@ cloud platform, deployment, or trace" (NetForge §3.2). It has exactly two parts
   structure), drawn from the corpus by `select()` over descriptor ranges, adapted
   by `transform()` (profile *filtering* preserves semantics; *trimming* expands
   the usable corpus), composed by `merge()`.
-- **Hybrid replay** is the fidelity rule: pressure is open-loop (fixed by the
-  CTP), the application under test stays fully closed-loop against the resulting
-  queue. CCA is *not* a regime knob — it belongs to the endpoint's stack.
+- **Dynamic pressure has two production alternatives, and Pramana refuses the
+  open-vs-closed-loop battleground by supporting both (Arpit, 07-02):**
+  *open-loop* = `replay(ctp)` — trace-mined pressure, non-reactive, the NetReplica
+  contribution; *closed-loop* = `load(workflows ↦ nodes)` — real applications run
+  as cross-traffic on additional nodes sharing the bottleneck. The elegant part:
+  closed-loop pressure requires **no new abstraction** — it is just more workflows
+  mapped to more nodes, drawn from the same pools (a Mininet-synthesized topology
+  or PINOT RPis both qualify as those nodes). Hybrid replay remains the open-loop
+  fidelity rule: pressure fixed, application-under-test fully reactive.
+- **Regimes have two realization modes.** **Imposed**: the bottleneck is emulated
+  (tc/HTB on veths) and the static envelope is *set* — the T1/laptop default.
+  **Inhabited**: the bottleneck is a *real* link reached through a connector — a
+  PINOT RPi on the campus wireless network, a Starlink terminal, a cellular
+  modem — where the envelope is a property of the environment and pressure can
+  still be injected via `load(...)` on co-located nodes. Wireless/cellular/LEO are
+  therefore **not out of scope; they are inhabited regimes on the right
+  infrastructure** — a connector question, not an abstraction limit. The
+  verification probe changes *semantics*, not machinery, across modes: in imposed
+  mode it **verifies** (realized vs. requested); in inhabited mode it
+  **characterizes** (measure the regime you got and label the data with it —
+  ground truth either way).
+- CCA is *not* a regime knob — it belongs to the endpoint's stack.
 
 ### 1.3 Pool and Node — the placement axis (from netUnicorn, made explicit)
 
