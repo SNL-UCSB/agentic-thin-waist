@@ -1,7 +1,9 @@
 # Pramana Architectural Spec — v0.1 (Convergence Draft)
 
-**UCSB SNL · 2026-07-01 · Status: CONVERGED DRAFT — 7 of 9 forks resolved; 2 remain
-open with accepted leans (§9). Ready as agenda for the team spec meeting.**
+**UCSB SNL · 2026-07-01, refined 07-02 · Status: CONVERGED DRAFT — 7 of 9 forks
+resolved (D1–D7) + 4 refinements from the netUnicorn comparison (R1–R4, §9); 2
+questions remain open with accepted leans. Ready as agenda for the team spec
+meeting.**
 
 Synthesized from: the 07-01 architecture meeting (Arpit, Jaber, Haarika, Manni;
 transcript in #pramana-v2), the March–April taskforce decisions
@@ -26,6 +28,30 @@ meeting closed on. **[OPEN]** marks unresolved forks, collected in §9.
 | Jul 1 | Persistent worker pool ("a bit of a no-brainer — these dockers don't need to be ephemeral" — Arpit); orchestrator decomposition (§3); taxonomy (§2); capability publishing (§4); telemetry decoupling (§6.2). | This spec |
 
 ## 1. Design principles
+
+### 1.0 Usability is the ordering principle (added 07-02)
+
+netUnicorn's cautionary tale is a *usability* tale: hard to run on a laptop, bloated
+as a service, and unsustainable manual authorship of tasks/pipelines. Pramana is
+what netUnicorn envisioned, with the authorship automated — and every architectural
+decision is ordered by three usability tiers:
+
+- **T1 — Laptop (primary goal).** On a single laptop: `git clone` →
+  `docker compose up` → a simple data-collection request → data, in minutes. No
+  cloud account, no API key required (the API-optional path is a T1 requirement,
+  not a convenience). The **laptop profile** runs the minimal service set; both
+  experiment endpoints can live inside one Docker via NetReplica's single-container
+  namespace compilation (§5.2).
+- **T2 — Cloud scale-up.** The *same spec*, scaled: prebuilt images + a connectivity
+  backend flag move the worker pool to cloud resources. Nothing about the intent or
+  the spec changes; only the mapping does.
+- **T3 — Infrastructure interfacing.** Easily reach different infrastructures
+  (testbeds, K8s, other clouds) for extensive use cases — via a netUnicorn-style
+  connector contract (§5.4), which is precisely the piece netUnicorn got right.
+
+A feature that improves T2/T3 but adds weight to T1 defaults to the scale profile.
+
+### 1.1 The constitution
 
 The seven taskforce principles (Apr 1, verbatim) remain the constitution:
 
@@ -204,6 +230,33 @@ experiment_set:
   ("anything you do on a host from a workflow perspective is NetGent"). Haarika's
   broadcaster A/V workflow gets upstreamed.
 
+**Pipeline = NetGent workflow (refined 07-02).** In netUnicorn, the pipeline-per-node
+was hand-authored: manually specified tasks, manually composed pipelines — the
+unsustainable part. In Pramana, the pipeline for a node *is* the NetGent workflow,
+and the wrapper actions around the application (pre/post: start capture, launch app,
+collect data, emit telemetry) are **part of NetGent itself**, not a second
+abstraction. Workflow generation is AI-assisted at development time (NetGent's
+generative mode as an authoring tool), never in the execution path. This is the
+lineage claim in one line: *Pramana = netUnicorn's node/pipeline vision, with the
+authorship of the pipeline automated by NetGent and the authorship of the intent
+automated by the LLM.*
+
+**Two endpoint configurations (refined 07-02).** Every experiment has two endpoints
+around the bottleneck; the spec supports both placements:
+
+1. **In-Docker pair (T1 default).** NetReplica's full setup is compiled into a
+   *single Docker instance* using network namespaces — both endpoints and the
+   reconfigurable bottleneck link live inside one container. This is what makes the
+   laptop tier real: one container = one complete experiment environment.
+2. **Split pair.** The client-side worker holds the reconfigurable bottleneck link
+   and connects to an **external endpoint node**: a separate container on the same
+   machine, or a remote container/host (T2/T3). The external endpoint is a named
+   service node in the spec (§5.2 sketch); the client workflow references it by
+   name.
+
+The planner chooses placement per experiment set; the spec's `mapping:` block makes
+it explicit and overridable.
+
 ### 5.3 Per-experiment execution sequence (worker-local)
 
 1. Receive experiment JSON (pointerized: CTP pointers, workflow URL, static knobs).
@@ -217,6 +270,26 @@ experiment_set:
 7. Reset network config between experiments; container persists per its persistence
    level.
 
+### 5.4 Connector contract for T2/T3 (adopted from netUnicorn, 07-02)
+
+The one piece of netUnicorn's architecture that directly serves usability tiers 2–3
+is its connector layer, and we adopt its shape rather than reinvent it:
+
+- A minimal protocol per infrastructure: `get_nodes / deploy / execute / stop`
+  (netUnicorn's `NetunicornConnectorProtocol`; each of its seven connectors is
+  ~140–240 LLoC). Pramana's `ConnectivityManager` backends (`local_docker`, `aws`,
+  the `NotImplementedError` `gcp`/`remote`) are refactored to this contract so a new
+  infrastructure is a small plug-in, not a code change in orchestration.
+- Connectors are configuration-selected (the spec's `mapping:` names them), keeping
+  principle 6 (portability via configuration).
+- The laptop profile ships with exactly one connector (`local_docker`); everything
+  else is opt-in. T1 never pays for T3's generality.
+- Worth evaluating during the worker-pool patchwork: netUnicorn's **pull-based
+  executor** semantics (worker polls for work, POSTs results, heartbeats + backoff;
+  core never needs inbound access to nodes). Pull semantics solve the NAT problem at
+  the worker rather than at a broker, and compose with — or shrink — the scale
+  profile's queue.
+
 ## 6. Representation plane
 
 ### 6.1 CTP service — two-step contract
@@ -229,14 +302,19 @@ experiment_set:
 - Batch semantics: the experiment set carries the full CTP pointer list; workers
   download in batches (e.g., 100 at a time), never one-per-iteration.
 
-### 6.2 Telemetry service **[RESOLVED 07-01: RabbitMQ]**
+### 6.2 Telemetry service **[RESOLVED 07-01: RabbitMQ · refined 07-02: scale profile only]**
 
 - Non-ephemeral, user-accessible; never torn down as part of experiment lifecycle.
-- **Decoupled upload via RabbitMQ**: workers publish result-ready events + artifacts
-  to a queue; a horizontally-scalable uploader consumes and persists to telemetry
-  (Postgres + S3/MinIO). Execution never blocks on upload; sync point is
-  end-of-experiment-set, not end-of-experiment. Durability across worker death is the
-  reason a real broker won over buffer-and-retry.
+- **Decoupled upload via RabbitMQ — in the scale profile**: workers publish
+  result-ready events + artifacts to a queue; a horizontally-scalable uploader
+  consumes and persists to telemetry (Postgres + S3/MinIO). Execution never blocks
+  on upload; sync point is end-of-experiment-set, not end-of-experiment. Durability
+  across worker death is the reason a broker won over buffer-and-retry at scale.
+- **Laptop profile (R3):** no broker. Workers write through the *same publish
+  interface* to a local buffer + direct-upload path (everything is on one machine;
+  broker durability buys nothing there). The interface is identical so specs and
+  worker code don't change between profiles — only the compose profile does. This
+  amends D3 in scope, not in substance, per the §1.0 usability ordering.
 - Worker-side results are deleted only after confirmed upload.
 - Provisioning is spec-relevant: Postgres connection pool ~10–20× concurrent
   experiment count; disk sized for the experiment set; experiments fail fast if
@@ -306,6 +384,16 @@ Resolved during convergence review (2026-07-01, Arpit):
 | D5 | Secrets | **Local gitignored secrets file**, spec references by key (§3). |
 | D6 | Spec→Substrate verification | **In summer scope, minimal form** (§7). |
 | D7 | Track 2–4 ownership | **Assign at next meeting**; this doc is the agenda. |
+
+Refinements from the netUnicorn comparison review (2026-07-02, Arpit —
+`docs/pramana_vs_netunicorn.md`):
+
+| # | Refinement | Content |
+|---|---|---|
+| R1 | Usability is the ordering principle | Three tiers: T1 laptop (primary), T2 cloud scale-up, T3 infra interfacing (§1.0). netUnicorn's cautionary tale = usability, not maintenance. Deployment **profiles** bound T1 weight. |
+| R2 | Two endpoint configurations in the spec | In-Docker pair (NetReplica single-container namespaces — T1 default) vs. split pair (client-side bottleneck + external endpoint node, local or remote) (§5.2). Pipeline-per-node = NetGent workflow incl. pre/post actions; authorship automated, not manual. |
+| R3 | D3 scoped to the scale profile | RabbitMQ only in the scale profile; laptop profile uses local buffer + direct upload behind the same publish interface (§6.2). |
+| R4 | Adopt netUnicorn's connector contract for T2/T3 | `get_nodes/deploy/execute/stop` plug-ins; laptop ships `local_docker` only; evaluate pull-based executor semantics during the pool patchwork (§5.4). |
 
 Remaining open, with accepted leans (revisit only with evidence):
 

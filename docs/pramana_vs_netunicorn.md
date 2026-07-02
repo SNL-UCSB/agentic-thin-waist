@@ -99,18 +99,33 @@ data points under a 10 Mbps / 10 ms bottleneck with realistic cross-traffic."
    SaltStack-direct is the evaluation template the HotNets E4 "time comparison"
    needs.
 
-## 6. The cautionary-tale tension (flag for the team)
+## 6. The cautionary tale, correctly stated: usability (Arpit, 07-02)
 
-The Apr 1 taskforce called netUnicorn "the cautionary tale" for persistent-service
-maintenance, and Pramana's principles demand local-first + minimal dependencies.
-netUnicorn's core is 6 Python services + Postgres + a Docker registry (~240 MB).
-Pramana is now: 6 services + Postgres + MinIO, **plus RabbitMQ (D3), plus a
-persistent worker pool, plus service nodes**. We are architecturally converging on
-the operational weight we defined ourselves against — with the difference that
-`docker compose up` hides it. That is defensible (compose makes 9 containers as easy
-as 3), but it should be a *conscious* trade recorded in the spec, and it sharpens Q1
-of `verification_gap.md` thinking: every added always-on service is maintenance
-surface the Mininet-bar principle must absorb.
+netUnicorn's failure mode was **usability**, and Pramana's architecture must be
+ordered by it. The three specific failures:
+
+1. **Hard to run on a laptop.** The core assumed a deployed platform (6 services +
+   Postgres + Docker registry + connectors to real infrastructure). There was no
+   meaningful single-machine story for "I just want data now."
+2. **Bloated as a service.** The whole system was a platform you *operate*, not a
+   tool you *use*. Operational weight is a usability failure mode, not only a
+   maintenance one.
+3. **Manual authorship of tasks and pipelines didn't sustain.** Every task was
+   hand-written Python; every pipeline hand-composed. Composing and compiling
+   individual tasks was not sustainable long-run — the library never grew the way it
+   needed to.
+
+Pramana's answer, feature by feature:
+
+| netUnicorn usability failure | Pramana counter |
+|---|---|
+| No laptop story | **Laptop-first is the primary goal**: `git clone` → `docker compose up` → intent → data in minutes, on one machine, no cloud account, no API key required (API-optional path). |
+| Bloated platform | **Deployment profiles**: the laptop profile runs the minimal service set; scale-out components (broker, uploader fleet, global CTP) belong to the scale profile only. Compose hides *count*, profiles bound *weight*. |
+| Manual task/pipeline authorship | **NetGent is the game changer**: the pipeline-per-node is a NetGent workflow (pre/post actions — app start, capture, telemetry — are part of NetGent itself), pre-validated and capability-published; generation is AI-assisted at development time. The waist is authored *for* the user, not *by* the user. |
+
+The residual caution stands in sharpened form: every always-on service added to the
+**laptop profile** is a regression toward failure mode 2. RabbitMQ, per this lens,
+must not be a laptop-profile dependency (see spec R3).
 
 ## 7. One-paragraph summary (paper-ready)
 
