@@ -59,9 +59,12 @@ program we call the **Core**:
 **The three deployment sizes.** *Tier 1 (the primary goal):* everything above
 on one laptop — `git clone`, `docker compose up`, one command, data in
 minutes, no cloud account. *Tier 2:* the same experiment file, with cloud
-workers — Amazon machines get public addresses reachable only from the
-operator's IP (this is already implemented and proven; the laptop only ever
-dials out, so it never needs to be reachable itself). *Tier 3:* other
+workers — the workers are Amazon EC2 machines, and it is *those* machines that
+get public addresses (assigned by AWS, reachable only from the operator's
+current IP). The laptop never has, and never needs, a public address at any
+tier: on the laptop, workers are just local containers on the Docker network;
+in the cloud, the laptop is always the caller, never the callee. This is
+already implemented and proven. *Tier 3:* other
 infrastructures (campus testbeds, wireless nodes) via small connector
 plug-ins — future work.
 
@@ -199,9 +202,14 @@ site, `compile()`.
 **Plane-level principles (P-PLANE).**
 6. The Core moves *pointers*; bulk data (traces, captures, profiles) always
    moves directly between workers and storage.
-7. Nothing ever needs to dial *into* the laptop. At Tier 2, the *workers* are
-   made reachable (public IP, security group scoped to the operator — the
-   already-implemented model) and the Core dials out to them.
+7. Nothing ever needs to dial *into* the laptop, at any tier — the Core is
+   always the caller. Reachability is tier-scoped vocabulary: at **Tier 1**,
+   workers are containers on the same machine, reached over the local Docker
+   network (no public IPs exist anywhere). At **Tier 2**, workers are EC2
+   instances — *AWS* assigns those machines public IPs, and their security
+   groups accept traffic only from the operator's current address (the
+   already-implemented model). "Workers are made reachable" is a statement
+   about cloud VMs only, never about anything on the laptop.
 8. Below the waist — after the echo is confirmed — no AI can run, by
    construction.
 9. Capability information is loaded at startup and on explicit refresh, never
