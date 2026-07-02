@@ -284,16 +284,20 @@ is its connector layer, and we adopt its shape rather than reinvent it:
   principle 6 (portability via configuration).
 - The laptop profile ships with exactly one connector (`local_docker`); everything
   else is opt-in. T1 never pays for T3's generality.
-- **Rendezvous channel (resolved 07-02, supersedes the pull-evaluation note).**
-  netUnicorn's pull model assumed a publicly reachable core/gateway; Pramana's
-  orchestrator lives on a laptop with no public IP, and at T3 *neither* side is
-  reachable. Therefore: both sides dial out to a **rendezvous channel**. Interface is
-  fixed (`claim()/heartbeat()/publish()`); binding varies — T1: the local scheduler
-  over localhost HTTP (no broker, R3 intact); T2/T3: a broker provisioned *with* the
-  pool by its connector (`deploy()` returns worker handles + channel endpoint),
-  carrying both dispatch and results. The rendezvous ships and dies with its pool —
-  Pramana never requires a standing server, which is the operational anti-netUnicorn
-  property. Full contract: `docs/pramana_interfaces_v0.md` S5/I2.
+- **Channel bindings (revised 07-02 after auditing the current implementation).**
+  The implemented model already solves T2 reachability by inversion: workers are
+  made reachable (EC2 public IP + security group scoped to the laptop's IP,
+  `aws_provisioner.py`), and the laptop orchestrator is a pure *outbound* HTTP
+  client. This is kept as the **direct binding** — it is proven, and it lets the
+  substrate worker remain an HTTP server through the persistent-pool change.
+  Results at T2 move to an **object-store rendezvous** (worker writes outbound to
+  S3; laptop importer reads outbound), retiring the pcap double-hop through the
+  laptop uplink. A **broker rendezvous** is reserved for T3 (workers behind NAT —
+  residential edge), implemented as a sidecar poller replaying into the worker's
+  unchanged HTTP API. RabbitMQ's scope therefore shrinks to T3-only, possibly
+  never. Required fixes in the current code: hard-fail the SG `0.0.0.0/0` fallback
+  (privileged worker exposed to the internet) and add `refresh-ingress` for laptop
+  IP changes. Full contract: `docs/pramana_interfaces_v0.md` S5/S8/I2.
 
 ## 6. Representation plane
 

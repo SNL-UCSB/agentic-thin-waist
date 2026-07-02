@@ -140,8 +140,12 @@ POST /status   {worker_id, deployment_id, state, stage, ts, partial_log_tail}
 ```
 
 `publish(envelope)` is the entire telemetry-facing interface a worker knows.
-Laptop profile: implementation = write-through to Telemetry REST + local buffer.
-Scale profile: implementation = RabbitMQ producer. Same signature (rule 6).
+T1 binding: write-through to Telemetry REST + local buffer. T2 binding:
+**object-store rendezvous** — the worker writes artifacts + envelopes outbound to
+S3; a laptop-side importer polls the bucket and ingests into Telemetry (both sides
+outbound-only; replaces today's `telemetry_capture_pull`, which double-hops every
+pcap through the laptop's uplink mid-experiment). T3 binding: broker, if ever
+needed. Same signature at every tier (rule 6).
 
 ## 3. The seams (the verbs)
 
@@ -151,7 +155,7 @@ Scale profile: implementation = RabbitMQ producer. Same signature (rule 6).
 | S2 Parser → Match → Planner → SpecGen | in-process typed calls passing A1 → draft spec → A5; **not** HTTP | modules of one service; the artifact types are the interface |
 | S3 KB ⇄ publishers | `GET capability file` (+ `ETag`/`If-None-Match` for refresh) | pull @ bootstrap + explicit refresh; never per-experiment |
 | S4 Match ⇄ CTP | `POST /ctp/query {criteria}` → `{pointers[], available, requested}` | partial counts are valid answers, not errors |
-| S5 Scheduler ⇄ workers | A7 claim + A8 status through a **rendezvous channel**: both sides dial *out* to a mutually reachable point. T1 binding = the local scheduler (localhost HTTP, no broker). T2/T3 binding = a broker provisioned *with* the pool by its connector (`deploy()` returns worker handles + channel endpoint); the channel carries both work items and results (unifies with S8/D3). | **Key constraint (Arpit, 07-02): the orchestrator lives on a laptop with no public IP** — netUnicorn could assume a publicly reachable core/gateway; Pramana cannot. At T3 *neither* side is reachable, so a rendezvous is the only universal pattern. No standing server is ever required: the rendezvous ships and dies with its pool. |
+| S5 Scheduler ⇄ workers | A7/A8 over a **channel** with per-tier bindings. **Direct binding (default, implemented):** scheduler dials reachable workers over HTTP — localhost containers at T1; public-IP EC2 with laptop-scoped security group at T2 (the current `connectivity.py` model: laptop is a pure outbound client, workers are servers). **Broker rendezvous binding (T3 only):** when workers sit behind NAT (residential edge), a broker ships with the pool and a *sidecar poller* on each node claims work and replays it into the worker's unchanged HTTP API. | Constraint: the laptop orchestrator is never reachable (no netUnicorn-style public core). The implemented insight: at T2, *worker* reachability is cheap (public IP + SG), so direct beats rendezvous there; the rendezvous is reserved for tiers where nothing is reachable. |
 | S6 Orchestrator ⇄ connectors | `get_nodes() → PoolSpec/NodeDescriptors` · `deploy(pool_spec)` · `execute(worker, bootstrap_cfg)` · `stop(worker)` | netUnicorn's protocol verbatim; one connector = one plug-in |
 | S7 Worker ⇄ CTP/NetGent | `GET` by pointer (CTP payload, workflow file), local cache, skip-if-cached | data plane; outside shaped namespaces |
 | S8 Worker ⇄ Telemetry | `publish(ResultEnvelope)` | profile-swappable implementation |
@@ -204,6 +208,6 @@ All four resolved 2026-07-02 (Arpit):
 | # | Resolution |
 |---|---|
 | I1 | **Iterative Q&A** for clarification — conversational, one question at a time, recompile as answers land. Riders: a round cap with batch-the-rest fallback (LLM-cost guard, per the Zoom-sweep API-credit lesson) and a "use defaults for everything else" escape hatch. Match is stateful per session. |
-| I2 | **Rendezvous channel** (supersedes both original options). Interface: `claim()/heartbeat()/publish()` everywhere; binding varies — T1: local scheduler over localhost HTTP (no broker); T2/T3: broker provisioned *with* the pool by its connector, carrying both dispatch and results. Driven by the no-public-IP constraint: the laptop orchestrator can never be assumed reachable (netUnicorn assumed a public core; Pramana must not). No standing infrastructure — the rendezvous ships and dies with its pool. |
+| I2 | **Channel abstraction with three bindings** (revised again 07-02 after auditing `connectivity.py`/`aws_provisioner.py` — the current implementation already solves T2 reachability by *inverting* it: workers get public IPs + a security group scoped to the laptop's IP; the laptop is a pure outbound HTTP client). Bindings: **(a) direct** — scheduler dials reachable workers (localhost at T1, public-IP EC2 at T2; implemented today, worker stays an HTTP server); **(b) object-store rendezvous for results at T2** — workers write outbound to S3, laptop reads outbound from S3 (replaces `telemetry_capture_pull` double-hop through the laptop uplink; uses existing `shared/s3/`); **(c) broker rendezvous, T3 only** — for workers behind NAT (residential edge), implemented as a **sidecar poller** that claims from the broker and replays into the co-located worker's existing HTTP API, so worker code never changes. RabbitMQ's scope shrinks to binding (c) — possibly never needed. Implementation fixes required: the SG `0.0.0.0/0` fallback must hard-fail (privileged worker on the open internet), and the provisioner needs `refresh-ingress` for laptop IP changes. |
 | I3 | **User-level dedupe tool** — no automatic skipping; a CLI diffs a spec against telemetry (`spec ∩ existing = residual spec`) so intentional repeats are always possible. Rider: the planner may *warn* on overlap (never auto-skip); the tool must be prominent, or the 07-01 "don't repeat data" requirement becomes empty discipline. |
 | I4 | **Annotate, never discard** — every ResultEnvelope carries measured-vs-requested + `within_tolerance`; collection always completes; filtering is analysis-time. Riders: the flag must be loud in exports, and the scheduler alarms on per-worker tolerance-failure *rates* (a systematically broken worker must not annotate garbage all night). |
