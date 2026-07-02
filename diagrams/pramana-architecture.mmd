@@ -13,8 +13,6 @@ graph TD
 
     CONN["Connectors<br/>local_docker, aws, ssh, ..."]
 
-    RDV["Rendezvous Channel<br/>T1: local scheduler, no broker<br/>T2/T3: broker shipped with pool"]
-
     NG["NetGent workflow registry<br/>(capability publisher, static)"]
     NR["NetReplica knobs<br/>(capability publisher, static)"]
     CTP["CTP Service<br/>(capability publisher, live:<br/>query schema + profile DB)"]
@@ -40,11 +38,8 @@ graph TD
     MATCH -->|"live CTP query, pointers back"| CTP
     PLAN -->|"get_nodes / deploy"| CONN
     CONN -.->|"materialize pool + nodes"| POOL
-    CONN -.->|"provision channel with pool"| RDV
-    SCHED -->|"dial out: offer work items"| RDV
-    POOL -->|"dial out: claim work, heartbeat"| RDV
-    POOL ==>|"publish results, async"| RDV
-    RDV ==>|"results"| TEL
+    SCHED -->|"dispatch work + poll status (Core dials out; T2: SG-scoped HTTP)"| POOL
+    POOL ==>|"results: T1 direct publish; T2 Core pulls"| TEL
     POOL ==>|"RUNTIME data plane: fetch CTP payload by pointer"| CTP
     POOL ==>|"RUNTIME data plane: fetch workflow by pinned sha"| NG
     POOL ==>|"app traffic"| NODE

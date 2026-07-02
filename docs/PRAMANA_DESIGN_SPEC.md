@@ -1,12 +1,121 @@
-# PRAMANA — Complete Design Specification v1.1
+# PRAMANA — Complete Design Specification v1.2
 
-**UCSB SNL · 2026-07-02 · CANONICAL.** Supersedes v1.0 after the software-engineering
-adversarial review (3 lenses, 47 findings — triaged in
-`pramana_adversarial_review_2026-07-02.md` §SE) and five owner decisions (E1–E5,
-§14). An engineer implements from this document alone. System name: **Pramana**
-(Sanskrit: *evidence*); repo: `agentic-thin-waist`.
+**UCSB SNL · 2026-07-02 · CANONICAL — the one document to implement from.**
+System name: **Pramana** (Sanskrit: *evidence*); repository:
+`agentic-thin-waist`. This version (v1.2) adds a plain-language overview and
+removes jargon-only passages after readability feedback.
+
+**How to read this document.** Part I tells the whole story in plain language —
+read it first, whoever you are. Parts II onward are the precise reference:
+requirements, the specification format, module contracts, and operational
+rules. Labels like "E1" or "R9" are anchors into the decision history; every
+one of them is restated in words where it is used, so you never need another
+file to understand this one. The older documents in `docs/` (spec_v0,
+interfaces_v0, abstraction_v0) are design history, superseded by this file.
 
 ---
+
+# Part I — The system in plain language
+
+**What Pramana is.** A researcher, a student, or an automated agent describes a
+networking experiment — "compare Zoom under a 10 Mbps bottleneck at 10 ms and
+100 ms latency, with realistic background traffic" — and Pramana turns that
+sentence into real measurements: packet captures, transport statistics, and
+application metrics, each labeled with the network conditions that actually
+held while it was collected. It runs entirely on one laptop by default; the
+same experiment description can later run on cloud machines by changing one
+line.
+
+**How an experiment flows through the system.** Six steps, all inside one
+program we call the **Core**:
+
+1. **Parse.** A language model reads the request and fills in a structured
+   form. This is the only place a language model is ever used per request —
+   and you can skip it entirely by writing the form yourself
+   (`pramana run my_experiment.yaml`), which requires no AI and no API key.
+2. **Check.** The *match* step validates every field of that form against what
+   the system actually supports — which applications, which network knobs,
+   which ranges. Anything the model invented that isn't supported is rejected,
+   never silently accepted. If required information is missing (say, a Zoom
+   meeting code), Pramana asks you — once, as a single batch of questions.
+3. **Echo.** Before anything runs, Pramana shows you, in plain English, what
+   it is about to do — including every default it filled in for you. You
+   confirm; then no AI touches anything downstream.
+4. **Plan and schedule.** The experiment list is assigned to a pool of
+   long-lived worker containers. Workers are not created and destroyed per
+   experiment (that was the old design's biggest waste); they persist and take
+   work one item at a time.
+5. **Run.** Each worker sets up the network conditions (bandwidth, latency,
+   queueing — using standard Linux tools inside namespaces), verifies with a
+   quick measurement that the conditions it was asked for are the conditions
+   it actually got, replays realistic background traffic, drives the real
+   application (a real browser joining a real Zoom call), and captures
+   everything.
+6. **Publish.** Results land in the telemetry database, labeled with their
+   full context — requested conditions, measured conditions, application,
+   software versions — so every data point can answer "under exactly what
+   circumstances was I collected?"
+
+**The three deployment sizes.** *Tier 1 (the primary goal):* everything above
+on one laptop — `git clone`, `docker compose up`, one command, data in
+minutes, no cloud account. *Tier 2:* the same experiment file, with cloud
+workers — Amazon machines get public addresses reachable only from the
+operator's IP (this is already implemented and proven; the laptop only ever
+dials out, so it never needs to be reachable itself). *Tier 3:* other
+infrastructures (campus testbeds, wireless nodes) via small connector
+plug-ins — future work.
+
+**Where the pieces come from.** Pramana composes three existing systems built
+by this group. **NetGent** contributes application behavior: workflows —
+"join this Zoom call", "watch this video" — compiled once from natural
+language into small state-machine files that replay deterministically forever,
+with no AI at run time. **NetReplica** contributes network conditions: the
+bottleneck link with its bandwidth, latency, and queue, built from Linux
+namespaces inside a single container. The **CTP service** contributes
+realistic background traffic: a database of *cross-traffic profiles* mined
+from real campus traces, searchable by intensity and burstiness. Each project
+publishes a small **capability file** describing what it offers; Pramana loads
+those at startup and validates every experiment against them. The projects
+evolve independently — Pramana never reads their code, only their capability
+files, prebuilt images, and individual artifacts fetched on demand.
+
+**What makes the results trustworthy.** Three mechanisms, in increasing order
+of depth. First, the AI can only fill fields with values the capability files
+declare — an invented setting fails validation and comes back as a question.
+Second, every experiment's identity is a cryptographic hash of exactly what
+was run — the workflow version, its parameters, the network conditions — so
+duplicates are detectable and every result is traceable. Third, workers
+*measure* the conditions they were asked to impose and ship
+requested-versus-realized numbers inside every result: the dataset carries its
+own ground truth, and a result never claims more verification than was
+actually performed.
+
+**What happens when things fail.** Workers send status regularly; if one goes
+silent, its work is reassigned — and a *fencing* counter guarantees that a
+worker that only *seemed* dead cannot come back and quietly pollute other
+experiments' traffic or write stale results. If the Core itself is killed
+mid-run, restarting it reconstructs everything from the database and resumes.
+Results are written with duplicate-proof keys, so retries can never
+double-count data.
+
+**What we deliberately did not build.** No message broker, no service mesh, no
+VPN, no third-party job system in the execution path, no Kubernetes, no web
+UI. Every one of these was considered and rejected — mostly because the
+current, simpler implementation already solves the problem, and every extra
+moving part is something a small research team must keep alive for years. The
+execution path relies only on boring, decades-old tools (Linux tc, tcpreplay,
+Postgres, Docker); anything newer is confined to development time, swappable
+by configuration, or small enough to vendor.
+
+**Right now (July 2026), two tracks run in parallel and must not be confused:**
+the *evidence track* — Zoom and HotNets data collection — runs on today's
+pipeline, frozen, bugfix-only; the *build track* — everything in this document
+— is the deliverable for the fall paper, the classroom, and beyond. Nothing in
+the build may block the data.
+
+---
+
+# Part II — Reference specification
 
 ## 0. Goals — the language we use, elevated then derived
 
@@ -64,23 +173,58 @@ everything below the waist is composition and replay, never authorship.* Model
 use above the waist: offline authoring (human-gated) + exactly one per-request
 site, `compile()`.
 
-**P-SYS** (system): 1 Usability tiers T1 laptop / T2 cloud / T3 any-infra;
-T1-weight rule. 2 Minimum viable intelligence (schema-constrained form-filling;
-pluggable LLM binding). 3 Hallucination containment (closed-world where
-enumerable; validated/allow-listed/backflowed where not; lexicon; provenance;
-echo; human-signed offline AI). 4 Logical disaggregation, physical packaging by
-profile. 5 Brownfield rule (reuse mapped in §8; changes mapped in §12).
-**P-PLANE**: 6 pointers in control plane, payloads direct. 7 outbound-initiation
-at unreachable boundaries; at T2 *workers* are made reachable (the implemented SG model); the Core only dials out (E5-revised).
-8 AI-free below the waist by type. 9 capability sync never per-experiment.
-**P-MOD**: 10 artifact-only interfaces + state ownership. 11 **validation strict
-at the compile gate; must-ignore-unknown below the waist** (K8s convention;
-additive fields never bump `schema_version`, semantic changes do; modules declare
-accepted version ranges). 12 interfaces profile-invariant, transports are
-bindings. **P-METHOD**: 13 idempotency at every sink; POSTs with content-derived
-ids are idempotent upserts (200 + existing). 14 fail fast and loud (perms,
-signatures, sha and fence mismatches, SG fallbacks). 15 determinism below the
-waist; identity via one shared RFC 8785 function only.
+**System-level principles (P-SYS).**
+1. *Usability orders everything.* Three tiers: the laptop is the primary
+   target; cloud scale-up must reuse the same experiment file; other
+   infrastructures come through connectors. Any feature that helps the larger
+   tiers but adds weight to the laptop tier goes into the optional "scale"
+   profile instead of the default.
+2. *Minimum viable intelligence.* The AI's job is reduced to filling a typed
+   form whose fields are published by capability files, so a small self-hosted
+   model suffices; the model is chosen once at setup and swappable by
+   configuration.
+3. *Hallucination containment.* Enumerable fields can only take published
+   values; free-form fields (URLs, durations) are validated, checked against
+   allow-lists, or turned into questions; vague words ("moderately bursty")
+   resolve only through a versioned lexicon file; every field records where
+   its value came from; the user sees a plain-English echo before anything
+   runs; and any AI-generated artifact (workflows, capability files) passes a
+   human gate before entering the system.
+4. *Disaggregate logically, package physically by profile.* Module boundaries
+   are enforced by the artifacts they exchange — never by how many containers
+   run. On the laptop the whole Core is one process.
+5. *Brownfield first.* Reuse existing code wherever it satisfies a contract;
+   the reuse map (§8) accounts for every existing file.
+
+**Plane-level principles (P-PLANE).**
+6. The Core moves *pointers*; bulk data (traces, captures, profiles) always
+   moves directly between workers and storage.
+7. Nothing ever needs to dial *into* the laptop. At Tier 2, the *workers* are
+   made reachable (public IP, security group scoped to the operator — the
+   already-implemented model) and the Core dials out to them.
+8. Below the waist — after the echo is confirmed — no AI can run, by
+   construction.
+9. Capability information is loaded at startup and on explicit refresh, never
+   during an experiment.
+
+**Module-level principles (P-MOD).**
+10. A module's interface may reference only the artifacts it produces or
+    consumes, and each piece of state has exactly one owner (§5.2).
+11. Validation is *strict* at the compile gate (unknown fields rejected) and
+    *tolerant* everywhere below it (unknown fields ignored) — the Kubernetes
+    convention. Adding a field never breaks old consumers and never bumps the
+    schema version; only semantic changes do.
+12. Interfaces never change between deployment tiers; only transports do.
+
+**Method-level principles (P-METHOD).**
+13. Every sink is idempotent: results are written with duplicate-proof keys,
+    and re-submitting the same experiment set returns the existing one.
+14. Fail fast and loud: bad file permissions, hash mismatches, stale fencing
+    counters, and security-group misconfiguration are hard errors, never
+    warnings.
+15. Everything below the waist is deterministic; experiment identity is
+    computed by exactly one shared hashing function (RFC 8785 canonical JSON)
+    that no module may reimplement.
 
 **P-EVIDENCE (E1 — the paths rule):** *HotNets/Zoom evidence runs on TODAY'S
 pipeline* (executor loop, duration hack, Haarika's flags — frozen, bugfix-only);
@@ -305,8 +449,9 @@ persist-via-telemetry-REST pattern is retired.
   operator's IP), Core dials out over HTTP — proven code, zero new
   dependencies. Known limitation (recorded, not redesigned): SG scoping is
   access control, not encryption; a pinned self-signed cert is the cheap v1.1
-  fix if secrets-bearing T2 runs demand it. No mesh, no tunnels, no broker.
-  T3 NAT'd infra remains the one case needing a rendezvous — deferred with it.
+  fix if secrets-bearing T2 runs demand it. No mesh, no tunnels, no broker — the transport question is settled by the
+  current implementation. Reaching NAT'd third-party infrastructure (T3) is
+  future work with no mechanism chosen; nothing in v1 anticipates one.
 - **M10 Worker:** substrate `main.py` kept; add `/v1/work` (idempotent-accept;
   synchronous prepare→verify→run→publish; netgent-runner in-process),
   `/v1/status`, fence handling + self-termination, prepare-phase heartbeats,
@@ -400,7 +545,8 @@ telemetry upsert + fence rejection. **M-6:** M5 match + batched backflow + echo;
 M6 pins; M3a binding. **M-7:** CLI. **M-8:** T2 — harden the existing SG model (two filed
 fixes), acceptance 4. **M-9:** scoped verify probe + CTP realized check.
 v2 parking lot: signing/freshness, synthesizer, KB refresh/diff, iterative
-sessions, SMT match, third provider, broker binding, keyring, `diff-collected`.
+sessions, SMT-based matching, a third LLM provider, keyring support, and the
+`diff-collected` dedupe tool.
 
 ## 13. Testing strategy (per SE review; before M-1 completes)
 

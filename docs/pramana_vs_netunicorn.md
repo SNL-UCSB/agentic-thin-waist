@@ -1,5 +1,15 @@
 # Pramana vs. netUnicorn — Architectural Comparison
 
+> **⚠️ HISTORICAL DOCUMENT — SUPERSEDED.** The current, authoritative
+> specification is **`PRAMANA_DESIGN_SPEC.md`**. Decisions recorded here were
+> revised during later reviews — in particular, all "rendezvous channel",
+> broker, S3-importer, and mesh/tunnel transport designs were **rejected**:
+> the shipped model is the current implementation (workers made reachable via
+> operator-scoped security groups; the Core only dials out; results pulled by
+> the Core). Read this file as design history and evidence, not as the spec.
+
+
+
 **UCSB SNL · 2026-07-02**
 
 Sources: `docs/pramana_spec_v0.md` (v0.1 converged draft) vs. netUnicorn

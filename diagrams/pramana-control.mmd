@@ -2,34 +2,31 @@ graph TD
     USER(["User / Agent"])
     UI["pramana CLI - REST API"]
 
-    subgraph ORCH["Core (one process at T1)"]
-        IP["1 - Intent Parser (LLM binding)"]
-        KB["2 - Knowledge Base<br/>hash-addressed capability snapshots"]
+    subgraph ORCH["Core (one process on the laptop)"]
+        IP["1 - Intent Parser (pluggable LLM)"]
+        KB["2 - Knowledge Base<br/>capability snapshots, hash-pinned"]
         MATCH["3 - Match (validation gate)"]
-        PLAN["4 - Planner (rules)"]
+        PLAN["4 - Planner (simple rules)"]
         SPEC["5 - Spec Generator<br/>pins capability hashes + workflow shas"]
-        SCHED["6 - Scheduler"]
+        SCHED["6 - Scheduler<br/>dials workers; polls status"]
     end
 
-    subgraph PUBS["Static capability publishers (evolve independently)"]
-        NG["NetGent registry<br/>capabilities.yaml, signed"]
-        NR["NetReplica<br/>capabilities.yaml, signed"]
+    subgraph PUBS["Capability publishers (evolve independently)"]
+        NG["NetGent registry<br/>capabilities.yaml in repo"]
+        NR["NetReplica<br/>capabilities.yaml in repo"]
     end
-    CTP["CTP Service<br/>capabilities: query schema, live"]
-    CONN["Connectors<br/>local_docker, aws, ssh"]
-    RDV["Channel<br/>T1 local / T2-T3 broker with pool"]
-    POOL["Worker pool + service nodes"]
+    CTP["CTP Service<br/>capabilities: query schema (live)"]
+    CONN["Connectors<br/>local_docker | aws"]
+    POOL["Worker pool + service nodes<br/>T1: local containers<br/>T2: EC2, public IP + SG scoped to operator"]
 
     USER --> UI --> IP --> MATCH
     KB --> MATCH
-    MATCH -.->|"iterative backflow"| USER
+    MATCH -.->|"one batched clarification round"| USER
     MATCH --> PLAN --> SPEC --> SCHED
     MATCH -->|"RUNTIME: CTP pointer query"| CTP
-    KB -.->|"BOOTSTRAP + REFRESH:<br/>pull signed capability file"| NG
-    KB -.->|"BOOTSTRAP + REFRESH:<br/>pull signed capability file"| NR
-    KB -.->|"BOOTSTRAP + REFRESH:<br/>pull query schema"| CTP
+    KB -.->|"BOOTSTRAP: load capability files"| NG
+    KB -.->|"BOOTSTRAP: load capability files"| NR
+    KB -.->|"BOOTSTRAP: load query schema"| CTP
     PLAN -->|"BOOTSTRAP: get_nodes / deploy"| CONN
-    CONN -.->|"materialize pool + channel"| POOL
-    CONN -.-> RDV
-    SCHED -->|"offer work items"| RDV
-    POOL -->|"claim + heartbeat (dial out)"| RDV
+    CONN -.->|"materialize pool + nodes"| POOL
+    SCHED -->|"dispatch work + poll status<br/>(Core always dials out)"| POOL
