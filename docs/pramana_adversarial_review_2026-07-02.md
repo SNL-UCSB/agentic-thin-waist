@@ -89,3 +89,24 @@ schema/implementation follows) · **ACCEPTED** (real limitation, now stated) ·
    unspecified; **v1 = fail and flag** (no runtime LLM repair — R5/§1.3).
 3. Inhabited-mode (wireless/LEO/cellular) deployments are designed-for but
    unevaluated.
+
+## G — NotebookLM grounding pass (primary sources, same day)
+
+Sources added to notebook `survey-agentic-systems-research`: Mininet (HotNets '10),
+Mininet-HiFi (CoNEXT '12), NetForge v3 (arXiv:2507.13476), NetGent
+(arXiv:2509.00625v2), netUnicorn full text (arXiv:2306.08853 — the prior source
+was abstract-only). Claims checked with quote-demanding queries:
+
+| Claim (doc) | Verdict |
+|---|---|
+| Mininet-HiFi made fidelity a monitored per-run property | **Confirmed** (§3.4: inter-dequeue times, CPU idle, "necessary conditions"). Caveat: the paper never says "network invariants" — do not use that phrase. |
+| netUnicorn reports at pipeline end, "best-effort" fidelity | **Confirmed verbatim** (§4.2). |
+| netUnicorn 17–35 vs 113–237 LLoC (5–13×) | **Confirmed** (Table 5, §6.2). |
+| netUnicorn pull-based executors | **Attribution corrected**: pull semantics are the *implementation's* (executor polls gateway); the paper says instructions are "shipped" and motivates the gateway via "intermittent network connectivity" (App. H). |
+| NetForge regime = static envelope + congestion-pressure process | **Confirmed verbatim** (§2.2). |
+| Filtering=`select()` / trimming=`transform()` | **Confirmed verbatim** (§4) — validates fix A7. |
+| "NetUnicorn separates where… NetForge separates the bottleneck regime…" | **Confirmed verbatim** (§3.1). |
+| NetForge §4 uses intent/representation/execution planes | **Confirmed** — validates fix A16. |
+| ~8 parallel regimes before netem degradation | **Confirmed in v2 only** (§5.5/A4: "eight parallel tasks", JSD < 0.14; limiting factor = "kernel scheduling in netem", not "timer granularity" — wording corrected in spec + abstraction). Not present in v3. |
+| NetGent compiles NL rules → NFA; LLM-free cache-first replay | **Confirmed verbatim** (abstract + cache-hit/miss passage). |
+| NetGent application count | **Corrected**: paper claims "50+ workflows spanning five domains"; public registry holds 16. Both numbers now stated (supersedes the bare A15 fix). |

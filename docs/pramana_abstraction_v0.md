@@ -319,6 +319,6 @@ Two threads make this arc *defensible* rather than merely narratable:
 - CTP replay enters at the *endpoints* and traverses the same bottleneck as the
   reactive workload — pressure and application share the queue, which is the
   entire point.
-- Parallel in-container regimes scale to ~8 per host before netem timer
-  granularity degrades (NetReplica v2 appendix) — a planner packing constraint,
-  i.e., a node attribute.
+- Parallel regime instances scale to ~8 concurrent tasks before kernel scheduling
+  in netem becomes the limiting factor (NetReplica v2 §5.5/A4; JSD across tasks
+  < 0.14 up to eight) — a planner packing constraint, i.e., a node attribute.

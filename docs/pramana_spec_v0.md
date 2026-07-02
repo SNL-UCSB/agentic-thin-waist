@@ -244,8 +244,10 @@ Rules:
 - Substrate workers are **persistent Docker containers created at bootstrap**, not
   ephemeral per-experiment containers. Pool size is a bootstrap parameter with a
   resource-derived default: `min(cores − 2, 8)` concurrent in-container regimes per
-  host (the ~8 ceiling is NetReplica's measured netem-granularity limit, published
-  as a node attribute the planner enforces); larger pools require split-pair
+  host (the ~8 ceiling is NetReplica v2's measured limit — "scaled elastically to
+  eight parallel tasks... beyond this point, kernel scheduling in netem became the
+  limiting factor", v2 §5.5/A4, JSD < 0.14 — published as a node attribute the
+  planner enforces); larger pools require split-pair
   placement or more hosts. User-configurable, never exceeded silently.
 - Docker images are **prebuilt and pulled from a registry** (Docker Hub `snlhub/*` /
   ECR). Build happens at most once at bootstrap if no image is available; never in the

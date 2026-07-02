@@ -35,7 +35,7 @@ data points under a 10 Mbps / 10 ms bottleneck with realistic cross-traffic."
 | Intent → executable | **Compiler service**: (pipeline, node-type) → Dockerfile → image in registry | **Spec Generator**: intent → experiment JSONs + node declarations | Different compilation targets: image vs. spec |
 | Per-node implementation choice | **TaskDispatcher**: `dispatch(node)` picks task impl per node attributes | **Knowledge Base + Match**: capability files, live CTP query, backflow to user | Pramana lifts dispatch to a system-level match with a user feedback loop — netUnicorn has no equivalent of backflow |
 | Infra heterogeneity | **Connector protocol** (`get_nodes/deploy/execute/stop`), pip-installable, YAML-configured, REST-hostable; 7 connectors, 138–242 LLoC each | `ConnectivityManager` with hardcoded backends; `local_docker` ✅, `aws` hybrid, `gcp`/`remote` = `NotImplementedError` | **netUnicorn is strictly ahead here** — adopt its connector contract |
-| Behind-NAT nodes | **Gateway + pull executors**: nodes only need outbound reach; heartbeat 30 s; exponential backoff | Historically: pcaps piped *through* the orchestrator (the §6.3 deviation); spec v0.1 answer: RabbitMQ | netUnicorn solved Pramana's NAT problem in 2023 with pull semantics — RabbitMQ is a heavier answer to the same constraint |
+| Behind-NAT nodes | **Gateway + pull executors** (pull semantics per the executor *implementation*; the paper says instructions are "shipped" and motivates the gateway via nodes with "intermittent network connectivity", App. H): nodes only need outbound reach; heartbeat 30 s; exponential backoff | Historically: pcaps piped *through* the orchestrator (the §6.3 deviation); spec v0.1 answer: RabbitMQ | netUnicorn solved Pramana's NAT problem in 2023 with pull semantics — RabbitMQ is a heavier answer to the same constraint |
 | Worker abstraction | **Node** + `CountableNodePool`/`UncountableNodePool`; `filter().take(N)` | **Persistent worker pool** + **service nodes**, persistence ∈ {iteration, experiment, experiment-set} (D1 adopts netUnicorn's node/pipeline model) | Pramana adds *persistence levels* and *typed* pools — netUnicorn nodes are persistent by nature (the executor is what's ephemeral) |
 | Execution granularity | Control offloaded to node executor; results reported **at pipeline end** ("best-effort" fidelity, minimal comms) | Same conclusion re-derived 07-01: telemetry decoupled, sync at experiment-set end | Convergent evolution — the meeting re-discovered netUnicorn's §4.2 trade |
 | Environment reuse | One image per (pipeline, node-type) reused across nodes; deployment skippable if image present; cleanup scripts restore nodes across experiments | Prebuilt `snlhub/*` images; persistent containers; pool-of-1 recycling | Same optimization, one level lower (netUnicorn reuses *images*, Pramana reuses *live containers*) |
@@ -62,8 +62,9 @@ data points under a 10 Mbps / 10 ms bottleneck with realistic cross-traffic."
    regime = static knobs + CTP dynamic pressure — has no netUnicorn counterpart.
 2. **A workflow library as a service.** netUnicorn tasks are user-contributed Python
    (`netunicorn-library`); Pramana ships deterministic, pre-validated NetGent
-   workflows (16 in the registry today, growing; generation amortizes per-app
-   authoring cost) discovered via capability files. [A15]
+   workflows (the NetGent paper evaluates 50+ workflows across five domains; the
+   public registry holds 16 today; generation amortizes per-app authoring cost)
+   discovered via capability files. [A15, grounded]
 3. **NL intent + match + backflow.** netUnicorn's user is a Python-writing expert.
    Pramana's intent parser, knowledge base, and ask-the-user backflow (never emit a
    spec the orchestrator doesn't understand) are all new layers.

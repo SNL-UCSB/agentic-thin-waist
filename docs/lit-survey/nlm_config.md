@@ -4,8 +4,8 @@
 
 - **notebook_id:** `6f2b2b44-34c0-4918-8a22-aff2b035da53`
 - **title:** survey-agentic-systems-research
-- **sources ingested:** 10 (Glia, AI Scientist v2, AI Scientist v1, Agent Laboratory, POPPER, netUnicorn, NetConfEval*, Confucius, NetArena, Learned Cloud Emulators)
-- **NLM binary:** `/Users/arpitgupta/.local/share/uv/tools/notebooklm-mcp-cli/bin/nlm`
+- **sources ingested:** 15 (Glia, AI Scientist v2, AI Scientist v1, Agent Laboratory, POPPER, netUnicorn [abstract-only + full-text PDF added 2026-07-02], NetConfEval*, Confucius, NetArena, Learned Cloud Emulators, Mininet, Mininet-HiFi, NetForge v3, NetGent)
+- **NLM binary:** `nlm` on PATH (`/Users/profg-agent/.local/bin/nlm`)
 - **Access method:** CLI via Bash (MCP does not work)
 
 *Note: NetConfEval arXiv URL resolved to wrong paper (2310.10183 is a math paper). Need to re-add with correct source.
