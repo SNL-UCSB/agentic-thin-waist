@@ -210,7 +210,51 @@ The current codebase realizes the *factors* but not the *composition*:
    only thing the scheduler consumes — the enforcement point for "AI-free below
    the waist."
 
-## 4. Fidelity notes carried over from the sources
+## 4. The intellectual trajectory: Mininet → Pramana (added 07-02)
+
+Mininet is the intellectual origin, and the arc is cleanest stated as: **each system
+in the line turns one remaining hand-crafted element of a Mininet experiment into a
+declarative, replayable object — while preserving Mininet's founding bet that
+fidelity comes from real kernel stacks and real applications, not models.**
+
+| System | What became a first-class object | What stayed hand-crafted | The Mininet inheritance |
+|---|---|---|---|
+| **Mininet** (HotNets '10) / **Mininet-HiFi** (CoNEXT '12) | the **topology**: `Topo(hosts, switches, links)` on one laptop, real stacks via namespaces + veth + tc; HiFi adds resource isolation and **fidelity monitoring** | everything *running on* the topology (workloads scripted per experiment); conditions purely synthetic (static tc params, no realistic contention); no portability off the laptop; no result management | — (the foundation) |
+| **netUnicorn** (CCS '23) | the **experiment**: pipeline ↦ nodes, portable across infrastructures | tasks and pipelines (hand-written Python); conditions (absent entirely); fidelity relaxed to "best-effort" | executors on namespaces/containers |
+| **NetReplica/NetForge** ('25–'26) | the **conditions**: regime = static envelope ⊗ trace-mined CTP, hybrid replay | application behavior; orchestration at scale | its single-container realization (`ns1 —veth— bridge —veth— ns2` + tc/HTB) *is* a Mininet-HiFi topology, specialized to the one link that matters |
+| **NetGent** ('25) | the **application behavior**: NL → NFA workflow artifact, deterministic replay | intent, conditions, placement | real applications on real stacks |
+| **Pramana** | the **intent**: `compile()` → ExperimentSet — the composition of all four | only the question itself | all of the above, composed |
+
+Two threads make this arc *defensible* rather than merely narratable:
+
+- **The fidelity thread.** Mininet-HiFi made emulation fidelity a *monitored
+  property* of every run; netUnicorn consciously relaxed it to best-effort in
+  exchange for scale; Pramana's Spec→Substrate verification probe **restores
+  fidelity as a measured, per-run property** — with realized-vs-requested ground
+  truth shipped inside every result. "We return to Mininet-HiFi's standard, at
+  netUnicorn's scale" is a sentence a SIGCOMM reviewer can check, not challenge.
+- **The specialization thread.** Mininet's generality (arbitrary topologies) is
+  deliberately traded for bottleneck-centrism — defensible because it is a *stated
+  scoping thesis* (single-bottleneck scoping, `thin_waist_one_pager.md`) with an
+  escape hatch (regime chaining for multi-hop), not an unexamined limitation.
+
+**Named blind spots (state them before reviewers do):**
+
+1. **Topology generality** — traded away; multi-bottleneck composition is claimed
+   (NetForge v2 "chain bottlenecks") but unevaluated.
+2. **Wireless/cellular** — absent across the entire line, Mininet included.
+3. **Two fidelity regimes conflated in the line's history** — netUnicorn argued
+   *in-vivo* realism (real infrastructure), NetForge argues *replayed* realism
+   (controlled emulation + trace-mined pressure). Pramana supports both but every
+   claim must name which mode it attaches to.
+4. **Verification covers one of four layers** — Spec→Substrate only; Intent→Spec,
+   Substrate→Result, Result→Claim remain open problems (`verification_gap.md`)
+   and must be flagged as such, never implied solved.
+5. **The loop is not yet an object** — evidence → next intent (the agentic
+   iteration the vision papers promise) has no production in the grammar. It is
+   the *sixth object*, explicitly future work.
+
+## 5. Fidelity notes carried over from the sources
 
 - Latency is applied off the shaped queue (netforge: netem on the egress leg) so
   queueing delay and propagation delay never conflate.
