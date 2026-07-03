@@ -869,5 +869,5 @@ Paginated endpoints (exactly three, one shape `{items, next_cursor}`):
 `GET /v1/experiment-sets?limit&cursor` → items = `{id, state, created_at}`;
 `GET /v1/results?spec_hash=&set_id=&limit&cursor` (telemetry) → items =
 ResultEnvelope summaries `{spec_hash, deployment_id, iteration, attempt,
-within_tolerance}`; and `GET /v1/experiment-sets/{id}` deployments as above — request `?limit=<1..200, default 50>&cursor=<opaque str>`;
+within_tolerance}`; and the deployments sublist of `GET /v1/experiment-sets/{id}` via `?deployments_limit=<1..200, default 50>&deployments_cursor=<opaque>` (the two LIST endpoints use plain `?limit&cursor`);
 response `{items: [...], next_cursor: str|null}`.
