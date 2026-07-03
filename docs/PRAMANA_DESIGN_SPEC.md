@@ -451,8 +451,9 @@ experiment_set:
 # Client-side only; expanded by `pramana run` before submission:
 sweeps:
   - {over: static.latency, values: [...]}
-  - {over: dynamic.ctp, select: {intensity_mbps: [4,8], n: 100}}   # CLI runs the
-                                                                   # S4 query
+  - {over: dynamic.ctp, select: {intensity_mbps: [4,8], n: 100}}   # CLI resolves via the
+                                                                   # CTP select query
+                                                                   # (interface defs §8.6)
 ```
 
 **4.1 Validation (Match; reject, never coerce):** schema + pinned capability
