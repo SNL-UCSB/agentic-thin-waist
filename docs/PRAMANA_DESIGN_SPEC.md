@@ -430,7 +430,8 @@ experiment_set:
         cca: cubic                                     # endpoint-applied; in identity
       application:
         workflow: zoom_client@sha256:...               # pinned at compile
-        params: {server: broadcaster, duration: {value: 30.0, unit: s},
+        params: {server: broadcaster, duration: {value: 30.0, unit: s},   # accepted as input;
+                                                                          # stored normalized (ms)
                  meeting_code: $secrets.zoom_meeting_code}
       dynamic:
         mode: replay|load|both|none
@@ -466,7 +467,9 @@ rejections (out-of-range value, unmatched endpoint, insufficient CTPs)
 rendered from fixed templates keyed by the failing rule — never free-form
 model text. Answers are type-validated, then loud itemized defaults + plain-language **echo**; sweep
 axes shown as realized value lists; user confirms.
-**4.2 Units:** rate(kbps|mbps|gbps→mbps) · time(ms|s|min→ms) · pct. Canonical numeric rendering (normative, RT-1): decimal string, round-half-even
+**4.2 Units:** rate(kbps|mbps|gbps→mbps) · time(ms|s|min→ms — normalization happens at model
+construction, so stored/hashed time is ALWAYS ms regardless of input form) ·
+pct. Canonical numeric rendering (normative, RT-1): decimal string, round-half-even
 to ≤ 6 fractional digits, trailing zeros stripped, no exponent notation,
 negative zero rendered as `0`; `parse∘format` idempotent
 (hypothesis property tests). No pint (float behavior would leak into identity).

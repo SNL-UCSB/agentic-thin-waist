@@ -44,7 +44,9 @@ cli/pramana/                          # M-7 — NEW (typer app)
 ```python
 # shared/models/units.py
 parse(text: str) -> Quantity                 # "10mbps" -> Quantity(10.0,"mbps"); raises UnitError
-format(q: Quantity) -> str                   # canonical decimal string (hash-stable)
+render(q: Quantity) -> str                   # canonical decimal string + unit ("10mbps");
+                                             #   parse(render(q)) == q (BP-2). Named render,
+                                             #   not format, to avoid shadowing the builtin
 
 # shared/models/hashing.py
 canonical_json(obj) -> bytes                 # RFC 8785; the ONLY call site, no reimplementation
@@ -55,7 +57,9 @@ set_hash(spec: ExperimentSet) -> str         # RT3-1: FULL equality key =
                                              # mapping, secrets, leaves})) — stored as its
                                              # own column; ALL equality/idempotency checks
                                              # use set_hash, never the id string
-set_id(spec: ExperimentSet) -> str           # "es_<slug>_" + set_hash[:8]; slug DISPLAY-ONLY:
+set_id(spec, slug_source: str = "intent") -> str   # "es_<slug>_" + set_hash[:8] (BP-5:
+                                             #   slug from the CLI-supplied filename stem,
+                                             #   default "intent"); slug DISPLAY-ONLY:
                                              #   kebab of spec filename stem (or "intent"),
                                              #   [a-z0-9-], <=24 chars; EQUALITY uses the
                                              #   full canonical hash alone, never the slug
@@ -118,6 +122,14 @@ touches exactly the functions its INTERFACE block names — nothing else.
 
 ## 2. Model stubs (Pydantic v2 — normative field lists, A5–A9)
 
+**Strictness mechanism (BP-6, normative):** every model below inherits
+`StrictModel(BaseModel)` with `model_config = ConfigDict(extra="forbid")` —
+Pydantic config does NOT propagate to nested models, so the base class is the
+only correct way to make the compile gate strict at every level. Below-waist
+consumers use lenient clones produced by one helper,
+`lenient(Model) -> type[Model]` (same fields, `extra="ignore"`), exported as
+`spec_lenient.*` from `shared/models`.
+
 **Wire-vs-file shape (RT2-1, normative):** the YAML `experiment_set:` wrapper
 exists ONLY in on-disk spec files (it hosts the sibling client-side `sweeps:`
 block). On the wire, `POST /v1/experiment-sets` carries the **flat
@@ -128,7 +140,12 @@ expansion. Every model and endpoint example below uses the flat shape.
 # shared/models/spec.py
 class Quantity(BaseModel):
     value: float
-    unit: Literal["mbps","ms","s","pct"]          # canonical units only
+    unit: Literal["mbps","ms","pct"]              # canonical STORED units (BP-1):
+    # a model validator NORMALIZES on construction — kbps/gbps -> mbps,
+    # s/min -> ms — and QUANTIZES value (round-half-even, <= 6 fractional
+    # digits, BP-11) so identical physical quantities always hash identically.
+    # Input flexibility is preserved: {value: 30, unit: s} is ACCEPTED and
+    # stored as {value: 30000.0, unit: ms}.
 
 class Static(BaseModel):
     capacity_down: Quantity; capacity_up: Quantity
@@ -140,29 +157,33 @@ class Static(BaseModel):
 
 class Application(BaseModel):
     workflow: str      # "zoom_client@sha256:..."  pinned form REQUIRED post-compile
-    params: dict[str, str | Quantity]              # values or "$secrets.<key>"
+    params: dict[str, str | Quantity | int | float | bool]   # values or "$secrets.<key>" (BP-12)
 
 class Dynamic(BaseModel):
     mode: Literal["replay","load","both","none"]
     # validation matrix (RT2-11): replay => ctp non-empty & load empty;
     # load => load non-empty & ctp empty; both => both non-empty;
     # none => both empty. Anything else = 422.
-    ctp: list[str] = []                            # len 1 or == iterations
+    ctp: list[str] = []                            # len 1 or == iterations — enforced as a
+                                                   # model validator = schema-gate 422 (BP-10)
     source: Literal["ctp_service","local_dir"] = "ctp_service"
-    local_dir: str | None = None                   # RT3-3: REQUIRED iff source=="local_dir";
+    local_dir: str | None = None                   # RT3-3/BP-9: strict biconditional — REQUIRED
+                                                   # when source=="local_dir", FORBIDDEN (422)
+                                                   # when source=="ctp_service";
                                                    # absolute path on the worker host, layout
                                                    # {local_dir}/{incoming|outgoing}/{ctp_id}.pcap;
                                                    # CLI validates existence at submit; no config
-                                                   # fallback. T1-ONLY (RT4-2): validators reject
-                                                   # source=local_dir when the leaf's node maps to
-                                                   # any non-local_docker connector; T2 requires
-                                                   # source=ctp_service
+                                                   # fallback. T1-ONLY (RT4-2/BP-8, set-level rule:
+                                                   # leaves have no node binding at the gate): if
+                                                   # ANY leaf uses source=local_dir, ALL mapping
+                                                   # values must be local_docker — mixed sets with
+                                                   # local_dir are illegal in v1
     min_available: int = 1
     load: list[LoadEntry] = []                     # {workflow, node, params}
 
 class Verify(BaseModel):
     probe: bool = True
-    tolerance: Tolerance                            # {capacity_pct: 5, latency_ms: 2}
+    tolerance: Tolerance = Tolerance()              # defaults 5%/2ms (BP-14)
     policy: Literal["annotate"] = "annotate"        # v1: annotate only
 
 class Experiment(BaseModel):
@@ -702,6 +723,40 @@ a 422 in v1. `metrics` required keys: `transport` (from the capture:
 load→{mode, load}; both→{mode, ctp, load}; none→{mode}),
 application: {workflow_sha, params_sans_secrets}, worker_id}`. Producers may
 add keys under `metrics.extra` only.
+### 8.11b Identity payload layout + golden vector (BP-3/7/13 — normative)
+
+The EXACT object hashed by `identity(e)` (before RFC 8785 serialization):
+
+```json
+{"dynamic": {"ctp": [...], "load": [...], "mode": "..."},
+ "params":  { ...resolved Application.params; $secrets.* references kept
+              verbatim as strings (BP-4); Quantities as {"unit","value"}
+              post-normalization... },
+ "static":  { ...ALL Static fields incl. null jitter/impair... },
+ "workflow_sha": "<full pinned string, id@sha256:...>"}
+```
+
+Only `mode`, `ctp`, `load` from Dynamic participate (`source`, `local_dir`,
+`min_available` are sourcing/placement concerns, outside identity). The
+`set_hash` payload is `{"schema_version", "nodes", "mapping", "secrets",
+"leaves": [identity payloads in list order]}` — the key is literally
+`"leaves"`; `capability_pins`, `intent_ref`, and `id` are INTENTIONALLY
+excluded so identical content recompiled against newer pins deduplicates.
+
+**Golden vector #1** (any conforming implementation MUST reproduce this):
+payload = a leaf with static {capacity_down/up 10 mbps, latency 10 ms, queue
+codel/"", cca cubic, no jitter/impair}, application {workflow
+"wget_client@sha256:aabbccdd", params {duration 30 s → normalized
+{"unit":"ms","value":30000}, url "https://example.com/f.bin"}}, dynamic
+{mode none}. Canonical bytes:
+
+```
+{"dynamic":{"ctp":[],"load":[],"mode":"none"},"params":{"duration":{"unit":"ms","value":30000},"url":"https://example.com/f.bin"},"static":{"capacity_down":{"unit":"mbps","value":10},"capacity_up":{"unit":"mbps","value":10},"cca":"cubic","impair":null,"jitter":null,"latency":{"unit":"ms","value":10},"queue":{"args":"","qdisc":"codel"}},"workflow_sha":"wget_client@sha256:aabbccdd"}
+```
+
+identity = `982f550e78fbede222f1fdf18c71d457b741280b9dc3e0f69968ac9e61b3c05d`.
+This vector lives in `shared/models/fixtures/` and is CI-enforced (card C-104).
+
 ### 8.12 Connector API (RT3-2)
 
 ```python
