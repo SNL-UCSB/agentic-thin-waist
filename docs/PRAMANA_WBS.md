@@ -56,7 +56,7 @@ Sizes: S ≤ 1 day · M ≤ 3 days · L = supervisor. ✎ = undergrad-suitable.
 | C-201 ✎ | schema-of-schemas (Pydantic) for capability files, `static|live` kinds | M |
 | C-202 ✎ | hand-author `capabilities.yaml` for NetGent from manifest.json + workflow params (16 workflows) | M |
 | C-203 ✎ | hand-author NetReplica knob file (ranges, qdiscs incl. buffer syntax, CCA host caveats, ≤8 ceiling) | S |
-| C-204 ✎ | loader: read dir/URLs, content-hash, expose snapshot API | M |
+| C-204 ✎ | loader: read capability DIRECTORIES (URLs are v2), content-hash, expose snapshot API | M |
 | C-205 ✎ | kill runtime `index.json` fetch in orchestration `tools.py`; read snapshot instead | M |
 
 ### SM-3 Scheduler + deployment store — *milestone: M-3 · gate: transition-table suite incl. reap/requeue/cancel/stale-fence races; crash-recovery test* (SUPERVISOR CORE: Manni; PlusCal in parallel)

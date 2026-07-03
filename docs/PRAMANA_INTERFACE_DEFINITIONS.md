@@ -171,7 +171,13 @@ class Dynamic(BaseModel):
     local_dir: str | None = None                   # RT3-3/BP-9: strict biconditional — REQUIRED
                                                    # when source=="local_dir", FORBIDDEN (422)
                                                    # when source=="ctp_service";
-                                                   # absolute path on the worker host, layout
+                                                   # absolute path AS SEEN INSIDE the worker
+                                                   # container (RT7-1): the local_docker
+                                                   # connector bind-mounts the host directory at
+                                                   # the IDENTICAL path (compose volume), so host
+                                                   # and container paths coincide; the CLI
+                                                   # validates the host-side path and the mount.
+                                                   # Layout
                                                    # {local_dir}/{incoming|outgoing}/{ctp_id}.pcap;
                                                    # CLI validates existence at submit; no config
                                                    # fallback. T1-ONLY (RT4-2/BP-8, set-level rule:
@@ -320,8 +326,13 @@ POST /v1/work            body: WorkItem
                                                         NEVER a second run
   409 {"reason":"fence_stale","current_fence":N}        stale fence
   409 {"reason":"busy","running":"d_xxx"}               worker occupied (pool bug)
-  422 problem+json                                      schema/sha refusal
-GET  /v1/status          -> StatusReply (200 always if alive)
+  422 problem+json type=…/validation                    schema errors
+  409 problem+json type=…/pin-mismatch                  workflow/capability sha
+                                                        mismatch (error field:
+                                                        workflow_pin_mismatch)
+GET  /v1/status?ack=<id,id,...>  -> StatusReply (200 always if alive; ack =
+                          comma-separated deployment_ids durably folded by the
+                          Core — worker drops those entries, §2)
 POST /v1/cancel          body: {"deployment_id","fence"} -> 202
 GET  /v1/envelopes?since=<cursor>   (T2-ONLY collection; §8.4b)
 GET  /v1/artifacts/{deployment_id}/{iteration}/{attempt}/{kind}  (T2-ONLY; §8.5)
@@ -340,8 +351,8 @@ POST /v1/experiment-sets      body: DraftExperimentSet — same shape as
                               the Core validates (Match), may 409 needs-input,
                               then pins + assigns ids and RETURNS the compiled
                               ExperimentSet (which is what it stores)
-  201 {"id": "es_..."}                        created
-  200 {"id": "es_..."}                        identical content re-POSTed (idempotent)
+  201 <compiled ExperimentSet>                created (FULL body, RT7-2)
+  200 <compiled ExperimentSet>                same set_hash re-POSTed (idempotent)
   422 problem+json type=".../validation"      schema violation (field pointer inside)
   409 problem+json type=".../needs-input"     unresolved prerequisites; ONE body shape
                                               (RT3-4): {type,title,status, session_id,
@@ -658,8 +669,8 @@ A workflow is `workflows/<id>/workflow.json` in the registry:
 browser|shell, main}`. Parameter placeholders `{{name}}` are substituted at
 run time from `Application.params`. Resolution: fetch
 `{artifact_base}/{id}/workflow.json`; the sha256 of the raw fetched bytes MUST
-equal the pin (`id@sha256:…`) or the worker refuses (409 pin mismatch → the
-deployment fails with error `workflow_pin_mismatch`). Engine trust (RT2-6): the capability file's `engine` field is authoritative
+equal the pin (`id@sha256:…`) or the worker refuses — `409 problem+json type=…/pin-mismatch` (same contract as
+/v1/work §4) and the deployment fails with error `workflow_pin_mismatch`. Engine trust (RT2-6): the capability file's `engine` field is authoritative
 and validated at compile; at run time the fetched `manifest.json` `type` MUST
 equal it, else the worker refuses (`engine_mismatch`). The sha pin covers
 `workflow.json` bytes only; `manifest.json` is advisory beyond the type check.
@@ -697,13 +708,14 @@ the normal poll + their container health check.
 
 ### 8.10 Session contract (RT-24)
 
-`POST /v1/intent` creates a session: `{session_id: uuid, questions:
-[{name, pointer, prompt, kind: string|secret|choice, choices?}]}`. If
+`POST /v1/intent` creates a session: `{session_id: uuid, questions: [Question, ...]}` (Question model incl. the
+closed `kind` enum: §8.10b — the single source). If
 `questions` is empty, the SAME response already carries `{echo, spec}` — no
 `/answers` call needed (RT2-10). A direct-spec `POST /v1/experiment-sets`
 returning `409 needs-input` ALSO creates a session — the 409 body is
 `{session_id, questions}`; resumption uses the same
-`POST /v1/sessions/{id}/answers`, whose response carries `{echo, spec}`, and
+`POST /v1/sessions/{id}/answers`, whose response is the §4 shape —
+`{echo, defaults, sweep_axes, spec}` (all four fields required; RT7-8) — and
 the client re-POSTs the returned spec (RT2-9). Sessions
 live 1 h, in the Core's Postgres. `POST /v1/sessions/{id}/answers` body
 `{answers: {<name>: <value>}}` — names must match the question list; values
