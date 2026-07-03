@@ -458,7 +458,8 @@ sweeps:
 ```
 
 **4.1 Validation (Match; reject, never coerce):** schema + pinned capability
-ranges/enums/dependencies; leaf workflow ∈ node pipeline; `$secrets.*` ∈ declared
+ranges/enums/dependencies; leaf workflow ∈ node pipeline; every declared node
+∈ mapping and every mapping key names a declared node (BP-14); `$secrets.*` ∈ declared
 prerequisites; fuzzy quantifiers only via pinned `lexicon.yaml`; endpoint-like
 free-form values against capability allow-lists or backflow. **One batched
 clarification round.** Questions come from exactly two safe sources (RT2-14):
