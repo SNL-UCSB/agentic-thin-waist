@@ -368,7 +368,7 @@ Taxonomy: intent · experiment set · experiment (leaf; identity-hashed) ·
 iteration (no teardown by default) · deployment (worker×leaf record + lifecycle)
 · attempt (post-reap counter) · **fence** (monotonic per-deployment epoch, §5.3).
 Glossary: workflow ≠ pipeline (node's runnable list) · regime = conditions only ·
-context (results) = static+dynamic+application · Core (never "orchestrator") ·
+context (results) = static + dynamic + application (normative shape: interface defs §8.11) · Core (never "orchestrator") ·
 worker unit = {substrate + browserless + netgent-runner} trio.
 
 ## 3. Capability Protocol

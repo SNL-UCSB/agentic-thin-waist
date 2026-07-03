@@ -50,7 +50,12 @@ format(q: Quantity) -> str                   # canonical decimal string (hash-st
 canonical_json(obj) -> bytes                 # RFC 8785; the ONLY call site, no reimplementation
 identity(exp: Experiment) -> str             # sha256 over {workflow_sha, params-sans-secrets,
                                              #   static, dynamic}; excludes placement/iterations
-set_id(spec: ExperimentSet) -> str           # "es_<slug>_" + hash8; slug is DISPLAY-ONLY:
+set_hash(spec: ExperimentSet) -> str         # RT3-1: FULL equality key =
+                                             # sha256(rfc8785({schema_version, nodes,
+                                             # mapping, secrets, leaves})) — stored as its
+                                             # own column; ALL equality/idempotency checks
+                                             # use set_hash, never the id string
+set_id(spec: ExperimentSet) -> str           # "es_<slug>_" + set_hash[:8]; slug DISPLAY-ONLY:
                                              #   kebab of spec filename stem (or "intent"),
                                              #   [a-z0-9-], <=24 chars; EQUALITY uses the
                                              #   full canonical hash alone, never the slug
@@ -144,6 +149,11 @@ class Dynamic(BaseModel):
     # none => both empty. Anything else = 422.
     ctp: list[str] = []                            # len 1 or == iterations
     source: Literal["ctp_service","local_dir"] = "ctp_service"
+    local_dir: str | None = None                   # RT3-3: REQUIRED iff source=="local_dir";
+                                                   # absolute path on the worker host, layout
+                                                   # {local_dir}/{incoming|outgoing}/{ctp_id}.pcap;
+                                                   # CLI validates existence at submit; no
+                                                   # config fallback
     min_available: int = 1
     load: list[LoadEntry] = []                     # {workflow, node, params}
 
@@ -189,6 +199,7 @@ class Deployment(BaseModel):                        # A6 — scheduler-owned row
                                                     # NOT experiment identity)
     experiment_id: str
     node: str                                       # "pool/worker-07"
+    kind: Literal["leaf","service"] = "leaf"       # RT3-6
     state: Literal["assigned","preparing","ready","running",
                    "reporting","done","failed","cancelled"]
     attempt: int = 1                                # <= 2
@@ -293,10 +304,16 @@ POST /v1/experiment-sets      body: ExperimentSet (flat; sweeps pre-expanded by 
   201 {"id": "es_..."}                        created
   200 {"id": "es_..."}                        identical content re-POSTed (idempotent)
   422 problem+json type=".../validation"      schema violation (field pointer inside)
-  409 problem+json type=".../needs-input"     unresolved prerequisites; body carries
-                                              questions: [{pointer, prompt, kind}]
-GET  /v1/experiment-sets/{id}                 -> {execution: {...}, ingested: "n/m",
-                                                  deployments: [DeploymentStatus...]}
+  409 problem+json type=".../needs-input"     unresolved prerequisites; ONE body shape
+                                              (RT3-4): {type,title,status, session_id,
+                                              questions: [Question]} — session_id ALWAYS
+                                              present; resume via /v1/sessions/{id}/answers
+GET  /v1/experiment-sets/{id}                 (full schema, RT3-11) ->
+  {execution: {state: running|done|cancelled|failed,
+               total: int, assigned: int, running: int,
+               done: int, failed: int, cancelled: int},
+   ingested: {ingested: int, expected: int},
+   deployments: [DeploymentStatus...]}          # paginated: ?limit=<=200&cursor=...
 POST /v1/experiment-sets/{id}/cancel          -> 202
 POST /v1/intent               body: {"text": "..."}   (LLM path)
   200 {"session_id", "questions":[...]}        batched round (may be empty)
@@ -319,6 +336,7 @@ CREATE TABLE deployments (
   set_id         text NOT NULL,
   node           text,
   preferred_node text,            -- planner affinity hint; the claim ORDER BY uses it
+  kind           text NOT NULL DEFAULT 'leaf',
   state          text NOT NULL DEFAULT 'assigned',
   attempt        int  NOT NULL DEFAULT 1,
   fence          int  NOT NULL DEFAULT 1,
@@ -482,7 +500,8 @@ workflows:
 kind: static
 service: netreplica
 knobs:
-  - {name: capacity, type: rate, range: ["0.1mbps","10gbps"]}
+  - {name: capacity_down, type: rate, range: ["0.1mbps","10gbps"]}
+  - {name: capacity_up,   type: rate, range: ["0.1mbps","10gbps"]}
   - {name: latency,  type: time, range: ["0ms","2000ms"]}
   - {name: jitter,   type: time, range: ["0ms","500ms"]}
   - {name: qdisc,    type: enum, values: [pfifo,bfifo,fifo,red,pie,fq_pie,codel,fq_codel,fq,cake]}
@@ -551,6 +570,9 @@ POST {endpoint}/ctps/select
        burstiness, …}]}    — partial results are VALID (query_matched may be
                               less than requested; compile applies the
                               min_available rule, spec §4)
+Deterministic selection (RT3-8): the CLI orders matches by (intensity asc,
+ctp_id lexicographic) and takes the first N required; the RESOLVED pointer
+list — not the query — is what enters the spec and the identity hash.
 Payload fetch: GET {endpoint}/ctps/{ctp_id}/pcap?direction=incoming|outgoing
   (local_dir source: files at {dir}/{incoming|outgoing}/{ctp_id}.pcap)
 ```
@@ -595,8 +617,9 @@ node's `pipeline[0]` (pinned), `params` = the node's `params`,
 `dynamic.mode = "none"`, `iterations = 1`, all `telemetry` switches false,
 `verify.probe = false`, `static` copied from the first dependent leaf
 (recorded, not applied — the service endpoint runs outside the shaped
-namespace); (3) `Deployment.kind: Literal["leaf","service"] = "leaf"`
-distinguishes them — service deployments are exempt from experiment timeouts
+namespace); (3) `Deployment.kind = "service"`
+distinguishes them; and (4) v1 validators REQUIRE `len(pipeline) == 1` for
+`kind: service` nodes (multi-step service pipelines are v2) (RT3-9) — service deployments are exempt from experiment timeouts
 and the ingest path.
 
 ### 8.9 Service-node dependency model (RT-14)
@@ -627,6 +650,22 @@ the CLI, never sent to the Core: the CLI substitutes `$secrets.<key>` and
 answers the session with the key name). One round in v1: after answers, the
 session returns the echo + compiled spec, or errors.
 
+### 8.10b Question model and secret answers (RT3-5)
+
+```python
+class Question(BaseModel):
+    name: str            # answer key; charset [a-z0-9_]
+    pointer: str         # RFC 6901 JSON Pointer into the draft spec
+    prompt: str          # template-rendered text (never free-form model output
+                         #   for validation-sourced questions)
+    kind: Literal["string","seconds","rate","int","choice","secret"]
+    choices: list[str] | None = None
+```
+Answers: `{answers: {<name>: <value>}}`, coerced/validated by `kind`.
+**Secret answers never carry the value to the Core:** the CLI writes the value
+into the LOCAL secrets file under key `<name>` and submits the literal string
+`"$secrets.<name>"` as the answer.
+
 ### 8.11 Closed enums and required keys (RT-20/21/22)
 
 `DeploymentStatus.state` ∈ the §3 table's states. `stage` ∈ {docker_up,
@@ -636,5 +675,75 @@ verdicts {verified, failed, characterized, unverified, n/a} — unknown keys are
 a 422 in v1. `metrics` required keys: `transport` (from the capture:
 `{throughput_mbps_ts: [...], rtt_ms_ts: [...], retransmits: int}`) and `app`
 (workflow-dependent; browser workflows: `{qoe: {...}}`, shell: `{stdout_summary}`).
-`context` required keys: `{static: {...as specced}, dynamic: {mode, ctp|load},
-workflow_sha, worker_id}`. Producers may add keys under `metrics.extra` only.
+`context` required keys (RT3-16, and the design spec's taxonomy defers here):
+`{static: {...as specced}, dynamic: {mode, ctp|load},
+application: {workflow_sha, params_sans_secrets}, worker_id}`. Producers may
+add keys under `metrics.extra` only.
+### 8.12 Connector API (RT3-2)
+
+```python
+class Connector(Protocol):
+    def get_nodes(self) -> list[NodeDescriptor]: ...
+    def deploy(self, spec: PoolSpec) -> list[NodeDescriptor]: ...
+    def recycle(self, node_id: str) -> NodeDescriptor: ...   # fresh-per-experiment
+    def stop(self, node_id: str) -> None: ...
+    def health(self, node_id: str) -> Literal["healthy","suspect","down"]: ...
+    def refresh_ingress(self) -> None: ...   # AWS: re-scope SG to operator IP;
+                                             # no-op for other connectors
+```
+Mapping-string resolution: `local_docker` and `ssh:<user@host>` → built-ins;
+`aws[:profile[@region]]` → built-in AWS with config profile/region (bare `aws`
+= `connectors.aws.profile/region` from config); any other token → Python
+entry-point lookup in group `pramana.connectors`.
+
+### 8.13 Config schema (RT3-12) — `~/.pramana/config.yaml`
+
+```yaml
+llm:        {provider: anthropic|openai_compatible|none, model: str,
+             endpoint: str|null, key_ref: str|null}   # key_ref = secrets-file key
+connectors: {default: local_docker, aws: {profile: default, region: us-west-2}}
+images:     {core: snlhub/core, substrate_worker: snlhub/substrate-worker,
+             netgent_runner: snlhub/netgent-runner}
+artifacts:  {bucket: pramana-artifacts, endpoint: "http://minio:9000",
+             access_key_ref: minio_access, secret_key_ref: minio_secret}
+ctp:        {endpoint: "http://ctp-service:8001"}
+telemetry:  {endpoint: "http://telemetry-service:8004"}
+pool:       {size: null}          # null = min(cores-2, 8)
+```
+Env override naming: `PRAMANA_` + upper-snake path (`PRAMANA_LLM_PROVIDER`,
+`PRAMANA_ARTIFACTS_BUCKET`); env > file > defaults above.
+
+### 8.14 Artifact storage contract (RT3-10)
+
+Bucket = `artifacts.bucket` (created by compose init). Auth from
+`artifacts.*_ref` secrets-file keys. Content-Type
+`application/octet-stream`. Overwrite policy: PUT to an existing key with the
+SAME sha256 = no-op success; with a DIFFERENT sha256 = error
+`artifact_conflict` (a bug — keys embed iteration+attempt uniqueness).
+Telemetry verifies existence + sha on first artifact read; a missing object
+flags the envelope `artifacts_missing` (result kept, per annotate-never-
+discard).
+
+### 8.15 Parameter type system + lexicon schema (RT3-13/14)
+
+Capability param types (closed set): `string | seconds | rate | int | float |
+bool | enum | node_ref | url | secret`. Wire representation in
+`Application.params`: `seconds`/`rate` → `Quantity` object; `int/float/bool` →
+native JSON; everything else → string (`node_ref` = a declared node name,
+validated; `url` = allow-list checked). Answer coercion follows the same
+table.
+
+`lexicon.yaml`: `entries: [{phrase: "moderately bursty",
+applies_to: "/dynamic", criteria: {burstiness_pmr_range: [2, 5]}}]` —
+`resolve_lexicon(phrase)` returns the `criteria` dict (the `CriteriaTemplate`)
+which Match merges into the CTP select query; `applies_to` scopes which spec
+subtree the phrase may bind to.
+
+### 8.16 problem+json fields + pagination (RT3-17, inlined)
+
+Error body fields (all errors): `{type: str (URI suffix per the §4 catalog),
+title: str, status: int, detail: str, instance: str|null}` + documented
+extension members only (`session_id`, `questions`, `pointer`, `current_fence`).
+Paginated endpoints (exactly two): `GET /v1/experiment-sets` and
+`GET /v1/results` — request `?limit=<1..200, default 50>&cursor=<opaque str>`;
+response `{items: [...], next_cursor: str|null}`.
