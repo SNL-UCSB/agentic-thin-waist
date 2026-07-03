@@ -1,4 +1,5 @@
 # Feature 001 — shared/models foundation (migration step M-1)
+> Status: Ready | Created: 2026-07-03 | Constitution: v1.1.0
 
 ## What
 The typed foundation every other module imports: units, the A5 experiment-set
@@ -6,7 +7,7 @@ models, artifact models A6–A10, capability-file models, identity hashing,
 operational defaults, and the lexicon.
 
 ## Why
-Single point everything blocks on (pragmatist review PR-4). Freezing it first,
+Single point everything blocks on (adversarial-review register, finding PR-4 in docs/pramana_adversarial_review_2026-07-02.md §SE). Freezing it first,
 with golden fixtures, is what makes 35 student cards parallelizable and makes
 further spec ambiguity structurally impossible.
 
@@ -23,8 +24,9 @@ further spec ambiguity structurally impossible.
 2. Hypothesis property tests: parse∘render idempotent; hash stability under
    input-form variation (30s == {value:30,unit:s} == {value:30000,unit:ms}).
 3. Identity excludes placement/iterations/telemetry/verify; includes
-   cca/ctp/queue-args/workflow-sha (probe test list is the reference suite:
-   see scratchpad build_probe — port, don't rewrite).
+   cca/ctp/queue-args/workflow-sha (the reference suite is committed at
+   specs/001-shared-models/contracts/test_probe_reference.py — port into
+   shared/tests/, don't rewrite).
 4. mypy --strict + ruff clean on shared/ (required status check).
 
 ## Out of scope

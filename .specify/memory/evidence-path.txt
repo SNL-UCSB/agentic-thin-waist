@@ -1,0 +1,5 @@
+# Frozen evidence-path files (constitution Art. III / E1). PRs touching these
+# need the bugfix-evidence-path label.
+services/orchestration/app/engine/executor.py
+services/orchestration/app/engine/telemetry_capture_pull.py
+services/orchestration/app/agent/

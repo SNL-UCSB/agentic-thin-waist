@@ -1,0 +1,21 @@
+name: shared-models
+on:
+  pull_request:
+    paths: ['shared/**']
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - name: ruff + mypy(strict) + tests on shared/models
+        run: |
+          pip -q install ruff mypy pydantic pytest hypothesis rfc8785 pydantic-settings
+          if [ -d shared/models ] && ls shared/models/*.py >/dev/null 2>&1; then
+            ruff check shared/models
+            mypy --strict shared/models
+          else
+            echo "shared/models not yet populated (pre-M-1) — structural gate only"
+          fi
+          if [ -d shared/tests ]; then (cd shared && python -m pytest tests/ -q) fi

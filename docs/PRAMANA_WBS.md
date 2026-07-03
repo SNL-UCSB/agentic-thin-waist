@@ -6,6 +6,14 @@ Jaber**. Tracking: **GitHub Issues + Actions** (cards = issues from the template
 below; sub-module gates = milestones; queue = labels `card` + `available` +
 size). Beads is NOT part of this framework.
 
+## Relationship to the spec-kit workflow (specs/)
+
+Each sub-module SM-n gets a feature directory `specs/NNN-<name>/` (exemplar:
+`specs/001-shared-models` for SM-1). The WBS tables here are the PLANNING
+input; each feature's `tasks.md` is the execution source of truth and GitHub
+Issues are generated from it one-way. On scope conflicts the WBS wins and
+tasks.md is regenerated. Workflow order and conventions: `specs/README.md`.
+
 ## Rules of the framework
 
 1. **Tests come first, from supervisors.** A card is assignable only when its

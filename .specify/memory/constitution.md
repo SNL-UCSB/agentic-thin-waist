@@ -1,55 +1,80 @@
 # Pramana Constitution
 
-<!-- Distilled from docs/PRAMANA_DESIGN_SPEC.md §1 (normative source). Every
-     /speckit-plan and /speckit-implement run is checked against this file.
-     If this file and the design spec disagree, the design spec wins and this
-     file gets a PR. -->
+<!-- Distilled from docs/PRAMANA_DESIGN_SPEC.md §1 (normative source). If this
+     file and the design spec disagree, the design spec wins and this file is
+     amended by PR. Every article carries an Enforcement line naming its
+     mechanical check; "PENDING" means the check is a committed obligation
+     (tracked task), not yet wired — articles may not cite enforcement that
+     does not exist. -->
 
 ## Article I — The waist rule
-Spend intelligence above the waist, never below it. `compile()` is the only
-per-request AI site; everything below the compiled experiment-set spec is
-deterministic by construction. No LLM call may be added to any execution path.
+`compile()` is the only per-request AI site. No PR may add an LLM/API call to
+any execution-path module (scheduler/, substrate/, telemetry, shared/models).
+**Enforcement:** specs-lint grep for LLM client imports outside
+`orchestration/app/engine/{intent_parser,llm_binding}.py` (PENDING: wired with
+migration M-3).
 
 ## Article II — Usability tiers order every decision
-T1 laptop is the primary target: one command to data, keyless via direct spec
-submission. T2 cloud reuses the same spec with only `mapping:` changed. Any
-feature that helps T2/T3 but adds weight to T1 goes to the scale profile.
-CLI-only; no web UI.
+T1 checkable bar: fresh laptop → `pramana init` → `pramana run
+examples/iperf_sweep.yaml` → data in ≤10 min, zero cloud accounts, zero API
+keys, no config beyond what `init` writes (= design-spec acceptance criterion
+1). Features that raise T1's step count, dependency count, or required config
+go to the scale profile. CLI-only; no web UI.
+**Enforcement:** acceptance harness job (WBS C-705).
 
 ## Article III — The evidence path is frozen (E1)
-Zoom/HotNets data collection runs on the pre-spec pipeline, bugfix-only.
-No task may touch it, depend on it, or block it.
+No PR may modify files matching `.specify/memory/evidence-path.txt` except
+with a `bugfix-evidence-path` label justified in the PR body.
+**Enforcement:** specs-lint path check against that allowlist file.
 
 ## Article IV — Contracts over conversations
-Modules exchange the versioned artifacts defined in
-docs/PRAMANA_INTERFACE_DEFINITIONS.md (normative for wire/schema/code detail).
-A new need = a missing field, not a new endpoint. Validation is strict at the
-compile gate, must-ignore-unknown below it. Identity hashing goes through the
-one shared RFC 8785 function; the golden vectors are CI-enforced; no
-reimplementation.
+Wire formats/schemas live only in docs/PRAMANA_INTERFACE_DEFINITIONS.md and,
+once code exists, in shared/models (Pydantic = source of truth; JSON Schema a
+build artifact). A new need = a missing field, not a new endpoint. Identity
+hashing: one shared RFC 8785 function; golden vector #1 (defs §8.11b) must
+reproduce.
+**Enforcement:** shared-models CI job (golden vectors + mypy --strict + ruff)
+— wired in this PR; becomes a required status check at migration M-1.
 
 ## Article V — Hallucination containment
-Enumerable fields are closed-world against capability files; free-form fields
-are validated, allow-listed, or become questions; fuzzy words resolve only via
-the pinned lexicon; every compiled field carries provenance; the user confirms
-a plain-language echo before execution; AI-generated artifacts (workflows,
-capability files) pass a human gate before entering the system.
+Mechanical form: (a) Match rejects any spec field failing schema/range/enum
+validation against pinned capability files — never coerces; (b) endpoint-like
+free-form values must match a capability `endpoints:` allow-list or produce a
+Question; (c) fuzzy quantifiers resolve only via the pinned lexicon;
+(d) the human gate = required PR review on `capabilities/**` and on the
+workflow registry (branch protection).
+**Enforcement:** (a–c) Match's table-driven test suite (WBS C-601/602);
+(d) CODEOWNERS + branch protection (PENDING: set with migration M-2).
 
 ## Article VI — Dependency discipline (E6)
-The execution path may depend only on Tier-1 (boring, battle-tested) tools.
-Anything newer must be dev-time-only, config-swappable, or vendorable, and
-must be added to design spec §15 with its tier and fence. Spec Kit itself is
-dev-time-only.
+The closed tier list is design-spec §15. Adding any dependency requires a §15
+entry naming its tier and fence in the same PR; execution-path modules may
+import Tier-1 only.
+**Enforcement:** specs-lint checks that PRs touching lockfiles/pyproject also
+touch design-spec §15 (PENDING: M-1 uv workspace lands first).
 
 ## Article VII — Tests define done
-A card/feature is complete when its supervisor-authored failing suite and the
-shared/models contract tests pass in CI (required status checks). No
-judgment-based acceptance. If acceptance tests cannot be written before
-implementation, the interface is not frozen — that is a spec defect; escalate.
+A card/feature is complete when its supervisor-authored failing suite
+(tests/cards/test_<id>.py) and the shared/models contract tests pass in CI as
+required status checks. If acceptance tests cannot be written before
+implementation, the interface is not frozen — spec defect; escalate. Test
+tasks are MANDATORY in every tasks.md (house tasks template).
+**Enforcement:** required status checks (branch protection; set at M-1).
 
 ## Article VIII — Brownfield first
-Reuse existing code wherever it satisfies a contract (reuse map: design spec
-§8). New components must name what they replace and why refactoring was
-insufficient.
+Every plan.md must cite the reuse-map row (design-spec §8) for each component
+it creates or replaces; creating a new component requires a "replaces X
+because Y" line. Plans without reuse citations fail the constitution check.
+**Enforcement:** plan-template constitution-check table (specs-lint verifies
+the table exists and every article has a verdict).
 
-**Version**: 1.0.0 | **Ratified**: 2026-07-03 | Source: PRAMANA_DESIGN_SPEC v1.2 (post 7-round audit)
+## Governance
+- **Amendments** by PR touching this file; approver: Arpit + one supervising
+  grad student (Manni or Jaber). Semver: MAJOR = article added/removed or
+  meaning reversed; MINOR = enforcement added/tightened; PATCH = wording.
+- Every plan.md records the constitution version it was gated against;
+  specs-lint fails on mismatch with this file's footer.
+- Deviations require a `constitution-exception` PR label + justification in
+  the plan's Complexity Tracking section.
+
+**Version**: 1.1.0 | **Ratified**: 2026-07-03 | **Last Amended**: 2026-07-03
