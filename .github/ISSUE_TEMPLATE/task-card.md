@@ -14,10 +14,10 @@ INTERFACE
 INPUTS
 - Skeleton: <path>
 - Fixtures: <path>
-- Failing suite: tests/cards/test_<id>.py
+- Failing suite: tests/cards/test_c<n>.py
 
 DONE WHEN
-- [ ] `pytest tests/cards/test_<id>.py` green in CI
+- [ ] `pytest tests/cards/test_c<n>.py` green in CI
 - [ ] shared/models contract tests green (required check)
 
 MUST NOT

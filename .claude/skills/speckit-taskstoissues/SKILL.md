@@ -5,7 +5,6 @@ argument-hint: "Optional filter or label for GitHub issues"
 compatibility: "Requires spec-kit project structure with .specify/ directory"
 metadata:
   author: "github-spec-kit"
-  source: "templates/commands/taskstoissues.md"
 user-invocable: true
 disable-model-invocation: false
 ---

@@ -17,7 +17,7 @@ tasks.md is regenerated. Workflow order and conventions: `specs/README.md`.
 ## Rules of the framework
 
 1. **Tests come first, from supervisors.** A card is assignable only when its
-   failing test suite exists (`tests/cards/test_<id>.py`) plus fixtures. If the
+   failing test suite exists (`tests/cards/test_c<n>.py`, e.g. `test_c101.py`) plus fixtures. If the
    acceptance tests can't be written in advance, the interface isn't frozen —
    that's a spec defect, escalate.
 2. **Done = CI green.** Card suite + `shared/models` contract tests are required
@@ -37,7 +37,7 @@ CARD <id>: <one-line what>
 CONTEXT   (≤5 sentences; a student never needs the whole system)
 INTERFACE (verbatim from PRAMANA_INTERFACE_DEFINITIONS.md §<n>; DESIGN_SPEC for intent only)
 INPUTS    skeleton file(s), fixtures, failing suite path
-DONE WHEN pytest tests/cards/test_<id>.py green in CI
+DONE WHEN pytest tests/cards/test_c<n>.py green in CI
 MUST NOT  touch outside <paths>; add deps; change any schema
 HANDOFF   PR body: what I did / surprises / anything flaky
 ```

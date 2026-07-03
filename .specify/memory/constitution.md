@@ -20,12 +20,12 @@ examples/iperf_sweep.yaml` → data in ≤10 min, zero cloud accounts, zero API
 keys, no config beyond what `init` writes (= design-spec acceptance criterion
 1). Features that raise T1's step count, dependency count, or required config
 go to the scale profile. CLI-only; no web UI.
-**Enforcement:** acceptance harness job (WBS C-705).
+**Enforcement:** acceptance harness job (WBS C-705) — PENDING (job not yet authored).
 
 ## Article III — The evidence path is frozen (E1)
 No PR may modify files matching `.specify/memory/evidence-path.txt` except
 with a `bugfix-evidence-path` label justified in the PR body.
-**Enforcement:** specs-lint path check against that allowlist file.
+**Enforcement:** specs-lint path check against that allowlist file — PENDING (workflow staged in docs/ci/ until a workflow-scope push).
 
 ## Article IV — Contracts over conversations
 Wire formats/schemas live only in docs/PRAMANA_INTERFACE_DEFINITIONS.md and,
@@ -33,8 +33,9 @@ once code exists, in shared/models (Pydantic = source of truth; JSON Schema a
 build artifact). A new need = a missing field, not a new endpoint. Identity
 hashing: one shared RFC 8785 function; golden vector #1 (defs §8.11b) must
 reproduce.
-**Enforcement:** shared-models CI job (golden vectors + mypy --strict + ruff)
-— wired in this PR; becomes a required status check at migration M-1.
+**Enforcement:** shared-models CI job (golden vectors + mypy --strict + ruff) —
+PENDING (staged in docs/ci/ until a workflow-scope push); becomes a required
+status check at migration M-1.
 
 ## Article V — Hallucination containment
 Mechanical form: (a) Match rejects any spec field failing schema/range/enum
@@ -55,7 +56,7 @@ touch design-spec §15 (PENDING: M-1 uv workspace lands first).
 
 ## Article VII — Tests define done
 A card/feature is complete when its supervisor-authored failing suite
-(tests/cards/test_<id>.py) and the shared/models contract tests pass in CI as
+(tests/cards/test_c<n>.py, e.g. test_c101.py) and the shared/models contract tests pass in CI as
 required status checks. If acceptance tests cannot be written before
 implementation, the interface is not frozen — spec defect; escalate. Test
 tasks are MANDATORY in every tasks.md (house tasks template).
@@ -65,8 +66,8 @@ tasks are MANDATORY in every tasks.md (house tasks template).
 Every plan.md must cite the reuse-map row (design-spec §8) for each component
 it creates or replaces; creating a new component requires a "replaces X
 because Y" line. Plans without reuse citations fail the constitution check.
-**Enforcement:** plan-template constitution-check table (specs-lint verifies
-the table exists and every article has a verdict).
+**Enforcement:** plan-template constitution-check table — PENDING (specs-lint,
+staged in docs/ci/, verifies the table exists and every article has a verdict).
 
 ## Governance
 - **Amendments** by PR touching this file; approver: Arpit + one supervising
