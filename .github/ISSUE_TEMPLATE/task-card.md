@@ -9,7 +9,7 @@ CONTEXT
 <!-- <=5 sentences. A student never needs the whole system. -->
 
 INTERFACE
-<!-- Verbatim signature/schema from PRAMANA_DESIGN_SPEC.md §<n> -->
+<!-- Verbatim from PRAMANA_INTERFACE_DEFINITIONS.md §<n> (DESIGN_SPEC for intent only) -->
 
 INPUTS
 - Skeleton: <path>

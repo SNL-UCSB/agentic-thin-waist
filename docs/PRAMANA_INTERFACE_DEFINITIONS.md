@@ -50,7 +50,10 @@ format(q: Quantity) -> str                   # canonical decimal string (hash-st
 canonical_json(obj) -> bytes                 # RFC 8785; the ONLY call site, no reimplementation
 identity(exp: Experiment) -> str             # sha256 over {workflow_sha, params-sans-secrets,
                                              #   static, dynamic}; excludes placement/iterations
-set_id(spec: ExperimentSet) -> str           # "es_<slug>_" + hash8 of canonical leaves
+set_id(spec: ExperimentSet) -> str           # "es_<slug>_" + hash8; slug is DISPLAY-ONLY:
+                                             #   kebab of spec filename stem (or "intent"),
+                                             #   [a-z0-9-], <=24 chars; EQUALITY uses the
+                                             #   full canonical hash alone, never the slug
 
 # shared/models/capability.py
 load_dir(path) -> Snapshot                   # read capabilities/*.yaml, content-hash each
@@ -102,13 +105,19 @@ probe(static, tolerance) -> Verification     # 5s iperf3 x2 + 10 pings + 2s drai
 
 # cli/pramana/                                  (M7 CLI)
 init(), doctor(), run(path, yes: bool), status(id, json: bool), cancel(id)
-expand_sweeps(doc) -> ExperimentSet          # client-side; CTP criteria resolved via S4 query
+expand_sweeps(doc) -> ExperimentSet          # client-side; CTP criteria resolved via the select query (§8.6)
 ```
 
 Anything not listed here is module-private. A student implementing a card
 touches exactly the functions its INTERFACE block names — nothing else.
 
 ## 2. Model stubs (Pydantic v2 — normative field lists, A5–A9)
+
+**Wire-vs-file shape (RT2-1, normative):** the YAML `experiment_set:` wrapper
+exists ONLY in on-disk spec files (it hosts the sibling client-side `sweeps:`
+block). On the wire, `POST /v1/experiment-sets` carries the **flat
+`ExperimentSet` object** — the CLI unwraps the file and strips `sweeps:` after
+expansion. Every model and endpoint example below uses the flat shape.
 
 ```python
 # shared/models/spec.py
@@ -130,6 +139,9 @@ class Application(BaseModel):
 
 class Dynamic(BaseModel):
     mode: Literal["replay","load","both","none"]
+    # validation matrix (RT2-11): replay => ctp non-empty & load empty;
+    # load => load non-empty & ctp empty; both => both non-empty;
+    # none => both empty. Anything else = 422.
     ctp: list[str] = []                            # len 1 or == iterations
     source: Literal["ctp_service","local_dir"] = "ctp_service"
     min_available: int = 1
@@ -306,6 +318,7 @@ CREATE TABLE deployments (
   experiment_id  text NOT NULL,
   set_id         text NOT NULL,
   node           text,
+  preferred_node text,            -- planner affinity hint; the claim ORDER BY uses it
   state          text NOT NULL DEFAULT 'assigned',
   attempt        int  NOT NULL DEFAULT 1,
   fence          int  NOT NULL DEFAULT 1,
@@ -405,6 +418,21 @@ class Artifact(BaseModel):                       # RT-7
     bytes: int
     sha256: str                                  # integrity; verified on ingest/pull
 
+class Pin(BaseModel):                            # RT2-5
+    version: str; url: str; sha256: str
+    pinned_at: datetime
+    signed_by: str | None = None                 # v2 signing; None in v1
+
+class Telemetry(BaseModel):                      # RT2-5 — per-leaf collection switches
+    pcap: bool = True
+    qtrace: bool = False
+    app_metrics: bool = True
+
+class PrepareInfo(BaseModel):                    # RT2-5
+    ctp_batch: list[str] = []
+    workflow_sha: str
+    skipped: bool = False                        # True when all inputs were cached
+
 class NodeDescriptor(BaseModel):                 # RT-32/41 — A10, connector -> planner
     node_id: str                                 # "pool/worker-03"
     connector: str
@@ -412,6 +440,14 @@ class NodeDescriptor(BaseModel):                 # RT-32/41 — A10, connector -
     attrs: list[str]                             # browser, audio, cca_host, public_reach
     max_concurrent_regimes: int = 8
     state: Literal["healthy","suspect","down"]
+
+class PoolSpec(BaseModel):                       # RT2-3 — Planner -> Connector.deploy
+    name_prefix: str
+    connector: str                               # from mapping
+    count: int
+    pool: Literal["fixed","elastic"]
+    attrs_required: list[str] = []
+    worker_image: str                            # default from config
 ```
 
 ### 8.2 Capability file schemas + examples (RT-8)
@@ -435,6 +471,11 @@ workflows:
       - {name: server,   type: node_ref, required: true}
       - {name: meeting_code, type: string, required: true, kind: secret_or_param}
     prerequisites: [meeting_code, meeting_password]
+    # RULE (RT2-7): every prerequisite MUST also be a declared param with
+    # kind secret|secret_or_param; `prerequisites` is exactly the subset of
+    # params that must resolve before compile completes — there is no second
+    # injection channel. (meeting_password therefore also appears in params:)
+    #   - {name: meeting_password, type: string, required: true, kind: secret}
     node_requirements: [browser, audio]
 
 # capabilities/netreplica.yaml    kind: static
@@ -475,9 +516,20 @@ POST /v1/results        body: ResultEnvelope
   201 created · 200 duplicate (same (spec_hash,deployment_id,iteration,attempt) —
   body unchanged, upsert no-op) · 409 problem+json type=…/fence-stale (envelope
   fence < scheduler-recorded fence) · 422 schema
-Artifacts: the worker uploads bytes FIRST via the object store (MinIO/S3,
-shared/s3 client) at the §8.1 key layout, then publishes the envelope carrying
-keys + sha256; telemetry verifies existence lazily on first read.
+Who performs ingest (RT2-8 — one path per tier, end to end):
+**T1:** the worker uploads artifact bytes to MinIO (same host, §8.1 key
+layout), then POSTs the envelope to telemetry directly. **T2:** the worker
+stores artifacts locally and queues envelopes; the Core's poll loop collects
+envelopes (`GET /v1/envelopes?since=<cursor>`, §8.4b), pulls artifact bytes
+(§8.5), uploads them to MinIO itself, then POSTs the envelope. Workers never
+need to reach the laptop in either tier.
+```
+
+### 8.4b Worker envelope queue (T2 collection)
+
+```
+GET /v1/envelopes?since=<cursor>   -> {envelopes: [ResultEnvelope...], cursor}
+  Retained until cursor advances past them + 24 h.
 ```
 
 ### 8.5 Worker artifact access (RT-12 — T2 pull path)
@@ -524,10 +576,28 @@ browser|shell, main}`. Parameter placeholders `{{name}}` are substituted at
 run time from `Application.params`. Resolution: fetch
 `{artifact_base}/{id}/workflow.json`; the sha256 of the raw fetched bytes MUST
 equal the pin (`id@sha256:…`) or the worker refuses (409 pin mismatch → the
-deployment fails with error `workflow_pin_mismatch`). The runner interface:
+deployment fails with error `workflow_pin_mismatch`). Engine trust (RT2-6): the capability file's `engine` field is authoritative
+and validated at compile; at run time the fetched `manifest.json` `type` MUST
+equal it, else the worker refuses (`engine_mismatch`). The sha pin covers
+`workflow.json` bytes only; `manifest.json` is advisory beyond the type check.
+The runner interface:
 `netgent-runner run <workflow.json> --type <manifest.type> --param k=v …`;
 exit 0 = success, nonzero = workflow failure (stderr tail becomes
 `DeploymentStatus.log_tail`).
+
+### 8.8b Service nodes on the wire (RT2-2)
+
+Service nodes reuse the same Deployment/WorkItem machinery with three fixed
+rules: (1) `Deployment.experiment_id = "svc_" + node.name` — service
+deployments live outside experiment identity and produce no ResultEnvelopes;
+(2) the WorkItem carries a synthetic Experiment: `application.workflow` = the
+node's `pipeline[0]` (pinned), `params` = the node's `params`,
+`dynamic.mode = "none"`, `iterations = 1`, all `telemetry` switches false,
+`verify.probe = false`, `static` copied from the first dependent leaf
+(recorded, not applied — the service endpoint runs outside the shaped
+namespace); (3) `Deployment.kind: Literal["leaf","service"] = "leaf"`
+distinguishes them — service deployments are exempt from experiment timeouts
+and the ingest path.
 
 ### 8.9 Service-node dependency model (RT-14)
 
@@ -543,7 +613,13 @@ the normal poll + their container health check.
 ### 8.10 Session contract (RT-24)
 
 `POST /v1/intent` creates a session: `{session_id: uuid, questions:
-[{name, pointer, prompt, kind: string|secret|choice, choices?}]}`. Sessions
+[{name, pointer, prompt, kind: string|secret|choice, choices?}]}`. If
+`questions` is empty, the SAME response already carries `{echo, spec}` — no
+`/answers` call needed (RT2-10). A direct-spec `POST /v1/experiment-sets`
+returning `409 needs-input` ALSO creates a session — the 409 body is
+`{session_id, questions}`; resumption uses the same
+`POST /v1/sessions/{id}/answers`, whose response carries `{echo, spec}`, and
+the client re-POSTs the returned spec (RT2-9). Sessions
 live 1 h, in the Core's Postgres. `POST /v1/sessions/{id}/answers` body
 `{answers: {<name>: <value>}}` — names must match the question list; values
 are validated against `kind` (secrets are written to the LOCAL secrets file by

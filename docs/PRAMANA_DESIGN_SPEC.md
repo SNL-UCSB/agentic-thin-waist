@@ -459,8 +459,11 @@ sweeps:
 ranges/enums/dependencies; leaf workflow ∈ node pipeline; `$secrets.*` ∈ declared
 prerequisites; fuzzy quantifiers only via pinned `lexicon.yaml`; endpoint-like
 free-form values against capability allow-lists or backflow. **One batched
-clarification round** (questions only from declared prerequisites; answers
-type-validated), then loud itemized defaults + plain-language **echo**; sweep
+clarification round.** Questions come from exactly two safe sources (RT2-14):
+(a) prerequisites declared in the capability file, and (b) validation
+rejections (out-of-range value, unmatched endpoint, insufficient CTPs)
+rendered from fixed templates keyed by the failing rule — never free-form
+model text. Answers are type-validated, then loud itemized defaults + plain-language **echo**; sweep
 axes shown as realized value lists; user confirms.
 **4.2 Units:** rate(kbps|mbps|gbps→mbps) · time(ms|s|min→ms) · pct. Canonical numeric rendering (normative, RT-1): decimal string, round-half-even
 to ≤ 6 fractional digits, trailing zeros stripped, no exponent notation,
@@ -547,7 +550,7 @@ persist-via-telemetry-REST pattern is retired.
 - **M1 CLI** (typer/click): `init` (pydantic-settings config: env `PRAMANA_*` >
   file > defaults; secrets scaffold with **enforced 0600** — doctor and dispatch
   hard-fail otherwise; `PRAMANA_SECRET_<KEY>` env override for CI), `run`
-  (sweep + S4 expansion), `status`, `cancel`, `doctor`. Machine conventions:
+  (sweep expansion + CTP select query, defs §8.6), `status`, `cancel`, `doctor`. Machine conventions:
   `--json` on read verbs, documented exit codes (**3 = backflow required**),
   `--yes` / `--answers-file` for non-interactive, completion, `NO_COLOR`.
   Deferred: `refresh`, `diff-collected` (v1.1+), keyring backend.
@@ -582,12 +585,12 @@ persist-via-telemetry-REST pattern is retired.
 - **M11 CTP-lite:** `local_dir` officialized; global URL moves to config;
   `/capabilities` endpoint deferred (hand-authored file covers v1).
 - **M12 Telemetry:** upsert on `(spec_hash, deployment_id, iteration, attempt)`
-  + fence rejection; `?spec_hash=` filter; two-axis set status. **T2 ingest = the
-  current implementation:** the Core's poll loop collects envelopes (small
-  JSON) and pulls artifacts from workers over the same SG-scoped HTTP it
-  already uses — today's proven path. S3-for-bulk-artifacts is a v1.1
-  optimization if the laptop uplink becomes the measured bottleneck, not a v1
-  component.
+  + fence rejection; `?spec_hash=` filter; two-axis set status. **T2 ingest (one
+  normative path — interface definitions §8.4/§8.4b/§8.5):** workers store
+  artifacts locally and queue envelopes; the Core's poll loop collects the
+  envelopes, pulls artifact bytes, uploads them to MinIO itself, and POSTs
+  each envelope to telemetry. At T1 the worker does both steps directly
+  (MinIO is local). Workers never reach the laptop in either tier.
 - **M13 NetGent:** runner embedded (§5.3); workflow-repo entry gate = PR review
   + golden-trace replay (signing v2); capability file hand-authored.
 - **M14 shared/ (FIRST, owned, frozen):** Pydantic v2 models, units, RFC 8785
@@ -603,8 +606,12 @@ persist-via-telemetry-REST pattern is retired.
    > defaults); validate. 2. Image ensure: pull `snlhub/*`; build only if image
    absent AND registry unreachable. 3. Connectors: `deploy(pool_spec)` per the
    default mapping → worker containers (+ service-node capacity). 4. Capability
-   load: read `capabilities/*.yaml`, content-hash, snapshot (offline: the
-   snapshot bundled in the images is used, refresh best-effort later).
+   load, precedence (RT2-12): repo checkout `capabilities/*.yaml` (running
+   from a clone) > `~/.pramana/capabilities/` (user override) > the snapshot
+   baked into the Core image at `/opt/pramana/capabilities-snapshot/`
+   (offline fallback; refresh best-effort later). Required images:
+   `snlhub/core`, `snlhub/substrate-worker`, `snlhub/netgent-runner`, plus
+   `postgres` and `minio`.
 5. Ready: `pramana doctor` green = REST up, pool healthy, snapshot loaded.
 
 ### 5.5 Observability (replaces "tracing falls out of the interfaces")

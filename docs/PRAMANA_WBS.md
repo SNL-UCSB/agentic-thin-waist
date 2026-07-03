@@ -27,7 +27,7 @@ size). Beads is NOT part of this framework.
 ```
 CARD <id>: <one-line what>
 CONTEXT   (≤5 sentences; a student never needs the whole system)
-INTERFACE (verbatim signature/schema from DESIGN_SPEC §<n>)
+INTERFACE (verbatim from PRAMANA_INTERFACE_DEFINITIONS.md §<n>; DESIGN_SPEC for intent only)
 INPUTS    skeleton file(s), fixtures, failing suite path
 DONE WHEN pytest tests/cards/test_<id>.py green in CI
 MUST NOT  touch outside <paths>; add deps; change any schema
