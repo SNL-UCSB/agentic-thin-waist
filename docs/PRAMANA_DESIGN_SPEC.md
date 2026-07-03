@@ -607,12 +607,14 @@ persist-via-telemetry-REST pattern is retired.
    > defaults); validate. 2. Image ensure: pull `snlhub/*`; build only if image
    absent AND registry unreachable. 3. Connectors: `deploy(pool_spec)` per the
    default mapping → worker containers (+ service-node capacity). 4. Capability
-   load, precedence (RT2-12): repo checkout `capabilities/*.yaml` (running
-   from a clone) > `~/.pramana/capabilities/` (user override) > the snapshot
-   baked into the Core image at `/opt/pramana/capabilities-snapshot/`
-   (offline fallback; refresh best-effort later). Required images:
-   `snlhub/core`, `snlhub/substrate-worker`, `snlhub/netgent-runner`, plus
-   `postgres` and `minio`.
+   load (RT4-7/11): the config key `capabilities.sources` is an ordered list
+   of directories/URLs; for each `<project>.yaml`, the FIRST source that
+   contains it wins. Default order: `./capabilities` (developer checkout
+   override, if present) → `~/.pramana/capabilities` (user override of the
+   bundled snapshot) → `/opt/pramana/capabilities-snapshot` (baked into the
+   Core image; the offline fallback). Required images: `snlhub/core`,
+   `snlhub/substrate-worker`, `snlhub/netgent-runner`, plus `postgres` and
+   `minio`.
 5. Ready: `pramana doctor` green = REST up, pool healthy, snapshot loaded.
 
 ### 5.5 Observability (replaces "tracing falls out of the interfaces")

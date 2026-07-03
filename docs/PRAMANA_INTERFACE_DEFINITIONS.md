@@ -152,8 +152,11 @@ class Dynamic(BaseModel):
     local_dir: str | None = None                   # RT3-3: REQUIRED iff source=="local_dir";
                                                    # absolute path on the worker host, layout
                                                    # {local_dir}/{incoming|outgoing}/{ctp_id}.pcap;
-                                                   # CLI validates existence at submit; no
-                                                   # config fallback
+                                                   # CLI validates existence at submit; no config
+                                                   # fallback. T1-ONLY (RT4-2): validators reject
+                                                   # source=local_dir when the leaf's node maps to
+                                                   # any non-local_docker connector; T2 requires
+                                                   # source=ctp_service
     min_available: int = 1
     load: list[LoadEntry] = []                     # {workflow, node, params}
 
@@ -294,7 +297,10 @@ POST /v1/work            body: WorkItem
   422 problem+json                                      schema/sha refusal
 GET  /v1/status          -> StatusReply (200 always if alive)
 POST /v1/cancel          body: {"deployment_id","fence"} -> 202
+GET  /v1/envelopes?since=<cursor>   (T2-ONLY collection; §8.4b)
+GET  /v1/artifacts/{deployment_id}/{iteration}/{attempt}/{kind}  (T2-ONLY; §8.5)
 (existing endpoints unchanged: /shape /capture /replay /qtrace /ctp/fetch /health)
+This block is the COMPLETE worker HTTP surface (RT4-10).
 ```
 
 **Core REST (FastAPI, /v1 prefix, RFC 9457 problem+json errors):**
@@ -316,7 +322,10 @@ GET  /v1/experiment-sets/{id}                 (full schema, RT3-11) ->
    deployments: [DeploymentStatus...]}          # paginated: ?limit=<=200&cursor=...
 POST /v1/experiment-sets/{id}/cancel          -> 202
 POST /v1/intent               body: {"text": "..."}   (LLM path)
-  200 {"session_id", "questions":[...]}        batched round (may be empty)
+  200 {"session_id", "questions":[Question,...]}            when questions exist
+  200 {"session_id", "questions":[], "echo": str,
+       "spec": ExperimentSet}                               when nothing to ask
+                                                (exactly these two bodies; §8.10)
 POST /v1/sessions/{id}/answers  body: {answers:{name:value}}
   200 {"echo": "<plain language>", "defaults":[...], "sweep_axes":[...],
        "spec": ExperimentSet}                  confirm via POST /v1/experiment-sets
@@ -432,12 +441,15 @@ class Tolerance(BaseModel):                      # RT-6 — closed key set v1
 class Artifact(BaseModel):                       # RT-7
     kind: Literal["pcap","qtrace","app_log","shell_log"]
     key: str                                     # object key, layout:
-                                                 # {spec_hash}/{deployment_id}/{iteration}/{kind}
+                                                 # {spec_hash}/{deployment_id}/{iteration}/{attempt}/{kind}
     bytes: int
     sha256: str                                  # integrity; verified on ingest/pull
 
 class Pin(BaseModel):                            # RT2-5
-    version: str; url: str; sha256: str
+    version: str
+    url: str | None = None                       # None for local files (e.g. the lexicon,
+                                                 # pinned from shared/models/lexicon.yaml)
+    sha256: str
     pinned_at: datetime
     signed_by: str | None = None                 # v2 signing; None in v1
 
@@ -554,7 +566,7 @@ GET /v1/envelopes?since=<cursor>   -> {envelopes: [ResultEnvelope...], cursor}
 ### 8.5 Worker artifact access (RT-12 — T2 pull path)
 
 ```
-GET /v1/artifacts/{deployment_id}/{iteration}/{kind}
+GET /v1/artifacts/{deployment_id}/{iteration}/{attempt}/{kind}
   200 bytes (headers: X-Sha256, Content-Length) · 404 unknown · 410 evicted
 Retention on the worker: until set completion + 24 h, then evicted.
 At T1 workers write MinIO directly; this endpoint is the T2 collection path.
@@ -645,9 +657,9 @@ returning `409 needs-input` ALSO creates a session — the 409 body is
 the client re-POSTs the returned spec (RT2-9). Sessions
 live 1 h, in the Core's Postgres. `POST /v1/sessions/{id}/answers` body
 `{answers: {<name>: <value>}}` — names must match the question list; values
-are validated against `kind` (secrets are written to the LOCAL secrets file by
-the CLI, never sent to the Core: the CLI substitutes `$secrets.<key>` and
-answers the session with the key name). One round in v1: after answers, the
+are validated against `kind` (secret answers: the CLI writes the value into the LOCAL secrets file under
+key `<name>` and submits the literal string `"$secrets.<name>"` as the answer
+— the single canonical wire form, same as §8.10b; the Core never sees values). One round in v1: after answers, the
 session returns the echo + compiled spec, or errors.
 
 ### 8.10b Question model and secret answers (RT3-5)
@@ -655,10 +667,20 @@ session returns the echo + compiled spec, or errors.
 ```python
 class Question(BaseModel):
     name: str            # answer key; charset [a-z0-9_]
-    pointer: str         # RFC 6901 JSON Pointer into the draft spec
+    pointer: str         # RFC 6901 JSON Pointer into the draft spec. Syntax,
+                         # restated: "/"-separated reference tokens from the
+                         # document root; "~" escapes as "~0", "/" in a token
+                         # as "~1". Examples: /experiments/0/static/latency ;
+                         # /nodes/1/params/meeting~1code (a key containing "/")
     prompt: str          # template-rendered text (never free-form model output
                          #   for validation-sourced questions)
-    kind: Literal["string","seconds","rate","int","choice","secret"]
+    kind: Literal["string","seconds","rate","int","float","bool",
+                  "choice","secret"]
+    # Mapping from capability param types (§8.15) and validation failures:
+    # enum -> choice (choices = declared values); node_ref -> choice (choices =
+    # declared node names); url -> string (allow-list validated on answer);
+    # seconds/rate/int/float/bool -> same-named kind; secret -> secret.
+    # Validation-rejection questions reuse the failing field's mapped kind.
     choices: list[str] | None = None
 ```
 Answers: `{answers: {<name>: <value>}}`, coerced/validated by `kind`.
@@ -676,7 +698,8 @@ a 422 in v1. `metrics` required keys: `transport` (from the capture:
 `{throughput_mbps_ts: [...], rtt_ms_ts: [...], retransmits: int}`) and `app`
 (workflow-dependent; browser workflows: `{qoe: {...}}`, shell: `{stdout_summary}`).
 `context` required keys (RT3-16, and the design spec's taxonomy defers here):
-`{static: {...as specced}, dynamic: {mode, ctp|load},
+`{static: {...as specced}, dynamic (per mode: replay→{mode, ctp};
+load→{mode, load}; both→{mode, ctp, load}; none→{mode}),
 application: {workflow_sha, params_sans_secrets}, worker_id}`. Producers may
 add keys under `metrics.extra` only.
 ### 8.12 Connector API (RT3-2)
@@ -709,6 +732,8 @@ artifacts:  {bucket: pramana-artifacts, endpoint: "http://minio:9000",
 ctp:        {endpoint: "http://ctp-service:8001"}
 telemetry:  {endpoint: "http://telemetry-service:8004"}
 pool:       {size: null}          # null = min(cores-2, 8)
+capabilities: {sources: ["./capabilities", "~/.pramana/capabilities",
+               "/opt/pramana/capabilities-snapshot"]}   # ordered; first hit wins
 ```
 Env override naming: `PRAMANA_` + upper-snake path (`PRAMANA_LLM_PROVIDER`,
 `PRAMANA_ARTIFACTS_BUCKET`); env > file > defaults above.
@@ -744,6 +769,7 @@ subtree the phrase may bind to.
 Error body fields (all errors): `{type: str (URI suffix per the §4 catalog),
 title: str, status: int, detail: str, instance: str|null}` + documented
 extension members only (`session_id`, `questions`, `pointer`, `current_fence`).
-Paginated endpoints (exactly two): `GET /v1/experiment-sets` and
-`GET /v1/results` — request `?limit=<1..200, default 50>&cursor=<opaque str>`;
+Paginated endpoints (exactly three): `GET /v1/experiment-sets` (list),
+`GET /v1/results`, and the `deployments` array of
+`GET /v1/experiment-sets/{id}` — request `?limit=<1..200, default 50>&cursor=<opaque str>`;
 response `{items: [...], next_cursor: str|null}`.
