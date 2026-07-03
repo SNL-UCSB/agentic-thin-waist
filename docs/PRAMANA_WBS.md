@@ -1,6 +1,6 @@
 # Pramana v1 — Work Breakdown Structure (student onboarding)
 
-**2026-07-02 · Derived from `PRAMANA_DESIGN_SPEC.md` v1.1 (migration M-1…M-9).**
+**2026-07-02 · Derived from `PRAMANA_DESIGN_SPEC.md` v1.2 + `PRAMANA_INTERFACE_DEFINITIONS.md` (migration M-1…M-9).**
 Team model: 3–4 rotating undergraduates + persistent 1–2; **supervisors: Manni &
 Jaber**. Tracking: **GitHub Issues + Actions** (cards = issues from the template
 below; sub-module gates = milestones; queue = labels `card` + `available` +

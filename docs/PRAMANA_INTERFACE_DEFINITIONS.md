@@ -16,7 +16,7 @@ shared/models/                        # M-1 — NEW package (owner: Jaber)
   __init__.py
   units.py            # Rate, Duration, Percent parse/format (canonical decimal)
   spec.py             # ExperimentSet, Experiment, NodeDecl, Regime blocks (A5)
-  artifacts.py        # Deployment, WorkItem, StatusEvent, ResultEnvelope (A6–A9)
+  artifacts.py        # Deployment, WorkItem, StatusReply/DeploymentStatus, ResultEnvelope, NodeDescriptor (A6–A10)
   capability.py       # CapabilityFile, WorkflowEntry, KnobEntry (A3)
   hashing.py          # identity() — the ONLY RFC 8785 call site
   defaults.py         # operational constants (spec §10)
@@ -187,12 +187,15 @@ class Deployment(BaseModel):                        # A6 — scheduler-owned row
     error: str | None = None
     ts: dict[str, datetime] = {}                    # stage -> timestamp
 
-class WorkItem(BaseModel):                          # A7 — POST /v1/work body
-    deployment_id: str; fence: int; attempt: int
+class WorkItem(BaseModel):                          # A7 — POST /v1/work body (NORMATIVE shape;
+    deployment_id: str; fence: int; attempt: int    #  the design spec's A7 sketch defers here)
     start_iteration: int
-    leaf: Experiment                                # full leaf, secrets RESOLVED
-    secrets: dict[str, str] = {}                    # in-memory only; never logged
+    leaf: Experiment                                # full leaf
+    secrets: dict[str, str] = {}                    # resolved values; in-memory only; never logged
 
+# A8 is transported as a BATCHED reply to a scheduler-initiated poll (there is
+# no per-event push in the direct binding). 'StatusEvent' in older sketches ==
+# one DeploymentStatus entry inside this reply.
 class StatusReply(BaseModel):                       # A8 — GET /v1/status response
     worker_id: str
     deployments: list[DeploymentStatus]             # all non-terminal on this worker
@@ -360,3 +363,202 @@ envelope insert is `ON CONFLICT DO NOTHING` + fence check in the WHERE.
 | M-5 | telemetry migration (upsert key) | telemetry routes (+filters) | — |
 | M-6 | match/backflow/echo in `orchestration/app/engine/` | `experiment_generator.py` (pins) | — |
 | M-7 | `cli/pramana/*`, `examples/*` | — | `services/experiment-api/` |
+## 8. Completions (red-team round 1 — normative)
+
+### 8.1 Remaining models (referenced in §2, defined here)
+
+```python
+class Queue(BaseModel):                          # RT-2/3
+    qdisc: Literal["pfifo","bfifo","fifo","red","pie","fq_pie","codel",
+                   "fq_codel","fq","cake"]       # closed set v1; extending it
+                                                 # is a capability-file change
+    args: str = ""                               # verbatim tc suffix appended after
+                                                 # `tc qdisc add ... <qdisc> <args>`;
+                                                 # validated by regex ^[a-z0-9 ._%]*$
+                                                 # (no shell metachars); semantics owned
+                                                 # by tc. Participates in identity as-is.
+
+class Impair(BaseModel):                         # RT-4 — maps 1:1 onto netem
+    loss_pct: float = 0.0                        # 0..100; netem `loss X%`
+    reorder_pct: float = 0.0                     # 0..100; netem `reorder X%` (requires
+                                                 # a delay; validator: latency > 0)
+    dup_pct: float = 0.0                         # 0..100; netem `duplicate X%`
+    # fields are independent; all default 0 = impairment absent; in identity.
+
+class LoadEntry(BaseModel):                      # RT-5 — closed-loop cross-traffic
+    workflow: str                                # pinned `id@sha256:...` post-compile,
+                                                 # same rule as application.workflow
+    node: str                                    # must name a declared node whose
+                                                 # `pipeline` contains this workflow id
+    params: dict[str, str | Quantity] = {}       # same typing as Application.params;
+                                                 # $secrets refs allowed, same rules
+
+class Tolerance(BaseModel):                      # RT-6 — closed key set v1
+    capacity_pct: float = 5.0                    # max |measured-requested|/requested
+    latency_ms: float = 2.0                      # max |measured-requested|
+    # No other keys in v1 (extra="forbid"); adding a factor = schema_version bump.
+
+class Artifact(BaseModel):                       # RT-7
+    kind: Literal["pcap","qtrace","app_log","shell_log"]
+    key: str                                     # object key, layout:
+                                                 # {spec_hash}/{deployment_id}/{iteration}/{kind}
+    bytes: int
+    sha256: str                                  # integrity; verified on ingest/pull
+
+class NodeDescriptor(BaseModel):                 # RT-32/41 — A10, connector -> planner
+    node_id: str                                 # "pool/worker-03"
+    connector: str
+    endpoint: str                                # http://host:port (worker API)
+    attrs: list[str]                             # browser, audio, cca_host, public_reach
+    max_concurrent_regimes: int = 8
+    state: Literal["healthy","suspect","down"]
+```
+
+### 8.2 Capability file schemas + examples (RT-8)
+
+```yaml
+# capabilities/netgent.yaml       kind: static
+kind: static
+service: netgent
+service_version: "2.4.0"
+artifact_base: "https://raw.githubusercontent.com/SNL-UCSB/netgent-workflow/main/workflows"
+endpoints: []                      # allow-list for URL/host params (suffix or exact)
+workflows:
+  - id: zoom_client
+    application: zoom
+    role: client                   # client | server
+    peer: zoom_server              # optional; required peer workflow id
+    engine: browser                # browser | shell
+    workflow_sha: "sha256:9e…"     # sha256 of workflows/<id>/workflow.json bytes
+    params:
+      - {name: duration, type: seconds, required: true}
+      - {name: server,   type: node_ref, required: true}
+      - {name: meeting_code, type: string, required: true, kind: secret_or_param}
+    prerequisites: [meeting_code, meeting_password]
+    node_requirements: [browser, audio]
+
+# capabilities/netreplica.yaml    kind: static
+kind: static
+service: netreplica
+knobs:
+  - {name: capacity, type: rate, range: ["0.1mbps","10gbps"]}
+  - {name: latency,  type: time, range: ["0ms","2000ms"]}
+  - {name: jitter,   type: time, range: ["0ms","500ms"]}
+  - {name: qdisc,    type: enum, values: [pfifo,bfifo,fifo,red,pie,fq_pie,codel,fq_codel,fq,cake]}
+  - {name: cca,      type: enum, values: [cubic,bbr,reno,vegas,...], host_kernel: true}
+ceilings: {concurrent_regimes_per_host: 8}
+
+# capabilities/ctp.yaml           kind: live
+kind: live
+service: ctp
+endpoint: "http://ctp-service:8001"     # or the configured global instance
+query_schema:                            # dimensions accepted by select (§8.6)
+  - {name: intensity_range_mbps, type: "[float,float]"}
+  - {name: burstiness_pmr_range, type: "[float,float]"}
+  - {name: intensity_direction,  type: enum, values: [download,upload,both]}
+  - {name: contributor_count_min, type: int}
+```
+
+### 8.3 Secrets file (RT-13)
+
+`~/.pramana/secrets.yaml`, permissions 0600 (enforced: `doctor` and dispatch
+hard-fail otherwise). Format: one flat map — `secrets: {zoom_meeting_code:
+"…", meeting_password: "…"}`. Key charset `[a-z0-9_]{1,64}`. Precedence:
+`PRAMANA_SECRET_<UPPERCASED_KEY>` env var > file entry > error
+`secrets-missing`. A `$secrets.<key>` reference resolves only if `<key>` is a
+declared prerequisite of that leaf's workflow.
+
+### 8.4 Telemetry ingest contract (RT-11)
+
+```
+POST /v1/results        body: ResultEnvelope
+  201 created · 200 duplicate (same (spec_hash,deployment_id,iteration,attempt) —
+  body unchanged, upsert no-op) · 409 problem+json type=…/fence-stale (envelope
+  fence < scheduler-recorded fence) · 422 schema
+Artifacts: the worker uploads bytes FIRST via the object store (MinIO/S3,
+shared/s3 client) at the §8.1 key layout, then publishes the envelope carrying
+keys + sha256; telemetry verifies existence lazily on first read.
+```
+
+### 8.5 Worker artifact access (RT-12 — T2 pull path)
+
+```
+GET /v1/artifacts/{deployment_id}/{iteration}/{kind}
+  200 bytes (headers: X-Sha256, Content-Length) · 404 unknown · 410 evicted
+Retention on the worker: until set completion + 24 h, then evicted.
+At T1 workers write MinIO directly; this endpoint is the T2 collection path.
+```
+
+### 8.6 CTP select query (RT-9/26 — mirrors the implemented ctp-service API)
+
+```
+POST {endpoint}/ctps/select
+  body: {query: {<dimensions from capability query_schema>}, limit: int<=10000,
+         offset: int, order_by: intensity|burstiness|contributor_count}
+  200 {query_matched: int, results_returned: int, ctps: [{ctp_id, intensity,
+       burstiness, …}]}    — partial results are VALID (query_matched may be
+                              less than requested; compile applies the
+                              min_available rule, spec §4)
+Payload fetch: GET {endpoint}/ctps/{ctp_id}/pcap?direction=incoming|outgoing
+  (local_dir source: files at {dir}/{incoming|outgoing}/{ctp_id}.pcap)
+```
+
+### 8.7 /shape mapping for the probe (RT-10)
+
+The worker's existing `/shape` endpoint accepts
+`{download_mbps, upload_mbps, latency_ms, jitter_ms, qdisc, qdisc_args,
+loss_pct, reorder_pct, dup_pct, cca, verify: {tolerance_capacity_pct,
+tolerance_latency_ms}}` and returns `{applied: {...}, verified: bool,
+measured: {capacity_down_mbps, capacity_up_mbps, latency_ms},
+verification_log: str}`. `probe()` = call `/shape` with `verify` set (5 s
+iperf3 per direction + 10 pings, 2 s drain before capture) and translate the
+response into the `Verification` model (§2), factor `envelope`.
+
+### 8.8 Workflow artifact contract (RT-15/43)
+
+A workflow is `workflows/<id>/workflow.json` in the registry:
+`{specification: str, states: [{checks: [{type, params}], actions:
+[{type, params}], end_state: str}], parameters: [str]}` with
+`workflows/<id>/manifest.json` `{name, description, version, type:
+browser|shell, main}`. Parameter placeholders `{{name}}` are substituted at
+run time from `Application.params`. Resolution: fetch
+`{artifact_base}/{id}/workflow.json`; the sha256 of the raw fetched bytes MUST
+equal the pin (`id@sha256:…`) or the worker refuses (409 pin mismatch → the
+deployment fails with error `workflow_pin_mismatch`). The runner interface:
+`netgent-runner run <workflow.json> --type <manifest.type> --param k=v …`;
+exit 0 = success, nonzero = workflow failure (stderr tail becomes
+`DeploymentStatus.log_tail`).
+
+### 8.9 Service-node dependency model (RT-14)
+
+A leaf depends on service node N iff any of its params has type `node_ref`
+resolving to N (e.g. `server: broadcaster`). The scheduler dispatches service
+nodes first; a dependent leaf is claimable only after N has emitted
+`stage: service_ready` (its workflow's post-launch check). If N's deployment
+reaches `failed`, all leaves depending on N fail with error
+`service_node_failed` — no automatic service-node restart in v1 (re-run the
+set). Service nodes are exempt from the experiment timeout; their liveness is
+the normal poll + their container health check.
+
+### 8.10 Session contract (RT-24)
+
+`POST /v1/intent` creates a session: `{session_id: uuid, questions:
+[{name, pointer, prompt, kind: string|secret|choice, choices?}]}`. Sessions
+live 1 h, in the Core's Postgres. `POST /v1/sessions/{id}/answers` body
+`{answers: {<name>: <value>}}` — names must match the question list; values
+are validated against `kind` (secrets are written to the LOCAL secrets file by
+the CLI, never sent to the Core: the CLI substitutes `$secrets.<key>` and
+answers the session with the key name). One round in v1: after answers, the
+session returns the echo + compiled spec, or errors.
+
+### 8.11 Closed enums and required keys (RT-20/21/22)
+
+`DeploymentStatus.state` ∈ the §3 table's states. `stage` ∈ {docker_up,
+prepare, service_ready, verify, run, publish, reset}. `Verification.per_factor`
+keys are exactly {envelope, ctp_realized, cca_negotiated, app_content} with
+verdicts {verified, failed, characterized, unverified, n/a} — unknown keys are
+a 422 in v1. `metrics` required keys: `transport` (from the capture:
+`{throughput_mbps_ts: [...], rtt_ms_ts: [...], retransmits: int}`) and `app`
+(workflow-dependent; browser workflows: `{qoe: {...}}`, shell: `{stdout_summary}`).
+`context` required keys: `{static: {...as specced}, dynamic: {mode, ctp|load},
+workflow_sha, worker_id}`. Producers may add keys under `metrics.extra` only.

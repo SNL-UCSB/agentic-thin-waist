@@ -1,6 +1,11 @@
 # PRAMANA — Complete Design Specification v1.2
 
-**UCSB SNL · 2026-07-02 · CANONICAL — the one document to implement from.**
+**UC Santa Barbara, Systems & Networking Lab (UCSB SNL) · 2026-07-02.**
+**Normative precedence (one rule):** this document is normative for *intent and
+decisions*; `PRAMANA_INTERFACE_DEFINITIONS.md` is normative for *wire formats,
+schemas, and code-level contracts*. On any conflict, the interface definitions
+win and a defect issue is filed against whichever document was stale. The two
+files together are the complete implementation source.
 System name: **Pramana** (Sanskrit: *evidence*); repository:
 `agentic-thin-waist`. This version (v1.2) adds a plain-language overview and
 removes jargon-only passages after readability feedback.
@@ -150,7 +155,7 @@ Priya has never seen Pramana. She wants to know how CUBIC and BBR differ over
 a 10 Mbps bottleneck.
 
 1. `git clone … && docker compose up` — Postgres, MinIO, telemetry, the Core,
-   and two worker containers start on her laptop. (§5.4 bootstrap)
+   and two worker containers start on her laptop. (§5.6 bootstrap sequence)
 2. `pramana init` — a wizard writes `~/.pramana/config.yaml`; she skips the
    LLM step (no API key). Capability files load; `pramana doctor` is green.
 3. She copies `examples/wget_cca_compare.yaml` — a spec with one `sweeps:`
@@ -338,7 +343,9 @@ sweep         : Experiment × dim → ExperimentSet              (client-side)
 Experiment    = ⟨ Workflow(params) ⊗ Regime ⟩ @ Roles × iterations
 identity(e)   = H_rfc8785(workflow@sha, params, static, dynamic)
 Roles         = ⟨ client: Node, server: Node? ⟩
-Workflow      = CLI(app, role) ▸ NFA⟨states, {{params}}⟩      (NetGent)
+Workflow      = CLI(app, role) ▸ NFA⟨states, {{params}}⟩      (NetGent; NFA =
+                nondeterministic finite automaton — an ordered set of states,
+                each = checks → actions → end_state)
 Regime        = Static⟨capacity↓↑, latency, queue⟩ ⊗ Dynamic⟨pressure⟩
 pressure      = replay(ctp) | load(Workflow* ↦ Node*) | both
 select        : criteria → ℘(corpus);  ctp ∈ closure(corpus; transform, merge)
@@ -350,6 +357,13 @@ collect       = deploy ; prepare ; verify ; run ; publish     (AI-free)
 ```
 
 Regime modes: **imposed** (probe verifies) | **inhabited** (probe characterizes).
+Persistence semantics (teardown rules, normative): `set` = the worker/service
+node lives until the experiment set completes or is cancelled; network config
+resets between experiments, never between iterations. `experiment` = network
+config AND workflow state reset after each leaf completes; container persists.
+`fresh-per-experiment` = the container itself is recycled (destroyed and
+recreated by the connector) after each leaf — the isolation mode. In every
+mode, nothing resets between iterations of one leaf.
 Taxonomy: intent · experiment set · experiment (leaf; identity-hashed) ·
 iteration (no teardown by default) · deployment (worker×leaf record + lifecycle)
 · attempt (post-reap counter) · **fence** (monotonic per-deployment epoch, §5.3).
@@ -359,7 +373,8 @@ worker unit = {substrate + browserless + netgent-runner} trio.
 
 ## 3. Capability Protocol
 
-**v1 (federation of one):** hand-authored `capabilities.yaml` per project,
+**v1 (federation of one):** hand-authored capability file per project at `capabilities/<project>.yaml`
+(`netgent.yaml`, `netreplica.yaml`, `ctp.yaml`),
 **in-repo, git-versioned; PR review is the human gate; commit/content sha is the
 pin.** Loader (~100 lines, in `shared/`) reads a configured directory/URL set at
 bootstrap, content-hashes each file, pins hashes into every compiled spec. No
@@ -388,7 +403,8 @@ below the waist (P-MOD 11).
 ```yaml
 schema_version: 1
 experiment_set:
-  id: es_<slug>_<hash8>              # content-derived; duplicate POST ⇒ 200 + existing
+  id: es_<slug>_<hash8>              # = set_id over canonical leaves; body id != recomputed => 422;
+                                     # duplicate POST (same set_id) ⇒ 200 + existing resource
   intent_ref: string|null
   capability_pins:                   # lockfile-shaped records, NOT bare hashes
     netgent:    {version: "2.4.0", url: "...", sha256: "...", pinned_at: ts}
@@ -402,7 +418,8 @@ experiment_set:
        persistence: set|experiment|fresh-per-experiment,
        pipeline: [workflow_id], requirements: [attr],
        params: {k: literal|$secrets.<key>}}            # service nodes only
-  mapping: {<node>: local_docker|aws|ssh:<host>|<connector_id>}
+  mapping: {<node>: local_docker | aws[:profile[@region]] | ssh:<user@host> | <connector_id>}
+                                     # bare `aws` = default profile+region from ~/.pramana/config.yaml
   experiments:                       # FLAT leaves
     - id: e_<hash8>                  # = identity-hash prefix; UUID format retired
       static:
@@ -417,12 +434,18 @@ experiment_set:
                  meeting_code: $secrets.zoom_meeting_code}
       dynamic:
         mode: replay|load|both|none
-        ctp: [id]                    # len 1 or == iterations (i-th ↦ i-th); in identity
+        ctp: [id]                    # len 1 => SAME profile replays every iteration;
+                                   # len == iterations => i-th iteration ↦ i-th pointer; in identity
         source: ctp_service|local_dir
-        min_available: int           # below floor at compile ⇒ backflow
+        min_available: int           # checked at compile, after sweep expansion, per leaf:
+                                     # matched CTPs must be >= max(iterations, min_available),
+                                     # else a question is raised (never silent)
         load: [{workflow: id@sha, node: name, params: {...}}]
       iterations: 1
       telemetry: {pcap: true, qtrace: false, app_metrics: true}
+                                   # qtrace = queue-occupancy time series sampled from the
+                                   # bottleneck qdisc (JSONL of {ts, qlen_pkts, qlen_bytes}),
+                                   # stored as an artifact of kind "qtrace"
       verify: {probe: true, tolerance: {capacity_pct: 5, latency_ms: 2},
                policy: annotate}     # annotate-only in v1
 # Client-side only; expanded by `pramana run` before submission:
@@ -439,16 +462,20 @@ free-form values against capability allow-lists or backflow. **One batched
 clarification round** (questions only from declared prerequisites; answers
 type-validated), then loud itemized defaults + plain-language **echo**; sweep
 axes shown as realized value lists; user confirms.
-**4.2 Units:** rate(kbps|mbps|gbps→mbps) · time(ms|s|min→ms) · pct. Canonical =
-fixed-precision decimal string before hashing; `parse∘format` idempotent
+**4.2 Units:** rate(kbps|mbps|gbps→mbps) · time(ms|s|min→ms) · pct. Canonical numeric rendering (normative, RT-1): decimal string, round-half-even
+to ≤ 6 fractional digits, trailing zeros stripped, no exponent notation,
+negative zero rendered as `0`; `parse∘format` idempotent
 (hypothesis property tests). No pint (float behavior would leak into identity).
-**4.3 Identity:** `sha256(rfc8785(...))` — **RFC 8785 JCS** via the `rfc8785`
+**4.3 Identity:** `sha256(rfc8785(...))` — **RFC 8785 (JSON Canonicalization Scheme, "JCS" — a fixed, unambiguous byte
+serialization of JSON)** via the `rfc8785`
 package, wrapped once in `shared/models/hashing.py`; **reimplementation
 prohibited**; golden hash vectors in fixtures. Includes {workflow_sha,
 resolved params sans secret values, static, dynamic.mode/ctp/load}. Excludes
 nodes, mapping, iterations, telemetry, verify, attempts, provenance.
 **4.4 Provenance:** out-of-band sidecar map, **JSON Pointer (RFC 6901) → source
-∈ {intent, capability_default, user_answer, external_unverified}**, derived at
+∈ {intent, capability_default, user_answer, external_unverified}** — the last
+applied to every field of an API-direct spec (`intent_ref: null`), meaning
+syntactically validated but without extraction provenance — derived at
 Match (not plumbed through layers), feeds the echo, excluded from identity.
 
 ## 5. Architecture
@@ -570,11 +597,22 @@ persist-via-telemetry-REST pattern is retired.
   single lock; per-service `requirements.txt` retired — root file already
   drifted from CI).
 
+### 5.6 Bootstrap sequence (exact order; each step blocks the next)
+
+1. Load config (`pydantic-settings`: env `PRAMANA_*` > `~/.pramana/config.yaml`
+   > defaults); validate. 2. Image ensure: pull `snlhub/*`; build only if image
+   absent AND registry unreachable. 3. Connectors: `deploy(pool_spec)` per the
+   default mapping → worker containers (+ service-node capacity). 4. Capability
+   load: read `capabilities/*.yaml`, content-hash, snapshot (offline: the
+   snapshot bundled in the images is used, refresh best-effort later).
+5. Ready: `pramana doctor` green = REST up, pool healthy, snapshot loaded.
+
 ### 5.5 Observability (replaces "tracing falls out of the interfaces")
 
 Stage timestamps stay, and: `deployment_id` correlation across all seams;
 structured JSON logs; Prometheus `/metrics` on the Core (queue depth, claim
-latency, reap rate, ingest lag, per-worker tolerance-failure rate — the I4
+latency, reap rate, ingest lag, per-worker tolerance-failure rate (the alarm decision I4 requires:
+alert when one worker's out-of-tolerance share is anomalous) — the
 alarm's actual home); Grafana/OTel in the scale profile only.
 
 ## 6. Security
@@ -584,14 +622,15 @@ Secrets: local file 0600 (enforced), keys-in-specs, resolve-at-dispatch against
 declared prerequisites only, in-memory transit, scrubbed from A6/A8/A9/logs.
 SG fallback `0.0.0.0/0` = hard fail (SG mode only). Workflow entry gate (PR +
 golden trace); capability files via PR review (v1) / minisign|SSHSIG + freshness
-(v2). Allow-listed endpoint catalogs bound URLs/hosts.
+(v2). Endpoint values (URLs/hosts) are bound by per-capability `endpoints:` allow-lists: exact hostname or dot-suffix match (`.zoom.us`), scheme and port required for URLs, no wildcards or CIDR ranges in v1; anything unmatched becomes a question.
 
 ## 7. Verification posture
 
 Scoped per-factor verdicts in every A9; envelope probe (5 s iperf3/direction +
 10 pings, post-net-setup, pre-capture, 2 s drain) verifies imposed /
 characterizes inhabited; CTP realized-descriptor check fast-follows. Grounded
-tool verdicts + research residuals: `verification_gap.md`. PlusCal per §5.3.
+tool verdicts + research residuals: `verification_gap.md` (background reading —
+NOT required to build). PlusCal per §5.3.
 
 ## 8. Reuse map (v1.1 corrections marked ★)
 
@@ -622,11 +661,29 @@ clarification: one batched round (round cap n/a in v1) · pool default
 min(cores−2, 8) · psycopg_pool ceiling 20 · statement_timeout 30 s · probe
 5 s+10 pings+2 s drain · verify policy annotate.
 
-## 11. Acceptance criteria
+## 11. Acceptance criteria (complete list; all must pass)
 
-1–7 as v1.0 (T1 keyless ≤10 min; T1 NL; Zoom class w/ service_ready; **T2 via the current SG-scoped direct model** — committed scope [E2]; kill-a-worker (now also asserts fence: zombie
-envelopes rejected); publisher evolution via pins; cancel) **+ 8: `kill -9` the
-Core mid-set → restart → set completes, no duplicates beyond attempt semantics.**
+1. **T1 keyless:** fresh laptop → `pramana init` (skip LLM) → `pramana run
+   examples/iperf_sweep.yaml` → labeled data in telemetry with scoped
+   verification fields, ≤ 10 min wall clock including image pulls.
+2. **T1 natural language:** `pramana "compare cubic and bbr at 10 and 50 mbps
+   over wget"` → (batched questions if any) → echo → confirm → 4 leaves →
+   results.
+3. **Zoom class:** broadcaster service node + 50-leaf set using a local CTP
+   directory; dependent leaves gated on `service_ready`; no duration hacks.
+4. **T2:** same spec with `mapping: pool: aws` → workers on EC2 (AWS-assigned
+   public IPs, security group scoped to the operator; hard-fail if the
+   operator IP cannot be determined) → results collected by the Core.
+5. **Kill a worker mid-set:** deployment shows requeue with `attempt=2` and a
+   bumped fence; the set completes; telemetry holds no duplicate
+   `(spec_hash, iteration, attempt)` row; a stale-fence envelope from the
+   zombie is rejected.
+6. **Publisher evolution:** bump a workflow in the registry → the running set
+   is unaffected (pins); after refresh, the next compile uses the new version.
+7. **Cancel:** `pramana cancel <set>` stops dispatch, reaps in-flight
+   deployments, releases service nodes.
+8. **Kill the Core (`kill -9`) mid-set:** restart → recovery reconciles from
+   Postgres → the set completes with no duplicates beyond attempt semantics.
 
 ## 12. Migration plan (revised order; each ships alone)
 
@@ -654,7 +711,11 @@ running criteria 1 & 3 in CI; criterion 2 with recorded LLM responses (no keys
 in CI) · per-service suites remain; a `shared/` change fans out to all service
 jobs.
 
-## 14. Decision log
+## 14. Decision log (historical index — NOT required for implementation)
+
+Implementers never need the documents behind these labels; every surviving
+decision is restated in full above or in the interface definitions. The labels
+exist so reviewers can trace *why*.
 
 D1–D7 · R1–R10 · I1 (amended by E3: batched v1, iterative v2) · I2–I4 ·
 U1–U25 · H1–H15 · A1–A19 · G (grounding) · SE-1…SE-47 (register §SE) ·
