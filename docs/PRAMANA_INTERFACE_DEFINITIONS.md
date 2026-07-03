@@ -23,6 +23,7 @@ shared/models/                        # M-1 — NEW package (owner: Jaber)
   lexicon.yaml
   fixtures/           # golden A5 docs + hash vectors + capability files
 shared/tests/         # property + golden-vector tests (M-1 gate)
+shared/db/            # EXISTING psycopg client (reused); pooled variant added in M-3
 capabilities/                         # M-2 — NEW, hand-authored, PR-reviewed
   netgent.yaml  netreplica.yaml  ctp.yaml
 services/orchestration/app/
@@ -245,7 +246,11 @@ class WorkItem(BaseModel):                          # A7 — POST /v1/work body 
 # one DeploymentStatus entry inside this reply.
 class StatusReply(BaseModel):                       # A8 — GET /v1/status response
     worker_id: str
-    deployments: list[DeploymentStatus]             # all non-terminal on this worker
+    deployments: list[DeploymentStatus]             # all deployments NOT YET ACKNOWLEDGED
+                                                    # by the Core — terminal states included
+                                                    # until acked (RT6-6): the poll request
+                                                    # carries ?ack=<id,id,...> of entries the
+                                                    # Core has durably folded; worker drops them
 class DeploymentStatus(BaseModel):
     deployment_id: str; fence: int
     state: str; stage: str                          # stage: docker_up|prepare|
@@ -290,7 +295,7 @@ DROPPED (stale).** Unlisted (state, event) pairs are errors → `failed`.
 | preparing | stage=service_ready (service nodes) | ready | unblock dependent deployments |
 | preparing | prepare_done | ready | prepare.skipped recorded |
 | ready | stage=run | running | ts.run |
-| running | iteration_completed(i) | running | start_iteration=i+1 persisted |
+| running | iteration_completed(i) | running | advisory fast-path only (RT6-7): the AUTHORITATIVE resume point is telemetry-confirmed envelopes; on requeue, start_iteration = max confirmed iteration + 1 |
 | running | stage=publish | reporting | — |
 | reporting | envelopes_confirmed | done | release worker lock; FIFO advance |
 | any active | 3 failed polls + no corroborating activity | (reap) | see below |
@@ -327,7 +332,14 @@ This block is the COMPLETE worker HTTP surface (RT4-10).
 **Core REST (FastAPI, /v1 prefix, RFC 9457 problem+json errors):**
 
 ```
-POST /v1/experiment-sets      body: ExperimentSet (flat; sweeps pre-expanded by CLI)
+POST /v1/experiment-sets      body: DraftExperimentSet — same shape as
+                              ExperimentSet EXCEPT: capability_pins ABSENT,
+                              workflow refs MAY be unpinned ids, experiment ids
+                              ABSENT; sweeps already expanded by the CLI.
+                              COMPILATION IS CORE-SIDE for both doors (RT6-1):
+                              the Core validates (Match), may 409 needs-input,
+                              then pins + assigns ids and RETURNS the compiled
+                              ExperimentSet (which is what it stores)
   201 {"id": "es_..."}                        created
   200 {"id": "es_..."}                        identical content re-POSTed (idempotent)
   422 problem+json type=".../validation"      schema violation (field pointer inside)
@@ -340,7 +352,8 @@ GET  /v1/experiment-sets/{id}                 (full schema, RT3-11) ->
                total: int, assigned: int, running: int,
                done: int, failed: int, cancelled: int},
    ingested: {ingested: int, expected: int},
-   deployments: [DeploymentStatus...]}          # paginated: ?limit=<=200&cursor=...
+   deployments: {items: [DeploymentStatus...], next_cursor: str|null}}
+                                  # ?deployments_limit=<=200&deployments_cursor=...
 POST /v1/experiment-sets/{id}/cancel          -> 202
 POST /v1/intent               body: {"text": "..."}   (LLM path)
   200 {"session_id", "questions":[Question,...]}            when questions exist
@@ -517,11 +530,16 @@ workflows:
     peer: zoom_server              # optional; required peer workflow id
     engine: browser                # browser | shell
     workflow_sha: "sha256:9e…"     # sha256 of workflows/<id>/workflow.json bytes
-    params:
-      - {name: duration, type: seconds, required: true}
-      - {name: server,   type: node_ref, required: true}
-      - {name: meeting_code, type: string, required: true, kind: secret_or_param}
-    prerequisites: [meeting_code, meeting_password]
+    params:                        # FULL param schema (RT6-4): flag/positional/arity
+      - {name: duration, type: seconds, required: true, flag: "-d"}
+      - {name: server,   type: node_ref, required: true, flag: "-s"}
+      - {name: meeting_code, type: string, required: true, flag: "-m",
+         kind: secret_or_param}
+      # every field: {name, type, required, default?, flag?, positional?: int,
+      #               arity?: 1|"*", kind?: secret|secret_or_param}
+    prerequisites:                 # RT6-4: objects, not bare names
+      - {name: meeting_code, kind: secret_or_param}
+      - {name: meeting_password, kind: secret}
     # RULE (RT2-7): every prerequisite MUST also be a declared param with
     # kind secret|secret_or_param; `prerequisites` is exactly the subset of
     # params that must resolve before compile completes — there is no second
@@ -539,6 +557,7 @@ knobs:
   - {name: jitter,   type: time, range: ["0ms","500ms"]}
   - {name: qdisc,    type: enum, values: [pfifo,bfifo,fifo,red,pie,fq_pie,codel,fq_codel,fq,cake]}
   - {name: cca,      type: enum, values: [cubic,bbr,reno,vegas,...], host_kernel: true}
+realization_modes: [in_container_pair, split_pair]    # RT6-4
 ceilings: {concurrent_regimes_per_host: 8}
 
 # capabilities/ctp.yaml           kind: live
@@ -581,7 +600,12 @@ need to reach the laptop in either tier.
 
 ```
 GET /v1/envelopes?since=<cursor>   -> {envelopes: [ResultEnvelope...], cursor}
-  Retained until cursor advances past them + 24 h.
+  cursor = monotonic per-worker enqueue sequence number (RT6-2). COMMIT POINT:
+  the Core advances `since` ONLY after, for every envelope in the page, (a)
+  artifact bytes are uploaded to the object store and (b) telemetry returned
+  2xx. Partial failure => re-fetch the same page; safe because ingest is
+  idempotent on (spec_hash, deployment_id, iteration, attempt). Worker retains
+  envelopes until the cursor passes them + 24 h.
 ```
 
 ### 8.5 Worker artifact access (RT-12 — T2 pull path)
@@ -606,6 +630,10 @@ POST {endpoint}/ctps/select
 Deterministic selection (RT3-8): the CLI orders matches by (intensity asc,
 ctp_id lexicographic) and takes the first N required; the RESOLVED pointer
 list — not the query — is what enters the spec and the identity hash.
+Replay direction rule (RT6-3): every CTP id ALWAYS fetches and replays BOTH
+directions — incoming at the server-side endpoint, outgoing at the client-side
+endpoint — mirroring the two-thread tcpreplay model. Direction is not a spec
+knob in v1.
 Payload fetch: GET {endpoint}/ctps/{ctp_id}/pcap?direction=incoming|outgoing
   (local_dir source: files at {dir}/{incoming|outgoing}/{ctp_id}.pcap)
 ```
@@ -648,9 +676,10 @@ deployments live outside experiment identity and produce no ResultEnvelopes;
 (2) the WorkItem carries a synthetic Experiment: `application.workflow` = the
 node's `pipeline[0]` (pinned), `params` = the node's `params`,
 `dynamic.mode = "none"`, `iterations = 1`, all `telemetry` switches false,
-`verify.probe = false`, `static` copied from the first dependent leaf
-(recorded, not applied — the service endpoint runs outside the shaped
-namespace); (3) `Deployment.kind = "service"`
+`verify.probe = false`, `static` = a FIXED documented default block (capacity 1 gbps both ways,
+latency 0 ms, queue pfifo/"", cca cubic) — recorded, never applied (the
+service endpoint runs outside the shaped namespace); deterministic regardless
+of dependent leaves (RT6-9); (3) `Deployment.kind = "service"`
 distinguishes them; and (4) v1 validators REQUIRE `len(pipeline) == 1` for
 `kind: service` nodes (multi-step service pipelines are v2) (RT3-9) — service deployments are exempt from experiment timeouts
 and the ingest path.
@@ -824,7 +853,9 @@ subtree the phrase may bind to.
 Error body fields (all errors): `{type: str (URI suffix per the §4 catalog),
 title: str, status: int, detail: str, instance: str|null}` + documented
 extension members only (`session_id`, `questions`, `pointer`, `current_fence`).
-Paginated endpoints (exactly three): `GET /v1/experiment-sets` (list),
-`GET /v1/results`, and the `deployments` array of
-`GET /v1/experiment-sets/{id}` — request `?limit=<1..200, default 50>&cursor=<opaque str>`;
+Paginated endpoints (exactly three, one shape `{items, next_cursor}`):
+`GET /v1/experiment-sets?limit&cursor` → items = `{id, state, created_at}`;
+`GET /v1/results?spec_hash=&set_id=&limit&cursor` (telemetry) → items =
+ResultEnvelope summaries `{spec_hash, deployment_id, iteration, attempt,
+within_tolerance}`; and `GET /v1/experiment-sets/{id}` deployments as above — request `?limit=<1..200, default 50>&cursor=<opaque str>`;
 response `{items: [...], next_cursor: str|null}`.

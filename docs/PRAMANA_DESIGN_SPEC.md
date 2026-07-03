@@ -293,8 +293,10 @@ site, `compile()`.
    the reuse map (§8) accounts for every existing file.
 
 **Plane-level principles (P-PLANE).**
-6. The Core moves *pointers*; bulk data (traces, captures, profiles) always
-   moves directly between workers and storage.
+6. The Core moves *pointers*; bulk experiment INPUTS (traces, profiles,
+   workflows) never transit it. Result artifacts transit the Core in exactly
+   one documented case — the T2 collection relay (workers cannot reach the
+   laptop's storage) — and nowhere else (RT6-8).
 7. Nothing ever needs to dial *into* the laptop, at any tier — the Core is
    always the caller. Reachability is tier-scoped vocabulary: at **Tier 1**,
    workers are containers on the same machine, reached over the local Docker
@@ -452,7 +454,8 @@ experiment_set:
 # Client-side only; expanded by `pramana run` before submission:
 sweeps:
   - {over: static.latency, values: [...]}
-  - {over: dynamic.ctp, select: {intensity_mbps: [4,8], n: 100}}   # CLI resolves via the
+  - {over: dynamic.ctp, select: {query: {intensity_range_mbps: [4, 8]},
+                                 needed: 100}}                    # CLI resolves via the
                                                                    # CTP select query
                                                                    # (interface defs §8.6)
 ```
@@ -612,7 +615,7 @@ persist-via-telemetry-REST pattern is retired.
    absent AND registry unreachable. 3. Connectors: `deploy(pool_spec)` per the
    default mapping → worker containers (+ service-node capacity). 4. Capability
    load (RT4-7/11): the config key `capabilities.sources` is an ordered list
-   of directories/URLs; for each `<project>.yaml`, the FIRST source that
+   of DIRECTORIES (URL sources are v2 — RT6-11); for each `<project>.yaml`, the FIRST source that
    contains it wins. Default order: `./capabilities` (developer checkout
    override, if present) → `~/.pramana/capabilities` (user override of the
    bundled snapshot) → `/opt/pramana/capabilities-snapshot` (baked into the
