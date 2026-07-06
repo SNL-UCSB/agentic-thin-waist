@@ -319,6 +319,33 @@ def _pin_shell_workflow(
     }
 
 
+def _keyword_match_workflow(intent: str, available: list[dict[str, Any]]) -> str | None:
+    """Deterministic fallback: match an intent to a library workflow by keyword.
+
+    The structured LLM picker is non-deterministic and occasionally rejects an
+    intent that clearly maps to a catalogued workflow — and in ``auto`` mode that
+    sends the request into the (currently broken) generation path. This recovers
+    the obvious matches by deriving an app keyword from each workflow id
+    (``test_wget_workflow`` -> ``wget``) and checking whether it appears in the
+    intent text, so library-backed applications stay on the reliable pinning path.
+    """
+    text = (intent or "").lower()
+    for w in available:
+        wid = str(w.get("id") or "")
+        kw = wid.lower()
+        if kw.startswith("test_"):
+            kw = kw[len("test_") :]
+        if kw.endswith("_workflow"):
+            kw = kw[: -len("_workflow")]
+        kw = kw.strip("_")
+        tokens = {t for t in kw.split("_") if len(t) >= 3}
+        if len(kw) >= 3:
+            tokens.add(kw)
+        if any(t in text for t in tokens):
+            return wid
+    return None
+
+
 def choose_workflow(
     state: ShellWorkflowGenerationState, runtime: Runtime[ShellWorkflowContext]
 ) -> dict[str, Any]:
@@ -451,6 +478,22 @@ def choose_workflow(
             selected_id=result.id,
             available=available,
             source_label="library selection (LLM)",
+        )
+
+    # LLM picker returned no match. Before falling through to generation (auto)
+    # or failing (library), try a deterministic keyword match so library-backed
+    # apps (e.g. wget) don't get pushed into the flaky/broken generation path.
+    kw_id = _keyword_match_workflow(intent, available)
+    if kw_id:
+        print(
+            f"[SHELL WF] LLM picker returned no match; deterministic keyword "
+            f"fallback selected {kw_id!r}"
+        )
+        return _pin_shell_workflow(
+            intent=intent,
+            selected_id=kw_id,
+            available=available,
+            source_label="deterministic keyword fallback",
         )
 
     # is_valid=False — branch on workflow_source.

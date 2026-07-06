@@ -12,11 +12,16 @@ dependencies = [
     "fastapi==0.115.0",
     "httpx>=0.24.0",
     "playwright==1.58.0",
-    "browser-use==0.5.11",
     "pydantic>=2.0.0",
     "python-dotenv>=1.2.2",
     "uvicorn[standard]==0.30.0",
 ]
+# playwright is pinned to 1.58.0 to match the Node playwright-core@1.58.0 Chromium
+# that the Dockerfile installs and ns1-wraps (via wrap-playwright-chrome.sh); the
+# Python package must resolve that same wrapped browser so YouTube/Zoom/Twitch
+# traffic traverses the shaped ns1 namespace. Do NOT add a separate
+# `playwright install chromium` step — it would fetch an unwrapped browser and
+# bypass traffic shaping. browser-use is intentionally omitted (nothing imports it).
 
 [dependency-groups]
 dev = [
