@@ -288,7 +288,7 @@ site, `compile()`.
    human gate before entering the system.
 4. *Disaggregate logically, package physically by profile.* Module boundaries
    are enforced by the artifacts they exchange — never by how many containers
-   run. On the laptop the whole Core is one process.
+   run. On the laptop the whole Core is one process. **[REOPENED 07-06 — see §16 O1: the Core may be decoupled at the spec-sheet boundary; do not treat single-process as final.]**
 5. *Brownfield first.* Reuse existing code wherever it satisfies a contract;
    the reuse map (§8) accounts for every existing file.
 
@@ -615,7 +615,7 @@ persist-via-telemetry-REST pattern is retired.
   per-iteration durable completion, stage timestamps.
 - **M11 CTP-lite:** `local_dir` officialized; global URL moves to config;
   `/capabilities` endpoint deferred (hand-authored file covers v1).
-- **M12 Telemetry:** upsert on `(spec_hash, deployment_id, iteration, attempt)`
+- **M12 Telemetry [REOPENED 07-06 — see §16 O2]:** upsert on `(spec_hash, deployment_id, iteration, attempt)`
   + fence rejection; `?spec_hash=` filter; two-axis set status. **T2 ingest (one
   normative path — interface definitions §8.4/§8.4b/§8.5):** workers store
   artifacts locally and queue envelopes; the Core's poll loop collects the
@@ -787,3 +787,56 @@ vendorable.**
   Celery, Kubernetes, Z3 (v2 optional), minisign (v2).
 
 Adding any dependency requires stating its tier and fence in this section.
+
+## 16. Reopened — 07-06 architecture meeting (Manni + Arpit; ACTIVE, NOT settled)
+
+Source: the 07-06 weekly meeting (transcript in the PPA corpus). The team
+"realized a fundamental underspecification problem" (Arpit, in the meeting):
+two decisions this document currently presents as converged are under active
+redesign. **Reviewers: treat the affected sections as open, not final.** These
+are captured here rather than folded into the canonical text because the
+meeting was Arpit + Manni + one voice — not the full team — and the design was
+not closed.
+
+**O1 — Decouple the Core at the spec-sheet boundary.** The proposal: split the
+"one process" Core into (a) **client space**: intent parser + knowledge base
+only, whose sole output is a spec sheet; and (b) **execution space** on a
+persistent server: Match, Planner, Scheduler, Telemetry, and the worker pool.
+"The control plane ends at synthesis of the spec sheet; the scope of everything
+below is the spec sheet, nothing more" (Arpit). Kubernetes-shaped: POST a spec
+sheet → accept/reject → run, deterministically. The Scheduler becomes an
+**infrastructure-agnostic interface** (not per-connector if-else) that drives
+SNL / AWS / PINOT worker pools.
+*Rationale (two factors, distinguished in the meeting):* **scalability** —
+50–100 containers × ~500 MB PCAP would saturate the client link; and
+**stability** — the laptop link is brittle (close the lid → the persistent
+connection breaks → containers stranded, data lost). Server-side placement is
+also not behind NAT, which resolves reachability differently than §5.4's
+"Core always dials out."
+*Contradicts:* §1 "the whole Core is one process," §3 module decomposition,
+§5.4/§5.6, Part I narrative, and both diagrams (Core drawn as one laptop box).
+
+**O2 — Telemetry placement.** Reopened toward: an **infrastructure-local
+telemetry instance close to each worker pool**, plus a **consolidated
+persistent view at the client via sync/stitching** across infrastructures
+("local vs remote telemetry modules... stitched into one persistent view" —
+Arpit). Offload stays decoupled from experiment lifecycle (settled earlier).
+*Contradicts:* §6.2 M12 ("T1 direct publish / T2 Core pulls").
+
+**O3 — `mapping:` generalizes to service placement.** Today `mapping:` places
+experiment *nodes* on connectors (§4). The meeting extends the node/mapping
+abstraction to also place *core services* (scheduler, telemetry) on
+infrastructure — a **one-time placement choice** the user makes given their
+credentials. "We're not talking about nodes for the services itself... flexible
+placement of service on different types of nodes" (Arpit).
+
+**Confirmed ALIGNED by the same meeting (no change):** persistent worker pool;
+single-user model with SSH-auth-per-infrastructure as a sub-module, not core;
+RabbitMQ optional/not-required (the queue was raised and set aside again once
+telemetry sits server-side near the workers — same conclusion as E5/D3, cleaner
+reasoning); orchestrator → Core (R9).
+
+**Next step:** confirm direction with the full team (Jaber, Eugene) before any
+of O1–O3 is folded into canonical text; then a v1.3 revision of §3/§5/§6 and
+the diagrams. Until then this section is the authority on those topics and the
+canonical sections carry a reopened marker.
