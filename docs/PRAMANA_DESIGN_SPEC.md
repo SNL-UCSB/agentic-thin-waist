@@ -336,20 +336,33 @@ A5 + echo may appear in papers as design artifacts, never as shipped claims.
 
 ## 2. Grammar, taxonomy, glossary
 
+**Grammar v2 (updated against the 111-set intent corpus; changes G1–G5 tagged
+inline; full rationale + spec-change map in `PRAMANA_GRAMMAR_V2_RATIONALE.md`).**
+
 ```
 Evidence      = collect(ExperimentSet)
 ExperimentSet = compile(Intent, Answers)  | user-written Spec (same gate)
                   v1: ONE batched clarification round (E3); iterative fixpoint = v2
 ExperimentSet = ⟨ nodes, mapping, secrets, leaves ⟩          (leaves flat/expanded)
 sweep         : Experiment × dim → ExperimentSet              (client-side)
-Experiment    = ⟨ Workflow(params) ⊗ Regime ⟩ @ Roles × iterations
-identity(e)   = H_rfc8785(workflow@sha, params, static, dynamic)
-Roles         = ⟨ client: Node, server: Node? ⟩
+Experiment    = ⟨ Foreground ⊗ Regime ⟩ @ Roles × iterations
+Foreground    = Workflow @ role                              (2-party default)  ── G5 ──
+              | { Workflow_i @ role_i } with per-role telemetry (n-party; the abstraction
+                already maps arbitrary workflows↦nodes, this is the notation for it)
+identity(e)   = H_rfc8785(workflow@sha, params, static, dynamic)   (static now carries
+                per-role added_latency + cca; iterations excluded, as before)
+Roles         = { role_i: Node[ added_latency?, cca? ] }    ── G1, G2: per-role ──
+                added_latency = flow-level path delay (NOT the bottleneck's behavior;
+                                congestion delay AT the bottleneck is Dynamic.pressure)
+                cca           = ⟨ algo, stack?, version?, params?, flags?, build? ⟩   ── G2 ──
 Workflow      = CLI(app, role) ▸ NFA⟨states, {{params}}⟩      (NetGent; NFA =
                 nondeterministic finite automaton — an ordered set of states,
                 each = checks → actions → end_state)
-Regime        = Static⟨capacity↓↑, latency, queue⟩ ⊗ Dynamic⟨pressure⟩
+Regime        = Static⟨capacity↓↑, queue⟩ ⊗ Dynamic⟨pressure⟩   ── G1: latency removed ──
+queue         = ⟨ discipline, size?, params?, ecn?, mode? ⟩   ── G3: was {qdisc, args:str} ──
 pressure      = replay(ctp) | load(Workflow* ↦ Node*) | both
+iterations    = int | ⟨ until: event(metric, target), min, max ⟩   ── G4: event-triggered;
+                stopping is the first instance; general event→action is a design item
 select        : criteria → ℘(corpus);  ctp ∈ closure(corpus; transform, merge)
 Nodes         = Pool.{active|latent}.filter(attrs).take(n); persistence ∈
                 {set, experiment, fresh-per-experiment}
@@ -357,6 +370,14 @@ mapping       : nodes → connectors
 collect       = deploy ; prepare ; verify ; run ; publish     (AI-free)
 ⊗             = independent late binding
 ```
+
+**Deliberately NOT in the grammar (boundary, per the corpus review):**
+measure-then-configure is intent *extraction*, not a production (the derived
+value is per-role `added_latency`, G1); scheduled-envelope reconfiguration is
+*rejected* — such intents are expressed via `Dynamic.pressure`, Pramana's native
+mechanism, not by reproducing the pre-Pramana envelope hack; closed-loop search
+and inhabited-edge reach stay above the waist / in the connector layer
+respectively. See the rationale doc.
 
 Regime modes: **imposed** (probe verifies) | **inhabited** (probe characterizes).
 Persistence semantics (teardown rules, normative): `set` = the worker/service
