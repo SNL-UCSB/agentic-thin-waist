@@ -3,7 +3,10 @@
 **2026-07-02 · Companion to `PRAMANA_DESIGN_SPEC.md` v1.2.** The design spec
 records *decisions*; this file records the *definitions*: copy-pasteable model
 stubs, the full state-transition table, wire contracts with example payloads,
-SQL, and the file manifest per migration step. Where the two disagree, this
+SQL, and the file manifest per migration step. **The v2 conditions model
+(`PRAMANA_GRAMMAR_V2_RATIONALE.md`) revises the models tagged `[v2]` below —
+`Static`, `Workflow`/`Path`, `Queue`, `iterations`; read it before refining
+them.** Where the two disagree, this
 file wins for implementation detail and the spec wins for intent. Everything
 here is v1-scope only.
 
@@ -148,13 +151,18 @@ class Quantity(BaseModel):
     # Input flexibility is preserved: {value: 30, unit: s} is ACCEPTED and
     # stored as {value: 30000.0, unit: ms}.
 
+# [v2] Conditions split into the bottleneck link (Static, below) and the
+# per-workflow path (a Path model on the workflow). See PRAMANA_GRAMMAR_V2_RATIONALE.md.
+# v2 target: Static keeps ONLY bottleneck knobs {capacity, queue}; latency, jitter,
+# impair move to a per-workflow Path{latency,jitter,loss,reorder,dup}; cca -> per-workflow
+# structured Cca{algo,stack,version,params,flags,build}. (v1 fields kept below until migrated.)
 class Static(BaseModel):
     capacity_down: Quantity; capacity_up: Quantity
-    latency: Quantity
-    jitter: Quantity | None = None                 # netem jitter
-    queue: Queue                                   # {qdisc: str, args: str}
-    impair: Impair | None = None                   # {loss_pct, reorder_pct, dup_pct}
-    cca: str                                       # validated against capability
+    latency: Quantity                              # [v2] -> Path (per-workflow)
+    jitter: Quantity | None = None                 # netem jitter — [v2] -> Path (per-workflow)
+    queue: Queue                                   # {qdisc: str, args: str} — [v2] structured, see Queue
+    impair: Impair | None = None                   # {loss_pct, reorder_pct, dup_pct} — [v2] -> Path
+    cca: str                                       # validated vs capability — [v2] -> per-workflow Cca
 
 class Application(BaseModel):
     workflow: str      # "zoom_client@sha256:..."  pinned form REQUIRED post-compile
@@ -196,7 +204,8 @@ class Verify(BaseModel):
 class Experiment(BaseModel):
     id: str                                        # "e_" + identity_hash[:8]
     static: Static; application: Application; dynamic: Dynamic
-    iterations: int = 1
+    iterations: int = 1                             # [v2] int | StopCriterion (event-triggered;
+                                                    # PRAMANA_GRAMMAR_V2_RATIONALE.md §3)
     telemetry: Telemetry                            # {pcap, qtrace, app_metrics}
     verify: Verify
 
@@ -453,6 +462,9 @@ envelope insert is `ON CONFLICT DO NOTHING` + fence check in the WHERE.
 ### 8.1 Remaining models (referenced in §2, defined here)
 
 ```python
+# [v2] The AQM is a structured, capability-matched object: params leave the opaque
+# `args` string and gain typed fields + ECN. v2 target adds `size`, `params`, `ecn`,
+# `mode`; `args` stays as an exotic-knob passthrough. See PRAMANA_GRAMMAR_V2_RATIONALE.md §2.
 class Queue(BaseModel):                          # RT-2/3
     qdisc: Literal["pfifo","bfifo","fifo","red","pie","fq_pie","codel",
                    "fq_codel","fq","cake"]       # closed set v1; extending it
