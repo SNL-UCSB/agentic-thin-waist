@@ -381,6 +381,19 @@ expresses the resulting `path.latency`. Iterative search over experiments and
 reaching deployed edge infrastructure live above the waist and in the connector
 layer, respectively.
 
+**Refinement (2026-07-07), ADDITIVE.** Regime generalizes from a single
+bottleneck to a **set of designated bottleneck links** over a topology
+(topology-first). Each designated link is specified precisely; the connecting
+topology is approximated. Single-bottleneck (the form written above) is the
+degenerate common case, kept as a compact one-liner for progressive disclosure;
+the general form subsumes multipath, dual-bottleneck, and parking-lot. Discipline
+and CCA validation is **abstract**: the grammar accepts any well-formed
+`queue.discipline` and `cca`, and the concrete realizable lists live in
+**capability files**, keyed per realization artifact (`tc`, LibreQoS/CAKE+XDP,
+BESS, P4/Tofino) and per execution infrastructure (full-control AWS/GCP versus
+limited-interface RIPE Atlas/Ark/PINOT). An unrealizable discipline, CCA, or
+workflow is GAP-IMPL, never GAP-DESIGN. See `PRAMANA_GRAMMAR_V2_RATIONALE.md` §7.
+
 Regime modes: **imposed** (probe verifies) | **inhabited** (probe characterizes).
 Persistence semantics (teardown rules, normative): `set` = the worker/service
 node lives until the experiment set completes or is cancelled; network config

@@ -154,6 +154,95 @@ implementation items the capability files already name (unwritten NetGent
 workflows; closed-loop `load` co-scheduling; QUIC userspace stacks), so the
 design-reach-versus-implementation-reach coverage is precisely computable.
 
+---
+
+## 7. Refinements (2026-07-07) — ADDITIVE
+
+> The four refinements below were agreed on 2026-07-07 and are recorded here
+> additively. They refine, and where noted supersede, the framing in §1, §2, and
+> §5 above. Source of truth: `SNL-UCSB/agentic-replication`,
+> `arpit/intent-corpus/REFINEMENTS_2026-07-07.md` (sections B and G). Nothing in
+> §1 through §6 is deleted; this section states the more general position and
+> flags the specific sentences it generalizes.
+
+### 7.1 Topology-first abstraction (generalizes §1)
+
+The abstraction is a **topology**: a graph of links with flows routing across
+endpoint pairs and interacting on shared links. A designated subset of those
+links are **bottleneck links**, each specified precisely; the connecting
+topology is approximated. Single-bottleneck is the **degenerate common case**,
+not the definition.
+
+The common case stays a compact one-liner (progressive disclosure): most
+experiments name one bottleneck and the intent reads as it does in §1. The
+general form is reached only when an experiment needs it, so the waist stays thin
+and does not become an ns-3 or Mininet config.
+
+This topology-first framing **subsumes** multipath, dual-bottleneck, parking-lot,
+and shared-link cross-traffic. Those are not gaps in the abstraction; they are
+demonstrations that it generalizes. Multipath in particular is no longer a
+missing production. It is the topology abstraction with more than one designated
+bottleneck link. The single-bottleneck restriction was a NetReplica
+implementation remnant, not a design boundary. The precise-versus-approximate
+split of §1 generalizes accordingly: from "one bottleneck precise, rest
+approximate" to "designated bottleneck links precise, connecting topology
+approximate."
+
+### 7.2 Grammar over abstract entities, not implementation (generalizes §2)
+
+The grammar expresses **abstract demand**, never an implementation's menu. An
+AQM is a discipline plus params plus ecn plus mode; a CCA is an algo plus params
+plus flags plus stack. What is realizable today is stated in **capability
+files**, and those files are keyed on two axes:
+
+- **Per realization artifact.** The bottleneck-link realization is a swappable
+  artifact: `tc`/netem, LibreQoS (CAKE and fq_codel via XDP/eBPF over HTB,
+  ISP-scale), BESS (software dataplane), P4/Tofino (hardware), OVS/BMv2
+  (software switches). Each artifact publishes the disciplines, CCAs, and
+  parameters it can realize.
+- **Per execution infrastructure.** Full-control infrastructure (AWS, GCP)
+  exposes the whole interface surface; limited-interface infrastructure (RIPE
+  Atlas, CAIDA Ark, PINOT) exposes only what its interfaces permit.
+
+The consequence is a clean gap taxonomy. A discipline outside `tc`, a CCA such as
+BBRv3 or a QUIC stack not in the shipped 15-CCA list, or a workflow a limited
+interface cannot run, are all **GAP-IMPL, not GAP-DESIGN**. An
+infrastructure-interface limit is a **capability**, never a design gap. Two
+places in the current grammar still leak `tc` into the design and should validate
+abstractly, with concrete lists moved to capability files: the `queue.discipline`
+enum (today it mirrors tc's qdisc list) and CCA validation against the shipped
+kernel's CCAs.
+
+### 7.3 Environment sampling (refines §5, "inhabited" Regime)
+
+Real-path, inhabited measurement (RIPE Atlas, CAIDA Ark, PINOT, GCP or GENI,
+real WiFi or cellular) is **design-SAT**, not a design gap. Pramana samples the
+available environment via `Workflow @ node` over an **inhabited** Regime,
+grounded in the netUnicorn and NetReplica PINOT environment-sampling argument.
+The rule is "impose is not express": the inability to *impose* a real path is
+exactly what inhabited mode *expresses*. Real-path measurement is therefore
+design-SAT, and the per-infrastructure interface surface is a capability, not a
+Pramana design gap.
+
+### 7.4 CTP re-expression of time-varying available bandwidth (refines §5, first bullet)
+
+Time-varying available bandwidth is expressed as **`Dynamic.pressure` via
+cross-traffic profiles (CTP)**, a more faithful mechanism than trace replay.
+Trace-replay experiments (for example Mahimahi FCC and cellular
+bandwidth-schedule replay) replayed a recorded trace because they had no
+principled way to synthesize time-varying available bandwidth. Pramana expresses
+the same experimental intent directly as competing traffic, so the variation
+emerges from real contending flows rather than a synthetic rate-limiter.
+
+This must be stated explicitly, not run under the rug: Pramana **re-realizes the
+experimental intent** via CTP dynamic pressure, a better mechanism than the
+original replay, not an identical byte-for-byte reproduction. This supersedes the
+§5 "scheduled envelope" rejection only in framing: the *intent* is re-expressible
+via `Dynamic.pressure`; a literal scheduled-capacity envelope remains outside the
+model.
+
+---
+
 ## Related documents
 
 - **Grammar productions:** `PRAMANA_DESIGN_SPEC.md` §2 (updated inline).
