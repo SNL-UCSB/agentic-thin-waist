@@ -1,0 +1,13 @@
+graph LR
+    POOL["Worker<br/>(substrate + browserless + netgent-runner)"]
+    NODE["Service Node<br/>Zoom broadcaster / Puffer / iperf"]
+    CTP["CTP Service<br/>profile DB"]
+    NG["NetGent registry"]
+    CORE["Core"]
+    TEL["Telemetry<br/>Postgres + MinIO"]
+
+    POOL ==>|"prepare: fetch CTP payload by pointer<br/>(outside shaped namespace, cached)"| CTP
+    POOL ==>|"prepare: fetch workflow by pinned sha<br/>(refuse mismatch)"| NG
+    POOL ==>|"run: app traffic through the bottleneck"| NODE
+    POOL ==>|"T1: publish results direct"| TEL
+    CORE ==>|"T2: Core pulls results from workers,<br/>ingests into telemetry (current implementation)"| TEL

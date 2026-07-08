@@ -1,0 +1,45 @@
+graph TD
+    USER(["User / Agent"])
+    UI["UI - REST API<br/>/intent, /experiment-status"]
+
+    subgraph ORCH["Core"]
+        IP["1 - Intent Parser<br/>(LLM)"]
+        KB["2 - Knowledge Base<br/>capability files"]
+        MATCH["3 - Match"]
+        PLAN["4 - Planner<br/>deterministic rules"]
+        SPEC["5 - Spec Generator<br/>experiment-set spec + nodes"]
+        SCHED["6 - Scheduler<br/>FIFO + semaphore"]
+    end
+
+    CONN["Connectors<br/>local_docker, aws, ssh, ..."]
+
+    NG["NetGent workflow registry<br/>(capability publisher, static)"]
+    NR["NetReplica knobs<br/>(capability publisher, static)"]
+    CTP["CTP Service<br/>(capability publisher, live:<br/>query schema + profile DB)"]
+
+    subgraph EXEC["Execution substrate"]
+        POOL["Persistent Worker Pool<br/>substrate workers, pool-of-1 recycling"]
+        NODE["Service Nodes<br/>Zoom broadcaster, Puffer / iperf server"]
+    end
+
+    TEL["Telemetry Service<br/>Postgres + MinIO"]
+
+    USER --> UI
+    UI --> IP
+    IP --> MATCH
+    KB --> MATCH
+    MATCH -.->|"iterative backflow: missing params, secrets to local file"| USER
+    MATCH --> PLAN
+    PLAN --> SPEC
+    SPEC --> SCHED
+    KB -.->|"BOOTSTRAP: pull signed capability file"| NG
+    KB -.->|"BOOTSTRAP: pull signed capability file"| NR
+    KB -.->|"BOOTSTRAP: pull query schema"| CTP
+    MATCH -->|"live CTP query, pointers back"| CTP
+    PLAN -->|"get_nodes / deploy"| CONN
+    CONN -.->|"materialize pool + nodes"| POOL
+    SCHED -->|"dispatch work + poll status (Core dials out; T2: SG-scoped HTTP)"| POOL
+    POOL ==>|"results: T1 direct publish; T2 Core pulls"| TEL
+    POOL ==>|"RUNTIME data plane: fetch CTP payload by pointer"| CTP
+    POOL ==>|"RUNTIME data plane: fetch workflow by pinned sha"| NG
+    POOL ==>|"app traffic"| NODE

@@ -111,3 +111,8 @@ Last updated: 2026-04-06
 - **Pass 1 complete:** 9 (Glia, Confucius, AI Scientist v2, SkyDiscover, Osprey, Academy, Flowcept, NetArena, Learned Cloud Emulators)
 - **Still truly pending (not in NLM):** 13 (#19 Credibility Crisis, #20 Strategic Data Collection, #24 Voyager, #25 Holistic Incident Mgmt, #26 MetaEase, #29 LLM Network Mgmt Survey, #30 MeshAgent, #31 BiAn, #36 Deep Research Survey, #39 Kgent, #46 gpCAM, #47 Colmena, #48 INTERSECT)
 - **Archetype budget:** Examiner (80-150 papers) — currently at 80, on track
+| 60 | Mininet | Lantz, Heller, McKeown | 2010 | HotNets | PDF ✅ NLM ✅ | Pramana lineage grounding |
+| 61 | Mininet-HiFi (Reproducible Network Experiments) | Handigol et al. | 2012 | CoNEXT | PDF ✅ NLM ✅ | fidelity-monitoring ancestor |
+| 62 | NetForge v3 | Daneshamooz et al. | 2026 | arXiv:2507.13476 | PDF ✅ NLM ✅ | regime/CTP grounding (own work) |
+| 63 | NetGent | Daneshamooz et al. | 2025 | arXiv:2509.00625v2 | PDF ✅ NLM ✅ | workflow/NFA grounding (own work) |
+| 64 | netUnicorn full text | Beltiukov et al. | 2023 | arXiv:2306.08853 | PDF ✅ NLM ✅ | replaces abstract-only source |
