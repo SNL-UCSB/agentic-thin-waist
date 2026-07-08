@@ -234,3 +234,9 @@ docker-compose.override.yml
 
 # Analysis notebook pcap cache (gitignored, generated on demand)
 _pcap_cache/
+
+# Large CCAnalyzer campaign artifacts — raw captures/payloads kept out of git.
+# (result.json metrics, timing CSVs, and rendered figures under cc_results/ are tracked.)
+/1GB.bin
+cc_results/*.pcap
+cc_results/*_qtrace.jsonl
