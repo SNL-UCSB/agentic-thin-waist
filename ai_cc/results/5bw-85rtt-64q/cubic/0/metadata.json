@@ -1,0 +1,21 @@
+{
+  "setting": "5bw-85rtt-64q",
+  "bandwidth_mbps": 5,
+  "base_rtt_ms": 85,
+  "mm_delay_oneway_ms": 42,
+  "queue_pkts": 64,
+  "queue_mgmt": "droptail-fifo",
+  "cca": "cubic",
+  "cca_side": "sender (origin HTTP server, via setsockopt TCP_CONGESTION)",
+  "download_tool": "wget",
+  "origin_file_bytes": 104857600,
+  "duration_s_target": 60,
+  "duration_s_actual": 61.08,
+  "bytes_delivered_downlink_log": 37548272,
+  "downlink_drops": 38,
+  "pcap_packets": 38915,
+  "t_start_utc": "2026-07-09T19:46:17Z",
+  "t_end_utc": "2026-07-09T19:47:19Z",
+  "emulation_cmd": "mm-delay 42 mm-link <5mbit.trace> <same> --downlink-queue=droptail --downlink-queue-args=packets=64 --downlink-log=... ",
+  "rep": 0
+}

@@ -1,0 +1,2 @@
+setting,bandwidth_mbps,base_rtt_ms,queue_pkts,queue_mgmt,cca,cca_side,download_tool,origin_file_bytes,duration_s_target,duration_s_actual,bytes_delivered_downlink_log,downlink_drops,pcap_packets,t_start_utc,t_end_utc,rep,run_dir
+5bw-85rtt-64q,5,85,64,droptail-fifo,cubic,"sender (origin HTTP server, via setsockopt TCP_CONGESTION)",wget,104857600,60,61.08,37548272,38,38915,2026-07-09T19:46:17Z,2026-07-09T19:47:19Z,0,results/5bw-85rtt-64q/cubic/0

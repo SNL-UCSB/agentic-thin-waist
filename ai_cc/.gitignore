@@ -1,0 +1,14 @@
+# Large / regenerable binaries — kept out of git
+# 1GB.bin: pre-existing data blob, unused by this replication
+1GB.bin
+# srv/: generated 100 MB origin file (regenerate via head -c)
+srv/
+# capture.pcap: 38 MB pcap per run; re-collectable via run_cell.sh
+results/**/capture.pcap
+
+# Keep per-run mahimahi + wget logs (raw signal source) despite root-level *.log
+!results/**/*.log
+
+# Transient runtime state
+harness/server.log
+harness/server.pid
