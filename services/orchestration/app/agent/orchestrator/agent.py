@@ -192,7 +192,7 @@ def route_workflow(state: OrchestratorState) -> str:
     parsed = state.get("parsed_intent") or {}
     app_type = parsed.get("application_type", "shell")
     applications = parsed.get("applications") or []
-    if app_type == "mixed" or (len(applications) > 1 and app_type != "browser"):
+    if app_type == "mixed" or len(applications) > 1:
         return "mixed_workflow"
     if app_type == "browser":
         return "browser_workflow"

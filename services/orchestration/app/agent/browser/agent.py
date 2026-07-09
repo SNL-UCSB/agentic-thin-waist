@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import os
 from typing import TYPE_CHECKING, Any
 
 import requests
@@ -13,6 +15,48 @@ from app.agent.utils import get_model, log_claude_step, with_structured_output
 
 if TYPE_CHECKING:
     from main import NetGent
+
+_LOCAL_BROWSER_WORKFLOWS_PATH = os.path.join(
+    os.path.dirname(__file__), "..", "..", "config", "local_browser_workflows.json"
+)
+
+
+def _load_local_browser_workflows() -> list[dict]:
+    """Load browser workflows from local config (e.g. Prudentia)."""
+    try:
+        with open(_LOCAL_BROWSER_WORKFLOWS_PATH) as f:
+            return json.load(f)
+    except Exception:
+        return []
+
+
+_PRUDENTIA_KEYWORD_MAP = {
+    "youtube": "prudentia_youtube_vod_workflow",
+    "vimeo": "prudentia_vimeo_vod_workflow",
+    "wikipedia": "prudentia_wikipedia_web_workflow",
+    "googlenews": "prudentia_googlenews_web_workflow",
+    "google news": "prudentia_googlenews_web_workflow",
+}
+
+
+def _keyword_match_browser_workflow(
+    intent: str, available: list[dict]
+) -> dict | None:
+    """Deterministic keyword fallback for browser workflows."""
+    intent_lower = intent.lower()
+    id_index = {w["id"]: w for w in available}
+    for keyword, wf_id in _PRUDENTIA_KEYWORD_MAP.items():
+        if keyword in intent_lower and wf_id in id_index:
+            entry = id_index[wf_id]
+            if entry.get("workflow"):
+                return entry["workflow"]
+            if entry.get("link"):
+                try:
+                    return requests.get(entry["link"], timeout=10).json()
+                except Exception:
+                    pass
+            return {"id": wf_id}
+    return None
 
 
 class BrowserWorkflowGenerationState(MessagesState):
@@ -53,16 +97,20 @@ def choose_workflow(
 
     WORKFLOW_INDEX_URL = "https://raw.githubusercontent.com/SNL-UCSB/netgent-workflow/main/workflows/index.json"
     try:
-        available = [
+        remote = [
             w
             for w in requests.get(WORKFLOW_INDEX_URL, timeout=10).json()
             if w.get("type") == "browser"
         ]
     except Exception:
-        available = []
+        remote = []
+    local = _load_local_browser_workflows()
+    remote_ids = {w["id"] for w in remote}
+    available = remote + [w for w in local if w.get("id") not in remote_ids]
     print(
         f"[BROWSER WF] workflow_source={workflow_source!r} "
-        f"pinned_workflow_id={pinned_id!r} library_size={len(available)}"
+        f"pinned_workflow_id={pinned_id!r} library_size={len(available)} "
+        f"(remote={len(remote)}, local={len(local)})"
     )
 
     if workflow_source == "generate":
@@ -142,6 +190,14 @@ def choose_workflow(
     )
 
     if not result.is_valid:
+        kw_wf = _keyword_match_browser_workflow(intent, available)
+        if kw_wf:
+            print(f"[BROWSER WF] LLM found no match; using keyword fallback")
+            return {
+                "workflow": kw_wf,
+                "parameters": None,
+                "reasoning": f"Keyword fallback matched workflow for intent: {intent!r}",
+            }
         return {
             "workflow": {},
             "parameters": None,
@@ -149,13 +205,26 @@ def choose_workflow(
         }
 
     chosen_entry = next((w for w in available if w["id"] == result.id), None)
-    if chosen_entry and chosen_entry.get("link"):
+    if chosen_entry and chosen_entry.get("workflow"):
+        workflow = chosen_entry["workflow"]
+        workflow.setdefault("id", chosen_entry["id"])
+    elif chosen_entry and chosen_entry.get("link"):
         try:
             workflow = requests.get(chosen_entry["link"], timeout=10).json()
         except Exception:
             workflow = {}
     else:
         workflow = {}
+
+    if not workflow:
+        kw_wf = _keyword_match_browser_workflow(intent, available)
+        if kw_wf:
+            print(f"[BROWSER WF] link fetch failed; using keyword fallback")
+            return {
+                "workflow": kw_wf,
+                "parameters": result.parameters,
+                "reasoning": result.reasoning,
+            }
 
     return {
         "workflow": workflow,

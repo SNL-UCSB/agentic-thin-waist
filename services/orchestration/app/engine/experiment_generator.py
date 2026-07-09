@@ -24,7 +24,24 @@ _UUID_LEN = 8
 _MAX_UNIQUENESS_ATTEMPTS = 8
 
 _SHELL_APPS = {"ping", "iperf", "iperf3", "ndt", "ndt7", "wget", "speedtest", "curl"}
-_BROWSER_APPS = {"youtube", "zoom", "teams", "netflix", "browsing", "twitch", "web"}
+_BROWSER_APPS = {
+    "youtube",
+    "zoom",
+    "teams",
+    "netflix",
+    "browsing",
+    "twitch",
+    "web",
+    "tubi",
+    "vimeo",
+    "wikipedia",
+    "googlenews",
+    "puffer",
+    "roku",
+    "talky",
+    "zoho",
+    "meet",
+}
 
 
 def _slugify_app(name: str) -> str:

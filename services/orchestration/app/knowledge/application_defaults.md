@@ -9,6 +9,8 @@ Supported applications (must match system prompt and other services):
 - netflix
 - zoom
 - twitch
+- tubi
+- vimeo
 - discord
 - google-meet
 - ndt
@@ -24,6 +26,8 @@ Supported applications (must match system prompt and other services):
 | netflix      | 60s             | Browser (NFA) | startup_time, rebuffer_events, bitrate                     |
 | zoom         | 120s            | Browser (NFA) | video_quality, audio_quality, packet_loss, end_to_end_latency |
 | twitch       | 60s             | Browser (NFA) | startup_time, rebuffer_events, bitrate, frame_drops        |
+| tubi         | 60s             | Browser (NFA) | startup_time, rebuffer_events, bitrate                     |
+| vimeo        | 60s             | Browser (NFA) | startup_time, rebuffer_events, bitrate                     |
 | discord      | 120s            | Browser (NFA) | audio_quality, packet_loss, latency                        |
 | google-meet  | 120s            | Browser (NFA) | video_quality, audio_quality, packet_loss, end_to_end_latency |
 | ndt          | 30s             | Shell         | download_mbps, upload_mbps, latency_ms                     |
@@ -34,6 +38,6 @@ Supported applications (must match system prompt and other services):
 Claude SHOULD:
 
 - Use the **Default Duration** when the user only specifies an application name.
-- Prefer browser-based tests (`Type = Browser (NFA)`) for OTT apps like YouTube/Netflix/Twitch/Zoom/Discord/Google Meet.
+- Prefer browser-based tests (`Type = Browser (NFA)`) for OTT apps like YouTube/Netflix/Twitch/Tubi/Vimeo/Zoom/Discord/Google Meet.
 - Prefer shell tools for lower-level characterization (NDT, ping, iperf3, wget).
 - Use `wget` when the intent is to measure HTTP/HTTPS bulk download performance against a specific URL.

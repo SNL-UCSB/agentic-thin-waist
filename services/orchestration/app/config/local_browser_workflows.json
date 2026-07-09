@@ -1,0 +1,152 @@
+[
+  {
+    "id": "prudentia_youtube_vod_workflow",
+    "name": "Prudentia YouTube Video-on-Demand",
+    "description": "Prudentia (SIGCOMM '24) YouTube VOD workload. Plays a YouTube video (Big Buck Bunny by default) using the browser's ABR player for the configured duration. Parameter 'video_id': YouTube video ID (v= portion of the URL, default: dQw4w9WgXcQ). Parameter 'watch_seconds': seconds to watch (Prudentia uses 600 s; use 60 for quick tests).",
+    "specification": "Prudentia YouTube video-on-demand workload (SIGCOMM '24, Table 1). 1. Go to 'https://www.youtube.com/watch?v=<video_id>&autoplay=1'. 2. Wait briefly for the player to load. 3. Keep the video playing for watch_seconds seconds.",
+    "version": "1.0.0",
+    "type": "browser",
+    "parameters": ["video_id", "watch_seconds"],
+    "link": "https://raw.githubusercontent.com/EugeneVuong/netgent/main/scripts/workflow/prudentia_youtube_vod_workflow.json",
+    "workflow": {
+      "specification": "Prudentia YouTube video-on-demand workload (SIGCOMM '24, Table 1).\n1. Go to 'https://www.youtube.com/watch?v= video_id &autoplay=1' (reference video: Big Buck Bunny).\n2. Wait briefly for the player page to load and autoplay to start.\n3. Keep the video playing for watch_seconds seconds (Prudentia runs 600 s and ignores the first/last 120 s).",
+      "states": [
+        {
+          "checks": [{"type": "always_true", "params": {}}],
+          "actions": [
+            {
+              "type": "go_to_url",
+              "params": {
+                "url": "https://www.youtube.com/watch?v={{video_id}}&autoplay=1",
+                "new_tab": false
+              }
+            },
+            {"type": "wait", "params": {"seconds": "5"}},
+            {"type": "wait", "params": {"seconds": "{{watch_seconds}}"}}
+          ],
+          "end_state": "Workflow Completed",
+          "executed": []
+        }
+      ],
+      "parameters": ["video_id", "watch_seconds"]
+    }
+  },
+  {
+    "id": "prudentia_vimeo_vod_workflow",
+    "name": "Prudentia Vimeo Video-on-Demand",
+    "description": "Prudentia (SIGCOMM '24) Vimeo VOD workload. Opens the Vimeo embed player for a video (Big Buck Bunny by default) with muted autoplay and watches it for the configured duration. Parameter 'video_id': Vimeo video ID (default: 76979871 for Big Buck Bunny). Parameter 'watch_seconds': seconds to watch (Prudentia uses 600 s; use 60 for quick tests).",
+    "specification": "Prudentia Vimeo video-on-demand workload (SIGCOMM '24, Table 1). 1. Open the Vimeo embed player for video_id with muted autoplay. 2. Wait briefly for playback to start. 3. Keep the video playing for watch_seconds seconds.",
+    "version": "1.0.0",
+    "type": "browser",
+    "parameters": ["video_id", "watch_seconds"],
+    "link": "https://raw.githubusercontent.com/EugeneVuong/netgent/main/scripts/workflow/prudentia_vimeo_vod_workflow.json",
+    "workflow": {
+      "specification": "Prudentia Vimeo video-on-demand workload (SIGCOMM '24, Table 1: BBR, 2 flows, max 14 Mbps, 7 bitrates up to 4K).\n1. Open the Vimeo embed player for video video_id (reference video: Big Buck Bunny) with muted autoplay.\n2. Wait briefly for the player to load and playback to start.\n3. Keep the video playing for watch_seconds seconds (Prudentia runs 600 s).",
+      "states": [
+        {
+          "checks": [{"type": "always_true", "params": {}}],
+          "actions": [
+            {
+              "type": "go_to_url",
+              "params": {
+                "url": "https://player.vimeo.com/video/{{video_id}}?autoplay=1&muted=1",
+                "new_tab": false
+              }
+            },
+            {"type": "wait", "params": {"seconds": "5"}},
+            {"type": "wait", "params": {"seconds": "{{watch_seconds}}"}}
+          ],
+          "end_state": "Workflow Completed",
+          "executed": []
+        }
+      ],
+      "parameters": ["video_id", "watch_seconds"]
+    }
+  },
+  {
+    "id": "prudentia_wikipedia_web_workflow",
+    "name": "Prudentia Wikipedia Web Browsing",
+    "description": "Prudentia (SIGCOMM '24) Wikipedia web-browsing workload. Loads a Wikipedia page 10 times with a configurable gap between loads. Parameter 'page_url': Wikipedia URL to load (default: https://en.wikipedia.org/wiki/Internet). Parameter 'gap_seconds': seconds between page loads (Prudentia uses 45 s; use 5 for quick tests).",
+    "specification": "Prudentia wikipedia.org web-browsing workload (SIGCOMM '24, section 5.2). Load page_url 10 times with gap_seconds seconds between each load.",
+    "version": "1.0.0",
+    "type": "browser",
+    "parameters": ["page_url", "gap_seconds"],
+    "link": "https://raw.githubusercontent.com/EugeneVuong/netgent/main/scripts/workflow/prudentia_wikipedia_web_workflow.json",
+    "workflow": {
+      "specification": "Prudentia wikipedia.org web-browsing workload (SIGCOMM '24, section 5.2; Table 1: BBRv1.0, >5 flows, mostly text with one or two images).\n1. Load page_url in the browser.\n2. Wait gap_seconds seconds (Prudentia uses 45 s between loads).\n3. Repeat the load ten times in total.",
+      "states": [
+        {
+          "checks": [{"type": "always_true", "params": {}}],
+          "actions": [
+            {"type": "go_to_url", "params": {"url": "{{page_url}}", "new_tab": false}},
+            {"type": "wait", "params": {"seconds": "{{gap_seconds}}"}},
+            {"type": "go_to_url", "params": {"url": "{{page_url}}", "new_tab": false}},
+            {"type": "wait", "params": {"seconds": "{{gap_seconds}}"}},
+            {"type": "go_to_url", "params": {"url": "{{page_url}}", "new_tab": false}},
+            {"type": "wait", "params": {"seconds": "{{gap_seconds}}"}},
+            {"type": "go_to_url", "params": {"url": "{{page_url}}", "new_tab": false}},
+            {"type": "wait", "params": {"seconds": "{{gap_seconds}}"}},
+            {"type": "go_to_url", "params": {"url": "{{page_url}}", "new_tab": false}},
+            {"type": "wait", "params": {"seconds": "{{gap_seconds}}"}},
+            {"type": "go_to_url", "params": {"url": "{{page_url}}", "new_tab": false}},
+            {"type": "wait", "params": {"seconds": "{{gap_seconds}}"}},
+            {"type": "go_to_url", "params": {"url": "{{page_url}}", "new_tab": false}},
+            {"type": "wait", "params": {"seconds": "{{gap_seconds}}"}},
+            {"type": "go_to_url", "params": {"url": "{{page_url}}", "new_tab": false}},
+            {"type": "wait", "params": {"seconds": "{{gap_seconds}}"}},
+            {"type": "go_to_url", "params": {"url": "{{page_url}}", "new_tab": false}},
+            {"type": "wait", "params": {"seconds": "{{gap_seconds}}"}},
+            {"type": "go_to_url", "params": {"url": "{{page_url}}", "new_tab": false}},
+            {"type": "wait", "params": {"seconds": "{{gap_seconds}}"}}
+          ],
+          "end_state": "Workflow Completed",
+          "executed": []
+        }
+      ],
+      "parameters": ["page_url", "gap_seconds"]
+    }
+  },
+  {
+    "id": "prudentia_googlenews_web_workflow",
+    "name": "Prudentia Google News Web Browsing",
+    "description": "Prudentia (SIGCOMM '24) news.google.com web-browsing workload. Loads a Google News page 10 times with a configurable gap. Parameter 'page_url': Google News URL (default: https://news.google.com). Parameter 'gap_seconds': seconds between page loads (use 5 for quick tests).",
+    "specification": "Prudentia news.google.com web-browsing workload (SIGCOMM '24, section 5.2). Load page_url 10 times with gap_seconds seconds between each load.",
+    "version": "1.0.0",
+    "type": "browser",
+    "parameters": ["page_url", "gap_seconds"],
+    "link": "https://raw.githubusercontent.com/EugeneVuong/netgent/main/scripts/workflow/prudentia_googlenews_web_workflow.json",
+    "workflow": {
+      "specification": "Prudentia news.google.com web-browsing workload (SIGCOMM '24, section 5.2; Table 1: BBRv3.0, >20 flows, text accompanied by thumbnail images).\n1. Load page_url in the browser.\n2. Wait gap_seconds seconds.\n3. Repeat the load ten times in total.",
+      "states": [
+        {
+          "checks": [{"type": "always_true", "params": {}}],
+          "actions": [
+            {"type": "go_to_url", "params": {"url": "{{page_url}}", "new_tab": false}},
+            {"type": "wait", "params": {"seconds": "{{gap_seconds}}"}},
+            {"type": "go_to_url", "params": {"url": "{{page_url}}", "new_tab": false}},
+            {"type": "wait", "params": {"seconds": "{{gap_seconds}}"}},
+            {"type": "go_to_url", "params": {"url": "{{page_url}}", "new_tab": false}},
+            {"type": "wait", "params": {"seconds": "{{gap_seconds}}"}},
+            {"type": "go_to_url", "params": {"url": "{{page_url}}", "new_tab": false}},
+            {"type": "wait", "params": {"seconds": "{{gap_seconds}}"}},
+            {"type": "go_to_url", "params": {"url": "{{page_url}}", "new_tab": false}},
+            {"type": "wait", "params": {"seconds": "{{gap_seconds}}"}},
+            {"type": "go_to_url", "params": {"url": "{{page_url}}", "new_tab": false}},
+            {"type": "wait", "params": {"seconds": "{{gap_seconds}}"}},
+            {"type": "go_to_url", "params": {"url": "{{page_url}}", "new_tab": false}},
+            {"type": "wait", "params": {"seconds": "{{gap_seconds}}"}},
+            {"type": "go_to_url", "params": {"url": "{{page_url}}", "new_tab": false}},
+            {"type": "wait", "params": {"seconds": "{{gap_seconds}}"}},
+            {"type": "go_to_url", "params": {"url": "{{page_url}}", "new_tab": false}},
+            {"type": "wait", "params": {"seconds": "{{gap_seconds}}"}},
+            {"type": "go_to_url", "params": {"url": "{{page_url}}", "new_tab": false}},
+            {"type": "wait", "params": {"seconds": "{{gap_seconds}}"}}
+          ],
+          "end_state": "Workflow Completed",
+          "executed": []
+        }
+      ],
+      "parameters": ["page_url", "gap_seconds"]
+    }
+  }
+]

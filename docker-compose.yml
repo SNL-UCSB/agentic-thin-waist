@@ -365,6 +365,7 @@ services:
       - SUBSTRATE_CAPTURE_DIR=${SUBSTRATE_CAPTURE_DIR:-/tmp/substrate-capture}
       - NETGENT_USE_LOCAL=${NETGENT_USE_LOCAL:-false}
       - NETGENT_NAMESPACE=${NETGENT_NAMESPACE:-ns1}
+      - ORCH_WORKER_STARTUP_WAIT_SECONDS=${ORCH_WORKER_STARTUP_WAIT_SECONDS:-20}
       - PYTHONPATH=/app:/shared:/shared/clients/netgent/src:/app/app
     depends_on:
       - experiment-api
