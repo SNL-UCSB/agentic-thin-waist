@@ -83,7 +83,7 @@ outputs for that step), **not** billed values. For the ground-truth session tota
 | 8 | Derive queue occupancy, validate, sanity-probe droptail | 19:47 | 19:50 | ~3 min | Trace spans 60.6 s, non-empty 99 %, oscillates 0↔~90. Probe confirmed the droptail cap is enforced and proportional (q8→max 11, q64→max 74). |
 | 9 | Build `index.csv`, plot, write report | 19:50 | 19:51 | ~1 min | — |
 
-### Per-step token usage (rough figures — see note above; not billed figures)
+### Per-step token usage
 
 | Step | Input | Output |
 |---|---|---|
