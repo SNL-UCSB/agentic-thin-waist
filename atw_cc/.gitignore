@@ -1,0 +1,7 @@
+# Large regenerable capture — re-collectable by re-running the ATW pipeline
+# (the raw queue_trace .jsonl IS kept: it is the queue-occupancy signal source)
+results/*__pcap__*.pcap
+
+# transient scratch
+results/_artifacts.json
+results/_tel_list.json

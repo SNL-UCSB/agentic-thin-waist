@@ -1,0 +1,2 @@
+experiment_id,cc,bw_mbps,rtt_ms,queue_pkts,declared_duration_s,t_submit_epoch,t_finish_epoch,wall_s,status
+wget_5_5_85_pfifo_cubic_16bfa2cc,cubic,5,85,64,60,1783632660.209609786,1783632853.650977475,193.441367689,complete
