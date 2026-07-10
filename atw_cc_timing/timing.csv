@@ -1,0 +1,36 @@
+tag,idx,bw,rtt,q,cc,cc_verified,final_status,experiment_id,backlog_max,healthcheck,submit_rtt,compile,parse,generate,spinup_prepare,transfer,drain_upload,orchestration_overhead,wall,parse_in_tokens,parse_out_tokens,orch_id
+00_5bw-85rtt-64q_cubic,0,5,85,64,cubic,cubic,complete,wget_5_5_85_pfifo_cubic_a8524c0b,64,0.136,0.073,2.98,1.799,1.181,13.993,59.997,74.036,91.219,151.216,9787,263,orch-4da19454
+01_5bw-130rtt-64q_bbr,1,5,130,64,bbr,bbr,complete,wget_5_5_130_pfifo_bbr_6462725f,59,0.189,0.053,2.347,0.599,1.747,41.692,59.999,71.573,116.382,176.381,9789,160,orch-86f0132e
+02_5bw-275rtt-128q_reno,2,5,275,128,reno,reno,complete,wget_5_5_275_pfifo_reno_fac6b6e6,128,0.174,0.039,2.952,1.775,1.177,43.994,60.0,72.294,119.436,179.436,9790,162,orch-0f13051a
+03_10bw-85rtt-128q_htcp,3,10,85,128,htcp,htcp,complete,wget_10_10_85_pfifo_htcp_74f44d5c,128,0.175,0.051,2.327,1.166,1.161,44.03,59.994,70.818,117.33,177.324,9790,162,orch-af0559d8
+04_10bw-130rtt-128q_vegas,4,10,130,128,vegas,vegas,complete,wget_10_10_130_pfifo_vegas_f1d59073,109,0.178,0.051,2.951,1.184,1.767,44.408,60.0,70.445,117.988,177.988,9790,163,orch-d7ef1608
+05_10bw-275rtt-256q_bic,5,10,275,256,bic,bic,complete,wget_10_10_275_pfifo_bic_df8e06d4,256,0.184,0.055,2.355,1.181,1.174,45.047,60.0,68.792,116.962,176.962,9790,161,orch-b2b95cfd
+06_15bw-85rtt-256q_cdg,6,15,85,256,cdg,cdg,complete,wget_15_15_85_pfifo_cdg_6bc4e2f6,29,0.189,0.038,2.96,1.775,1.184,46.585,60.0,61.022,110.749,170.749,9790,282,orch-5dd049a5
+07_15bw-130rtt-256q_highspeed,7,15,130,256,highspeed,highspeed,complete,wget_15_15_130_pfifo_highspeed_46942276,256,0.179,0.039,2.952,1.217,1.735,54.357,59.999,69.093,126.555,186.554,9791,161,orch-eb395e27
+08_15bw-275rtt-512q_hybla,8,15,275,512,hybla,hybla,complete,wget_15_15_275_pfifo_hybla_a07b2173,172,0.159,0.055,2.39,1.21,1.179,46.663,60.0,65.108,114.359,174.359,9791,161,orch-9f6061dd
+09_5bw-275rtt-32q_illinois,9,5,275,32,illinois,illinois,complete,wget_5_5_275_pfifo_illinois_0f7fecae,32,0.193,0.051,1.749,0.588,1.162,50.806,60.0,71.82,125.155,185.155,9789,162,orch-2075fb71
+10_5bw-275rtt-128q_nv,10,5,275,128,nv,nv,complete,wget_5_5_275_pfifo_nv_5f1ff432,24,0.159,0.05,4.154,2.971,1.183,42.632,60.0,69.565,116.51,176.51,9789,162,orch-38d83bc1
+11_5bw-275rtt-512q_scalable,11,5,275,512,scalable,scalable,complete,wget_5_5_275_pfifo_scalable_f7baeb4a,512,0.201,0.046,1.768,1.169,0.599,46.591,59.997,71.541,120.652,180.649,9789,168,orch-8dba573c
+12_5bw-275rtt-1024q_veno,12,5,275,1024,veno,veno,complete,wget_5_5_275_pfifo_veno_a9e5216d,1024,0.158,0.056,2.4,0.629,1.771,44.064,60.0,72.037,119.285,179.285,9791,162,orch-060ea513
+13_5bw-85rtt-64q_westwood,13,5,85,64,westwood,westwood,complete,wget_5_5_85_pfifo_westwood_6ddbe64e,64,0.176,0.039,2.369,1.781,0.588,44.156,60.0,73.03,119.692,179.692,9788,159,orch-a0e06015
+14_5bw-130rtt-64q_yeah,14,5,130,64,yeah,yeah,complete,wget_5_5_130_pfifo_yeah_9f01af31,64,15.096,0.052,2.969,1.783,1.186,27.651,59.999,73.082,103.87,163.869,9788,343,orch-9e653c6e
+15_10bw-85rtt-128q_cubic,15,10,85,128,cubic,cubic,complete,wget_10_10_85_pfifo_cubic_c0f7c37d,128,0.187,0.05,2.917,1.734,1.183,42.414,59.995,70.548,116.052,176.047,9789,263,orch-0a77fec3
+16_10bw-130rtt-128q_bbr,16,10,130,128,bbr,bbr,complete,wget_10_10_130_pfifo_bbr_881d6f2a,111,0.199,0.054,2.934,1.774,1.16,44.867,60.0,67.928,115.967,175.967,9791,163,orch-4051c400
+17_5bw-85rtt-64q_reno,17,5,85,64,reno,reno,complete,wget_5_5_85_pfifo_reno_e36f8d35,64,0.178,0.046,2.932,1.772,1.16,47.62,59.999,73.973,124.681,184.68,9788,244,orch-c89353ca
+18_10bw-130rtt-128q_cubic,18,10,130,128,cubic,cubic,complete,wget_10_10_130_pfifo_cubic_a1344499,128,0.174,0.05,2.343,1.175,1.169,42.223,59.999,70.221,114.969,174.968,9790,161,orch-b3a32045
+19_5bw-130rtt-64q_bbr,19,5,130,64,bbr,bbr,complete,wget_5_5_130_pfifo_bbr_19608040,59,0.179,0.054,1.715,0.574,1.141,45.94,59.999,71.28,119.685,179.684,9789,160,orch-5dac851b
+
+# NOTE: orchestration_overhead = compile + spinup_prepare + drain_upload
+#       (a roll-up of the non-transfer phases; wall = orchestration_overhead + transfer).
+#       Do NOT add orchestration_overhead on top of its components.
+# phase,median,p10,p90,min,max (seconds; completed runs only)
+# healthcheck,0.18,0.16,0.2,0.14,15.1
+# submit_rtt,0.05,0.04,0.06,0.04,0.07
+# compile,2.66,1.77,2.97,1.72,4.15
+# parse,1.21,0.6,1.78,0.57,2.97
+# generate,1.18,1.09,1.75,0.59,1.77
+# spinup_prepare,44.28,40.29,47.94,13.99,54.36
+# transfer,60.0,60.0,60.0,59.99,60.0
+# drain_upload,71.05,67.65,73.17,61.02,74.04
+# orchestration_overhead,117.15,110.06,124.73,91.22,126.56
+# wall,177.14,170.06,184.73,151.22,186.55

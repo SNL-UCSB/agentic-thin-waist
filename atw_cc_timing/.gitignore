@@ -1,0 +1,8 @@
+# Large regenerable captures — re-collectable by re-running the campaign.
+# The raw queue_trace .jsonl IS kept (it is the queue-occupancy signal source
+# and the phase-timing / drain analysis input).
+runs/*/pcap__*.pcap
+
+# transient scratch
+runs/*/artifacts.json
+CAMPAIGN_DONE

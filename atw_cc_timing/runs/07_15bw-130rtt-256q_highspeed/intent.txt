@@ -1,0 +1,1 @@
+Run a wget download from http://128.111.5.237:8888/1GB.bin over a 15 Mbps bottleneck with 130 ms added latency, pfifo queue of 256 packets and highspeed congestion control. Do not store the downloaded file (write it to /dev/null). Stop the wget process after 60 seconds. One trial.
