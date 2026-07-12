@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Any
 
-from dotenv import load_dotenv
+from dotenv import find_dotenv, load_dotenv
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import MessagesState
@@ -25,15 +26,30 @@ from app.agent.shell.agent import ShellWorkflowContext
 from app.agent.shell.agent import create_agent as create_shell_agent
 from app.agent.utils import (
     get_model,
+    get_model_provider,
     log_claude_step,
     save_state,
     with_structured_output,
 )
 from app.engine.experiment_generator import ExperimentGenerator
 from app.engine.orchestration_manager import OrchestrationManager
+from app.engine.token_tracker import TokenUsageCallback, record_intent_tokens
 from app.models.schemas import OrchestrationStatus
 
-load_dotenv()
+# Load orchestrator configuration (incl. ANTHROPIC_API_KEY) from the repo-root
+# ``.env`` so the orchestrator uses that file whether it runs inside docker
+# (env already injected by compose) or as a local process (CWD may be elsewhere).
+# ``find_dotenv`` walks up from the CWD; if that misses (e.g. CWD has no .env),
+# walk up this module's parents looking for the repo-root ``.env``.
+_dotenv_path = find_dotenv(usecwd=True)
+if not _dotenv_path:
+    for _parent in Path(__file__).resolve().parents:
+        _candidate = _parent / ".env"
+        if _candidate.exists():
+            _dotenv_path = str(_candidate)
+            break
+# ``override=False``: real environment variables (e.g. docker-compose) win.
+load_dotenv(_dotenv_path or None, override=False)
 
 
 class OrchestratorState(MessagesState):
@@ -510,31 +526,70 @@ class OrchestratorAgent:
             Dict with parsed_intent, experiments, orchestration_result,
             and reasoning_steps.
         """
-        result = self.graph.invoke(
-            {
-                "intent": intent,
-                "orchestration_id": orchestration_id,
-                "workflow": workflow,
-                "workflow_parameters": None,
-                "workflow_reasoning": None,
-                "workflow_source": workflow_source,
-                "workflow_id": workflow_id,
-                "use_examples": use_examples,
-                "max_parallel_workers": max_parallel_workers,
-                "messages": [HumanMessage(content=intent)],
-                "parsed_intent": None,
-                "intent_overrides": intent_overrides or {},
-                "experiments": [],
-                "orchestration_result": None,
-                "reasoning_steps": [],
-            },
-            context={
-                "generator": ExperimentGenerator(),
-                "orchestration_manager": OrchestrationManager(
-                    max_parallel_workers=max_parallel_workers,
-                ),
-            },
-        )
+        # Aggregate orchestrator LLM token usage across every model call in this
+        # run (parse_intent + shell/browser workflow sub-agents). The callback
+        # propagates to nested LLM invocations via LangChain's run context.
+        token_cb = TokenUsageCallback()
+        result: dict[str, Any] = {}
+        run_error: str | None = None
+        try:
+            result = self.graph.invoke(
+                {
+                    "intent": intent,
+                    "orchestration_id": orchestration_id,
+                    "workflow": workflow,
+                    "workflow_parameters": None,
+                    "workflow_reasoning": None,
+                    "workflow_source": workflow_source,
+                    "workflow_id": workflow_id,
+                    "use_examples": use_examples,
+                    "max_parallel_workers": max_parallel_workers,
+                    "messages": [HumanMessage(content=intent)],
+                    "parsed_intent": None,
+                    "intent_overrides": intent_overrides or {},
+                    "experiments": [],
+                    "orchestration_result": None,
+                    "reasoning_steps": [],
+                },
+                context={
+                    "generator": ExperimentGenerator(),
+                    "orchestration_manager": OrchestrationManager(
+                        max_parallel_workers=max_parallel_workers,
+                    ),
+                },
+                config={"callbacks": [token_cb]},
+            )
+        except Exception as exc:
+            run_error = str(exc)
+            raise
+        finally:
+            orch_result = result.get("orchestration_result") or {}
+            status = orch_result.get("status") or ("error" if run_error else "unknown")
+            provider = get_model_provider()
+            model_name = (
+                os.environ.get("ORCHESTRATOR_ANTHROPIC_MODEL")
+                or os.environ.get("CLAUDE_MODEL")
+                or os.environ.get("ORCHESTRATOR_GOOGLE_MODEL")
+                or os.environ.get("GOOGLE_MODEL")
+                or "claude-sonnet-4-6"
+            )
+            usage = token_cb.summary()
+            record_intent_tokens(
+                orchestration_id=orchestration_id,
+                intent=intent,
+                provider=provider,
+                model=model_name,
+                usage=usage,
+                status=status,
+                parsed_intent=result.get("parsed_intent"),
+                experiments_count=len(result.get("experiments", []) or []),
+                error=run_error or orch_result.get("error"),
+            )
+            print(
+                f"[TOKENS {orchestration_id}] orchestrator LLM tokens: "
+                f"in={usage['input_tokens']} out={usage['output_tokens']} "
+                f"total={usage['total_tokens']} calls={usage['llm_calls']}"
+            )
 
         return {
             "parsed_intent": result.get("parsed_intent"),
