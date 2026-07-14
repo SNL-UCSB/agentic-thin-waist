@@ -1952,7 +1952,8 @@ class PerAppMarkRequest(BaseModel):
         ),
     )
     default_latency_ms: float = Field(
-        50.0, ge=0,
+        50.0,
+        ge=0,
         description="netem delay for unclassified traffic (default lane).",
     )
     netem_iface: str = Field(
@@ -1988,12 +1989,14 @@ def _setup_connmark_rules(app_marks: Dict[str, Dict[str, int]]) -> None:
     def _ensure_rule(ns: str, table: str, chain: str, rule: str) -> None:
         check = subprocess.run(
             f"ip netns exec {ns} iptables -t {table} -C {chain} {rule}",
-            shell=True, capture_output=True,
+            shell=True,
+            capture_output=True,
         )
         if check.returncode != 0:
             subprocess.run(
                 f"ip netns exec {ns} iptables -t {table} -A {chain} {rule}",
-                shell=True, check=True,
+                shell=True,
+                check=True,
             )
 
     # ns2: for each app, mark incoming SYNs by source IP alias so ns2's
@@ -2002,13 +2005,15 @@ def _setup_connmark_rules(app_marks: Dict[str, Dict[str, int]]) -> None:
         _mark = _cfg.get("mark")
         _ip = _cfg.get("bind_ip")
         if _mark and _ip:
-            _ensure_rule("ns2", "mangle", "PREROUTING",
-                         f"-i veth3 -s {_ip} -j MARK --set-mark {_mark}")
+            _ensure_rule(
+                "ns2",
+                "mangle",
+                "PREROUTING",
+                f"-i veth3 -s {_ip} -j MARK --set-mark {_mark}",
+            )
 
-    _ensure_rule("ns2", "mangle", "PREROUTING",
-                 "-i veth3 -j CONNMARK --save-mark")
-    _ensure_rule("ns2", "mangle", "PREROUTING",
-                 "-i veth5 -j CONNMARK --restore-mark")
+    _ensure_rule("ns2", "mangle", "PREROUTING", "-i veth3 -j CONNMARK --save-mark")
+    _ensure_rule("ns2", "mangle", "PREROUTING", "-i veth5 -j CONNMARK --restore-mark")
 
 
 def apply_per_app_netem(
@@ -2057,8 +2062,12 @@ def apply_per_app_netem(
         lat = float(cfg.get("latency_ms", default_latency_ms))
         classid = f"1:{mark}"
         handle = f"{mark}:"
-        _rc(f"tc class add dev {iface} parent 1: classid {classid} htb rate 1gbit burst 1600")
-        _rc(f"tc qdisc add dev {iface} parent {classid} handle {handle} netem delay {lat}ms")
+        _rc(
+            f"tc class add dev {iface} parent 1: classid {classid} htb rate 1gbit burst 1600"
+        )
+        _rc(
+            f"tc qdisc add dev {iface} parent {classid} handle {handle} netem delay {lat}ms"
+        )
 
     # 4. Default HTB class + leaf netem (classid 1:100, handle 100:).
     _rc(f"tc class add dev {iface} parent 1: classid 1:100 htb rate 1gbit burst 1600")
@@ -2107,17 +2116,21 @@ def _add_ns1_alias(bind_ip: str) -> None:
     """Add an alias IP to ns1's veth1 (idempotent)."""
     check = subprocess.run(
         f"ip netns exec ns1 ip addr show dev veth1",
-        shell=True, capture_output=True, text=True,
+        shell=True,
+        capture_output=True,
+        text=True,
     )
     if bind_ip not in (check.stdout or ""):
         subprocess.run(
             f"ip netns exec ns1 ip addr add {bind_ip}/32 dev veth1",
-            shell=True, check=True,
+            shell=True,
+            check=True,
         )
         # Also add the return route in ns2 so its MASQUERADE handles it
         subprocess.run(
             f"ip netns exec ns2 ip route replace {bind_ip}/32 dev veth3",
-            shell=True, check=False,
+            shell=True,
+            check=False,
         )
 
 
@@ -2139,11 +2152,19 @@ def _start_app_proxy(port: int, mark: int, bind_ip: str) -> None:
 
     proc = subprocess.Popen(
         [
-            "ip", "netns", "exec", "ns1",
-            "python3", "-m", "substrate.browser_proxy",
-            "--host", bind_ip,
-            "--port", str(port),
-            "--mark", str(mark),
+            "ip",
+            "netns",
+            "exec",
+            "ns1",
+            "python3",
+            "-m",
+            "substrate.browser_proxy",
+            "--host",
+            bind_ip,
+            "--port",
+            str(port),
+            "--mark",
+            str(mark),
         ],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,

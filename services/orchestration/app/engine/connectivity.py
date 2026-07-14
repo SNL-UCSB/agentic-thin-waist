@@ -946,9 +946,7 @@ class ConnectivityManager:
             "netem_ns": netem_ns,
         }
         with httpx.Client(timeout=60) as client:
-            resp = client.post(
-                f"{info.endpoint}/shape/per_app_marks", json=payload
-            )
+            resp = client.post(f"{info.endpoint}/shape/per_app_marks", json=payload)
         if resp.status_code != 200:
             raise RuntimeError(
                 f"POST /shape/per_app_marks failed for worker {worker_id} "

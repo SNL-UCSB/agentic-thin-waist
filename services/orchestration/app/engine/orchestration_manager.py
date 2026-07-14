@@ -653,13 +653,15 @@ def _run_experiment_on_worker(
         # Build the app_marks config from per_app_latency and assign proxy
         # slots.  Proxy ports start at 8889; alias IPs start at 172.16.1.5/32
         # (steps of 4 to stay within distinct /30 sub-ranges).
-        proxy_assignments: dict[str, dict] = {}  # app_name → {bind_ip, proxy_port, mark}
+        proxy_assignments: dict[str, dict] = (
+            {}
+        )  # app_name → {bind_ip, proxy_port, mark}
         if per_app_latency:
             _BASE_PORT = 8889
-            _BASE_IP_OCTET = 5   # 172.16.1.5, .9, .13, …
+            _BASE_IP_OCTET = 5  # 172.16.1.5, .9, .13, …
             app_marks_cfg: dict[str, dict] = {}
             for _i, (_app, _lat) in enumerate(per_app_latency.items()):
-                _mark = 10 * (_i + 1)          # 10, 20, 30, …
+                _mark = 10 * (_i + 1)  # 10, 20, 30, …
                 _port = _BASE_PORT + _i
                 _ip = f"172.16.1.{_BASE_IP_OCTET + _i * 4}"
                 app_marks_cfg[_app] = {
@@ -668,7 +670,11 @@ def _run_experiment_on_worker(
                     "bind_ip": _ip,
                     "latency_ms": _lat,
                 }
-                proxy_assignments[_app] = {"bind_ip": _ip, "proxy_port": _port, "mark": _mark}
+                proxy_assignments[_app] = {
+                    "bind_ip": _ip,
+                    "proxy_port": _port,
+                    "mark": _mark,
+                }
             try:
                 marks_resp = manager.setup_per_app_marks(
                     worker.worker_id,
@@ -677,8 +683,10 @@ def _run_experiment_on_worker(
                 )
                 print(f"[MULTI-APP] Per-app marks + netem: {marks_resp}")
             except Exception as exc:
-                print(f"[MULTI-APP] Per-app marks FAILED (falling back to flat netem): {exc}")
-                proxy_assignments = {}   # fall back: no per-app proxies
+                print(
+                    f"[MULTI-APP] Per-app marks FAILED (falling back to flat netem): {exc}"
+                )
+                proxy_assignments = {}  # fall back: no per-app proxies
 
         _wait_until(start_at)
 
@@ -746,7 +754,9 @@ def _run_experiment_on_worker(
                     worker.worker_id,
                     restore_latency_ms=latency_ms,
                 )
-                print(f"[MULTI-APP] Per-app marks torn down, flat netem restored ({latency_ms}ms)")
+                print(
+                    f"[MULTI-APP] Per-app marks torn down, flat netem restored ({latency_ms}ms)"
+                )
             except Exception as exc:
                 print(f"[MULTI-APP] Per-app teardown warning: {exc}")
 

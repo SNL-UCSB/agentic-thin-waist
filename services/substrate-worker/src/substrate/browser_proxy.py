@@ -133,9 +133,7 @@ def _handle_plain(client: socket.socket, raw: bytes, method: str, target: str) -
     path = split.path or "/"
     if split.query:
         path += "?" + split.query
-    rebuilt = raw.replace(
-        f"{method} {target}".encode(), f"{method} {path}".encode(), 1
-    )
+    rebuilt = raw.replace(f"{method} {target}".encode(), f"{method} {path}".encode(), 1)
     try:
         upstream = _marked_connection(host, port, CONNECT_TIMEOUT)
     except OSError:

@@ -39,9 +39,7 @@ _PRUDENTIA_KEYWORD_MAP = {
 }
 
 
-def _keyword_match_browser_workflow(
-    intent: str, available: list[dict]
-) -> dict | None:
+def _keyword_match_browser_workflow(intent: str, available: list[dict]) -> dict | None:
     """Deterministic keyword fallback for browser workflows."""
     intent_lower = intent.lower()
     id_index = {w["id"]: w for w in available}
