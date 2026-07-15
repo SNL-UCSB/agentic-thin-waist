@@ -145,6 +145,98 @@ async def _run_subprocess_with_deadline(command):
 
 _netgent_exec.run_subprocess = _run_subprocess_with_deadline
 
+# Per-request browser proxy routing.  Concurrent /run calls each execute in
+# their own thread; contextvars let each thread steer Playwright through a
+# different marked proxy without mutating process-global env vars or forking
+# the netgent submodule.
+_BROWSER_PROXY_HOST: "_contextvars.ContextVar[Optional[str]]" = _contextvars.ContextVar(
+    "substrate_browser_proxy_host", default=None
+)
+_BROWSER_PROXY_PORT: "_contextvars.ContextVar[Optional[int]]" = _contextvars.ContextVar(
+    "substrate_browser_proxy_port", default=None
+)
+_NETGENT_PLAYWRIGHT_PATCHED = False
+
+
+def _ensure_netgent_playwright_proxy_patch() -> None:
+    """Monkey-patch NetGent._playwright_page to honor per-request proxy context.
+
+    The upstream netgent submodule does not accept per-app proxy host/port in
+    its constructor.  We inject proxy settings here via contextvars so each
+    concurrent browser workflow can route through its own marked proxy in ns1.
+    """
+    global _NETGENT_PLAYWRIGHT_PATCHED
+    if _NETGENT_PLAYWRIGHT_PATCHED:
+        return
+
+    from contextlib import asynccontextmanager
+
+    from main import NetGent
+
+    @asynccontextmanager
+    async def _playwright_page_with_proxy(self):
+        from playwright.async_api import async_playwright
+
+        playwright = await async_playwright().start()
+
+        proxy_host = (
+            _BROWSER_PROXY_HOST.get()
+            or os.environ.get("BROWSER_PROXY_HOST", "").strip()
+        )
+        proxy_port = _BROWSER_PROXY_PORT.get()
+        proxy_port_str = (
+            str(proxy_port)
+            if proxy_port is not None
+            else os.environ.get("BROWSER_PROXY_PORT", "").strip()
+        )
+        context_kwargs: dict = {}
+        if proxy_host and proxy_port_str:
+            context_kwargs["proxy"] = {
+                "server": f"http://{proxy_host}:{proxy_port_str}"
+            }
+
+        stable_args = [
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+            "--disable-gpu",
+            "--disable-dev-shm-usage",
+            "--no-zygote",
+            "--use-fake-ui-for-media-stream",
+            "--use-fake-device-for-media-stream",
+        ]
+
+        try:
+            if self._cdp_url:
+                browser = await playwright.chromium.connect(self._cdp_url)
+                context = await browser.new_context(**context_kwargs)
+            else:
+                browser = await playwright.chromium.launch(
+                    headless=self._headless,
+                    args=stable_args,
+                )
+                context = await browser.new_context(**context_kwargs)
+
+            await context.grant_permissions(["camera", "microphone"])
+
+            page = await context.new_page()
+            try:
+                yield page
+            finally:
+                try:
+                    await context.close()
+                except Exception:
+                    pass
+                try:
+                    await browser.close()
+                except Exception:
+                    pass
+        finally:
+            await playwright.stop()
+
+    NetGent._playwright_page = _playwright_page_with_proxy
+    _NETGENT_PLAYWRIGHT_PATCHED = True
+
+
 app = FastAPI()
 
 CURRENT_BOTTLENECK_STATE = None  # will hold a BottleneckState
@@ -501,6 +593,48 @@ class RunExperimentRequest(BaseModel):
             "bottleneck state. Default False because the probes add ~10s of "
             "non-workflow traffic to any concurrent pcap capture. Use POST "
             "/shape (which always verifies) when you need verification."
+        ),
+    )
+    # --- Per-app fwmark (Stage 1 classification) ---
+    # When set, the browser proxy instance listening on `browser_proxy_port`
+    # stamps all its upstream sockets with SO_MARK=`app_fwmark`. This mark
+    # is picked up by CONNMARK rules in ns2 so that the return path (veth3
+    # egress) can later route per-app traffic into distinct netem lanes.
+    app_fwmark: Optional[int] = Field(
+        None,
+        ge=1,
+        le=255,
+        description=(
+            "fwmark (1-255) to stamp on this app's browser-proxy upstream "
+            "sockets. Must correspond to a proxy instance started via "
+            "POST /shape/per_app_marks."
+        ),
+    )
+    browser_proxy_host: Optional[str] = Field(
+        None,
+        description=(
+            "Alias IP of the per-app browser-proxy in ns1 (e.g. '172.16.1.5'). "
+            "Overrides BROWSER_PROXY_HOST. Must match the bind_ip used in "
+            "POST /shape/per_app_marks so Chrome tunnels through the right proxy."
+        ),
+    )
+    browser_proxy_port: Optional[int] = Field(
+        None,
+        description=(
+            "Port of the per-app browser-proxy instance in ns1 to use for "
+            "this workflow (e.g. 8889). Overrides the BROWSER_PROXY_PORT "
+            "env var. Required when app_fwmark is set."
+        ),
+    )
+    shell_bind_ip: Optional[str] = Field(
+        None,
+        description=(
+            "Alias IP to bind shell workflow tools to (e.g. '172.16.1.5'). "
+            "When set, the appropriate source-bind flag is injected into every "
+            "shell action that supports it: -B for iperf3, --bind-address= for "
+            "wget, -I for ping. Must match a bind_ip registered via "
+            "POST /shape/per_app_marks so ns2 classifies the connections into "
+            "the correct netem lane. Has no effect on browser workflows."
         ),
     )
 
@@ -1787,6 +1921,472 @@ def fetch_ctp_endpoint(req: CtpFetchRequest) -> CtpFetchResponse:
     return CtpFetchResponse(status="ok", **result)
 
 
+class PerAppMarkRequest(BaseModel):
+    """Stage 1 + Stage 2 per-app classification and netem delay configuration.
+
+    Each entry in ``app_marks`` describes one application::
+
+        {
+          "app_marks": {
+            "youtube": {
+              "mark":       10,          # fwmark 1-255
+              "proxy_port": 8889,        # listener port inside ns1
+              "bind_ip":    "172.16.1.5",# /32 alias added to ns1:veth1
+              "latency_ms": 10           # (Stage 2) per-app netem delay in ms
+            },
+            "twitch":  {"mark": 20, "proxy_port": 8890, "bind_ip": "172.16.1.9",  "latency_ms": 150},
+            "tubi":    {"mark": 30, "proxy_port": 8891, "bind_ip": "172.16.1.13", "latency_ms": 40}
+          },
+          "default_latency_ms": 50,    # delay for unclassified traffic
+          "netem_iface":        "veth3",# interface in netem_ns to install HTB+netem
+          "netem_ns":           "ns2"
+        }
+
+    When any ``latency_ms`` key is present the endpoint also executes Stage 2:
+    - Replaces the flat netem on ``netem_iface`` with an HTB root qdisc.
+    - Adds one leaf netem per app at the specified delay.
+    - Adds a default netem lane at ``default_latency_ms`` for unclassified flows.
+    - Installs ``tc filter ... fw`` rules that route marked return packets into
+      the correct netem lane.
+
+    Omit ``latency_ms`` from every app_marks entry to run Stage 1 only
+    (classification without delay changes).
+
+    Call ``DELETE /shape/per_app_marks`` to tear everything down and restore
+    the original flat netem.
+    """
+
+    app_marks: Dict[str, Dict] = Field(
+        ...,
+        description=(
+            "Mapping of app_name -> {mark, proxy_port, bind_ip, [latency_ms]}."
+        ),
+    )
+    default_latency_ms: float = Field(
+        50.0,
+        ge=0,
+        description="netem delay for unclassified traffic (default lane).",
+    )
+    netem_iface: str = Field(
+        "veth3",
+        description="Interface in netem_ns where the HTB+netem qdisc is installed.",
+    )
+    netem_ns: str = Field(
+        "ns2",
+        description="Network namespace that owns netem_iface.",
+    )
+
+
+def _setup_connmark_rules(app_marks: Dict[str, Dict[str, int]]) -> None:
+    """Install source-IP-based MARK + CONNMARK iptables rules in ns2 (idempotent).
+
+    Background: Linux clears skb->mark when a packet crosses a network-namespace
+    boundary via a veth pair, so the SO_MARK set on the proxy's socket in ns1
+    cannot be read directly by ns2's iptables.  Instead we use distinct source IP
+    aliases in ns1 (one per app) as the mark carrier — L3 source addresses ARE
+    preserved across namespace crossings.
+
+    ns2 PREROUTING (outgoing SYN arrives at veth3, src = app's alias IP):
+      -i veth3 -s <alias_ip> -j MARK --set-mark <mark>   (set skb->mark)
+      -i veth3              -j CONNMARK --save-mark        (persist to conntrack)
+
+    ns2 PREROUTING (return packet arrives at veth5 from WAN):
+      -i veth5              -j CONNMARK --restore-mark     (restore from conntrack)
+
+    The restored mark on the return packet at veth3 egress is what Stage 2
+    tc filters will read to steer packets into per-app netem lanes.
+    """
+
+    def _ensure_rule(ns: str, table: str, chain: str, rule: str) -> None:
+        check = subprocess.run(
+            f"ip netns exec {ns} iptables -t {table} -C {chain} {rule}",
+            shell=True,
+            capture_output=True,
+        )
+        if check.returncode != 0:
+            subprocess.run(
+                f"ip netns exec {ns} iptables -t {table} -A {chain} {rule}",
+                shell=True,
+                check=True,
+            )
+
+    # ns2: for each app, mark incoming SYNs by source IP alias so ns2's
+    # conntrack carries the per-app mark on the right connection.
+    for _cfg in app_marks.values():
+        _mark = _cfg.get("mark")
+        _ip = _cfg.get("bind_ip")
+        if _mark and _ip:
+            _ensure_rule(
+                "ns2",
+                "mangle",
+                "PREROUTING",
+                f"-i veth3 -s {_ip} -j MARK --set-mark {_mark}",
+            )
+
+    _ensure_rule("ns2", "mangle", "PREROUTING", "-i veth3 -j CONNMARK --save-mark")
+    _ensure_rule("ns2", "mangle", "PREROUTING", "-i veth5 -j CONNMARK --restore-mark")
+
+
+def apply_per_app_netem(
+    app_marks: Dict[str, Dict],
+    default_latency_ms: float,
+    iface: str,
+    ns: str,
+) -> None:
+    """Stage 2: Replace flat netem on *iface* with HTB + per-app netem lanes.
+
+    Layout on *iface* after this call::
+
+        root  1: htb  default 100          ← unclassified → default lane
+          class 1:10  htb  rate 1gbit      ← YouTube lane
+            qdisc 10: netem delay 10ms
+          class 1:20  htb  rate 1gbit      ← Twitch lane
+            qdisc 20: netem delay 150ms
+          class 1:100 htb  rate 1gbit      ← default lane
+            qdisc 100: netem delay 50ms
+        filter parent 1: fw  handle 10  →  flowid 1:10
+        filter parent 1: fw  handle 20  →  flowid 1:20
+
+    The HTB classes are intentionally uncapped (rate=1gbit) so only the netem
+    leaf qdisc adds delay — the actual rate cap lives on veth2/veth4 and must
+    not be touched.
+
+    tc ``fw`` filters match skb->mark which is restored from conntrack by the
+    ``CONNMARK --restore-mark`` iptables rule in ns2 PREROUTING at veth5.
+    """
+    _rc = lambda cmd: subprocess.run(  # noqa: E731
+        f"ip netns exec {ns} {cmd}", shell=True, check=True, capture_output=True
+    )
+
+    # 1. Tear down any existing root qdisc (flat netem or leftover HTB).
+    subprocess.run(
+        f"ip netns exec {ns} tc qdisc del dev {iface} root 2>/dev/null || true",
+        shell=True,
+    )
+
+    # 2. HTB root — default class 100 catches unclassified traffic.
+    _rc(f"tc qdisc add dev {iface} root handle 1: htb default 100")
+
+    # 3. Per-app HTB classes + leaf netem qdiscs.
+    for cfg in app_marks.values():
+        mark = int(cfg["mark"])
+        lat = float(cfg.get("latency_ms", default_latency_ms))
+        classid = f"1:{mark}"
+        handle = f"{mark}:"
+        _rc(
+            f"tc class add dev {iface} parent 1: classid {classid} htb rate 1gbit burst 1600"
+        )
+        _rc(
+            f"tc qdisc add dev {iface} parent {classid} handle {handle} netem delay {lat}ms"
+        )
+
+    # 4. Default HTB class + leaf netem (classid 1:100, handle 100:).
+    _rc(f"tc class add dev {iface} parent 1: classid 1:100 htb rate 1gbit burst 1600")
+    _rc(
+        f"tc qdisc add dev {iface} parent 1:100 handle 100: "
+        f"netem delay {default_latency_ms}ms"
+    )
+
+    # 5. fw filters — route marked return packets into their netem lane.
+    for cfg in app_marks.values():
+        mark = int(cfg["mark"])
+        _rc(
+            f"tc filter add dev {iface} parent 1: "
+            f"protocol ip prio 1 handle {mark} fw flowid 1:{mark}"
+        )
+
+
+def teardown_per_app_netem(
+    iface: str,
+    ns: str,
+    restore_latency_ms: float = 50.0,
+) -> None:
+    """Tear down the HTB+netem setup and restore a flat netem on *iface*.
+
+    Also flushes the ns2 PREROUTING MARK/CONNMARK rules installed by Stage 1/2.
+    Call this after the experiment finishes to return to the original behaviour.
+    """
+    subprocess.run(
+        f"ip netns exec {ns} tc qdisc del dev {iface} root 2>/dev/null || true",
+        shell=True,
+    )
+    if restore_latency_ms > 0:
+        subprocess.run(
+            f"ip netns exec {ns} tc qdisc add dev {iface} root "
+            f"netem delay {restore_latency_ms}ms",
+            shell=True,
+            check=True,
+        )
+
+
+# Global registry of per-app proxy processes: port → subprocess.Popen
+_APP_PROXY_PROCS: Dict[int, subprocess.Popen] = {}
+
+# Global registry of alias IPs added to ns1:veth1 for teardown.
+_APP_ALIAS_IPS: List[str] = []
+
+
+_SHELL_BIND_FLAGS: Dict[str, "Callable[[str], List[str]]"] = {
+    # iperf3: -B <ip> binds the client socket to the given source address.
+    "iperf": lambda ip: ["-B", ip],
+    # wget: --bind-address=<ip> selects the outgoing interface address.
+    "wget": lambda ip: [f"--bind-address={ip}"],
+    # ping: -I <ip> sets the source IP for ICMP packets.
+    "ping": lambda ip: ["-I", ip],
+    # ndt-client has no --bind-address flag — intentionally omitted.
+}
+
+
+def _inject_shell_bind_flags(workflow: Dict, bind_ip: str) -> Dict:
+    """Return a deep copy of *workflow* with source-bind flags injected.
+
+    Walks ``states[].actions[]`` and prepends the appropriate bind flag to
+    each action's ``extra_args`` based on its type::
+
+        iperf  → ["-B", bind_ip, ...]
+        wget   → ["--bind-address=<ip>", ...]
+        ping   → ["-I", bind_ip, ...]
+
+    Actions whose type is not in ``_SHELL_BIND_FLAGS`` (e.g. ``ndt``) are
+    left unchanged.  Existing ``extra_args`` are preserved and appended after
+    the bind flag so user-supplied args still take effect.
+    """
+    import copy
+
+    wf = copy.deepcopy(workflow)
+    for state in wf.get("states", []):
+        for action in state.get("actions", []):
+            action_type = action.get("type", "")
+            flag_fn = _SHELL_BIND_FLAGS.get(action_type)
+            if flag_fn is None:
+                continue
+            params = action.setdefault("params", {})
+            existing = params.get("extra_args") or []
+            if isinstance(existing, str):
+                existing = [existing]
+            bind_flags = flag_fn(bind_ip)
+            # Prepend bind flag; skip if already present (idempotent).
+            params["extra_args"] = bind_flags + [
+                f for f in existing if f not in bind_flags
+            ]
+    return wf
+
+
+def _add_ns1_alias(bind_ip: str) -> None:
+    """Add an alias IP to ns1's veth1 (idempotent) and track it for teardown."""
+    check = subprocess.run(
+        f"ip netns exec ns1 ip addr show dev veth1",
+        shell=True,
+        capture_output=True,
+        text=True,
+    )
+    if bind_ip not in (check.stdout or ""):
+        subprocess.run(
+            f"ip netns exec ns1 ip addr add {bind_ip}/32 dev veth1",
+            shell=True,
+            check=True,
+        )
+        # Also add the return route in ns2 so its MASQUERADE handles it
+        subprocess.run(
+            f"ip netns exec ns2 ip route replace {bind_ip}/32 dev veth3",
+            shell=True,
+            check=False,
+        )
+    if bind_ip not in _APP_ALIAS_IPS:
+        _APP_ALIAS_IPS.append(bind_ip)
+
+
+def _start_app_proxy(port: int, mark: int, bind_ip: str) -> None:
+    """Start a browser_proxy in ns1 on *port* bound to *bind_ip* with *mark*.
+
+    The proxy listens on the alias IP so that all its upstream TCP connections
+    originate from that source address.  ns2 can then classify these SYNs by
+    source IP (which survives the namespace crossing) rather than by SO_MARK
+    (which is cleared at the veth boundary in newer kernels).
+    """
+    existing = _APP_PROXY_PROCS.get(port)
+    if existing and existing.poll() is None:
+        existing.terminate()
+        try:
+            existing.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            existing.kill()
+
+    proc = subprocess.Popen(
+        [
+            "ip",
+            "netns",
+            "exec",
+            "ns1",
+            "python3",
+            "-m",
+            "substrate.browser_proxy",
+            "--host",
+            bind_ip,
+            "--port",
+            str(port),
+            "--mark",
+            str(mark),
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    _APP_PROXY_PROCS[port] = proc
+
+
+@app.post("/shape/per_app_marks")
+def setup_per_app_marks(req: PerAppMarkRequest) -> Dict:
+    """Stage 1 + Stage 2 per-app classification and optional netem delay setup.
+
+    Stage 1 (always executed):
+      - Adds /32 alias IPs to ns1:veth1 (one per app).
+      - For browser apps (proxy_port present): starts a dedicated browser_proxy
+        in ns1 bound to each alias IP so Chrome tunnels through it.
+      - For shell apps (proxy_port absent): skips proxy; the binary is expected
+        to bind directly to the alias IP via -B / --bind-address / -I flags
+        injected by the ``shell_bind_ip`` field on POST /run.
+      - Installs iptables MARK (by source IP) + CONNMARK save/restore in ns2
+        so the per-app mark is available on the return path at veth3 egress.
+
+    Stage 2 (executed when any app entry has a ``latency_ms`` key):
+      - Replaces the flat netem on ``netem_iface`` with an HTB root qdisc.
+      - Adds one leaf netem per app at ``latency_ms`` ms, plus a default lane
+        at ``default_latency_ms`` ms for unclassified traffic.
+      - Adds ``tc filter ... fw`` rules routing marked return packets into the
+        correct netem lane.
+
+    Idempotent — safe to call before every concurrent experiment.
+
+    Verification::
+
+        ip netns exec ns2 iptables -t mangle -L PREROUTING -v -n
+        ip netns exec ns2 tc qdisc show dev veth3
+        ip netns exec ns2 tc filter show dev veth3
+        ip netns exec ns2 cat /proc/net/nf_conntrack | awk '/mark=[^0]/'
+    """
+    results: Dict[str, Dict] = {}
+    stage2 = any(cfg.get("latency_ms") is not None for cfg in req.app_marks.values())
+
+    for app_name, cfg in req.app_marks.items():
+        mark = cfg.get("mark")
+        port = cfg.get("proxy_port")  # optional — absent for shell apps
+        bind_ip = cfg.get("bind_ip")
+        if not mark or not bind_ip:
+            raise HTTPException(
+                status_code=422,
+                detail=f"app '{app_name}' missing 'mark' or 'bind_ip'",
+            )
+        try:
+            _add_ns1_alias(bind_ip)
+            if port:
+                _start_app_proxy(port=port, mark=mark, bind_ip=bind_ip)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to configure alias/proxy for '{app_name}': {exc}",
+            )
+        results[app_name] = {
+            "mark": mark,
+            "proxy_port": port,
+            "bind_ip": bind_ip,
+            "latency_ms": cfg.get("latency_ms"),
+            "status": "started" if port else "alias_only",
+        }
+
+    try:
+        _setup_connmark_rules(req.app_marks)
+    except subprocess.CalledProcessError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"CONNMARK iptables setup failed: {exc}",
+        )
+
+    if stage2:
+        try:
+            apply_per_app_netem(
+                app_marks=req.app_marks,
+                default_latency_ms=req.default_latency_ms,
+                iface=req.netem_iface,
+                ns=req.netem_ns,
+            )
+        except subprocess.CalledProcessError as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Per-app netem setup failed: {exc.stderr.decode() if exc.stderr else exc}",
+            )
+
+    return {
+        "status": "ok",
+        "stage2_netem": stage2,
+        "apps": results,
+    }
+
+
+@app.delete("/shape/per_app_marks")
+def teardown_per_app_marks(
+    restore_latency_ms: float = 50.0,
+    netem_iface: str = "veth3",
+    netem_ns: str = "ns2",
+) -> Dict:
+    """Tear down per-app classification and restore the original flat netem.
+
+    Actions:
+    - Removes the HTB+netem qdisc on ``netem_iface`` and restores a flat netem
+      at ``restore_latency_ms`` ms (default 50 ms — matches the original setup).
+    - Flushes the ns2 PREROUTING MARK/CONNMARK rules installed by Stage 1/2.
+    - Terminates all per-app proxy processes.
+    - Removes alias IPs from ns1:veth1 and their /32 routes in ns2.
+
+    Call this at experiment teardown to return to today's behaviour::
+
+        curl -X DELETE 'http://localhost:8002/shape/per_app_marks?restore_latency_ms=50'
+    """
+    # 1. Restore flat netem on the netem interface.
+    try:
+        teardown_per_app_netem(
+            iface=netem_iface,
+            ns=netem_ns,
+            restore_latency_ms=restore_latency_ms,
+        )
+    except subprocess.CalledProcessError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Netem teardown failed: {exc}",
+        )
+
+    # 2. Flush ns2 PREROUTING MARK/CONNMARK rules.
+    subprocess.run(
+        f"ip netns exec {netem_ns} iptables -t mangle -F PREROUTING 2>/dev/null || true",
+        shell=True,
+    )
+
+    # 3. Kill per-app proxy processes.
+    for port, proc in list(_APP_PROXY_PROCS.items()):
+        try:
+            proc.terminate()
+            proc.wait(timeout=3)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+        del _APP_PROXY_PROCS[port]
+
+    # 4. Remove alias IPs from ns1:veth1 and ns2 routes added by _add_ns1_alias.
+    for ip in list(_APP_ALIAS_IPS):
+        subprocess.run(
+            f"ip netns exec ns1 ip addr del {ip}/32 dev veth1 2>/dev/null || true",
+            shell=True,
+        )
+        subprocess.run(
+            f"ip netns exec ns2 ip route del {ip}/32 dev veth3 2>/dev/null || true",
+            shell=True,
+        )
+    _APP_ALIAS_IPS.clear()
+
+    return {"status": "ok", "restored_latency_ms": restore_latency_ms}
+
+
 @app.post("/run", response_model=RunExperimentResponse)
 def run_experiment(req: RunExperimentRequest) -> RunExperimentResponse:
     """Apply shaping + congestion, then execute a workflow in a single call.
@@ -1868,19 +2468,41 @@ def run_experiment(req: RunExperimentRequest) -> RunExperimentResponse:
     )
     observer_thread.start()
 
+    proxy_host_token = None
+    proxy_port_token = None
     try:
+        # Route this browser workflow through a per-app marked proxy when
+        # requested.  Contextvars keep concurrent /run threads isolated.
+        _ensure_netgent_playwright_proxy_patch()
+        if req.browser_proxy_port:
+            proxy_host_token = _BROWSER_PROXY_HOST.set(
+                req.browser_proxy_host
+                or os.environ.get("BROWSER_PROXY_HOST", "").strip()
+                or None
+            )
+            proxy_port_token = _BROWSER_PROXY_PORT.set(req.browser_proxy_port)
+
         client = NetGent(
             cdp_url=os.environ.get("BROWSERLESS_WS_ENDPOINT", "").strip() or None,
             headless=True,
         )
+        workflow = (
+            _inject_shell_bind_flags(req.workflow, req.shell_bind_ip)
+            if req.shell_bind_ip
+            else req.workflow
+        )
         result = client.run_workflow(
-            req.workflow,
+            workflow,
             type=req.runtime,
             parameters=req.parameters or {},
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Workflow failed: {exc}")
     finally:
+        if proxy_host_token is not None:
+            _BROWSER_PROXY_HOST.reset(proxy_host_token)
+        if proxy_port_token is not None:
+            _BROWSER_PROXY_PORT.reset(proxy_port_token)
         terminated_at_deadline = bool(triggered_box[0])
         _SHELL_DEADLINE_TRIGGERED.reset(triggered_token)
         if deadline_token is not None:
