@@ -606,8 +606,14 @@ def _run_experiment_on_worker(
 
         When the experiment spec includes a ``per_app_latency`` dict, Stage 1+2
         per-app classification is set up before the workflows fire:
-          - A browser proxy is started in ns1 for each app on a unique alias IP.
-          - iptables MARK + CONNMARK rules classify return traffic in ns2.
+          - For browser apps: a dedicated proxy is started in ns1 on a unique
+            alias IP; each /run call receives browser_proxy_host/port so Chrome
+            tunnels through it.
+          - For shell apps: only an alias IP is registered (no proxy); the /run
+            call receives shell_bind_ip so the worker injects -B/--bind-address
+            flags into every shell action.
+          - iptables MARK + CONNMARK rules classify return traffic in ns2 for
+            both app types (classification is source-IP based, not proxy-based).
           - HTB + per-app netem lanes replace the flat netem on veth3.
         After all workflows finish, the per-app setup is torn down and the flat
         netem is restored.
@@ -650,31 +656,53 @@ def _run_experiment_on_worker(
             return
 
         # --- Stage 1 + 2 per-app marks (optional) ----------------------------
-        # Build the app_marks config from per_app_latency and assign proxy
-        # slots.  Proxy ports start at 8889; alias IPs start at 172.16.1.5/32
-        # (steps of 4 to stay within distinct /30 sub-ranges).
+        # Build the app_marks config from per_app_latency. Browser apps get a
+        # dedicated proxy (proxy_port set); shell apps get alias-only (no proxy).
+        # Proxy ports start at 8889 and are allocated only for browser apps.
+        # Alias IPs start at 172.16.1.5/32 in steps of 4 (one /30 sub-range each).
         proxy_assignments: dict[str, dict] = (
             {}
-        )  # app_name → {bind_ip, proxy_port, mark}
+        )  # app_name → {bind_ip, [proxy_port], mark}
         if per_app_latency:
             _BASE_PORT = 8889
             _BASE_IP_OCTET = 5  # 172.16.1.5, .9, .13, …
             app_marks_cfg: dict[str, dict] = {}
+            _port_counter = 0  # incremented only for browser apps
             for _i, (_app, _lat) in enumerate(per_app_latency.items()):
                 _mark = 10 * (_i + 1)  # 10, 20, 30, …
-                _port = _BASE_PORT + _i
                 _ip = f"172.16.1.{_BASE_IP_OCTET + _i * 4}"
-                app_marks_cfg[_app] = {
-                    "mark": _mark,
-                    "proxy_port": _port,
-                    "bind_ip": _ip,
-                    "latency_ms": _lat,
-                }
-                proxy_assignments[_app] = {
-                    "bind_ip": _ip,
-                    "proxy_port": _port,
-                    "mark": _mark,
-                }
+                # Determine whether this app is browser or shell.
+                _app_idx = apps.index(_app) if _app in apps else _i
+                _is_browser = (
+                    app_types[_app_idx].lower() == "browser"
+                    if _app_idx < len(app_types)
+                    else True  # default to browser for backwards compat
+                )
+                if _is_browser:
+                    _port = _BASE_PORT + _port_counter
+                    _port_counter += 1
+                    app_marks_cfg[_app] = {
+                        "mark": _mark,
+                        "proxy_port": _port,
+                        "bind_ip": _ip,
+                        "latency_ms": _lat,
+                    }
+                    proxy_assignments[_app] = {
+                        "bind_ip": _ip,
+                        "proxy_port": _port,
+                        "mark": _mark,
+                    }
+                else:
+                    # Shell app: alias IP + netem lane only — no proxy started.
+                    app_marks_cfg[_app] = {
+                        "mark": _mark,
+                        "bind_ip": _ip,
+                        "latency_ms": _lat,
+                    }
+                    proxy_assignments[_app] = {
+                        "bind_ip": _ip,
+                        "mark": _mark,
+                    }
             try:
                 marks_resp = manager.setup_per_app_marks(
                     worker.worker_id,
@@ -686,7 +714,7 @@ def _run_experiment_on_worker(
                 print(
                     f"[MULTI-APP] Per-app marks FAILED (falling back to flat netem): {exc}"
                 )
-                proxy_assignments = {}  # fall back: no per-app proxies
+                proxy_assignments = {}  # fall back: no per-app routing
 
         _wait_until(start_at)
 
@@ -720,6 +748,11 @@ def _run_experiment_on_worker(
             ) -> None:
                 key = f"run_{i}"
                 try:
+                    # Route browser apps through their per-app proxy; route
+                    # shell apps by injecting a source-bind flag into the
+                    # workflow actions (shell_bind_ip).  The two paths are
+                    # mutually exclusive: proxy_port present → browser path.
+                    _has_proxy = bool(pc.get("proxy_port"))
                     r = manager.run_workflow(
                         worker_id=worker.worker_id,
                         workflow=w,
@@ -728,8 +761,9 @@ def _run_experiment_on_worker(
                         experiment_max_seconds=ms,
                         cca=cca,
                         cca_namespace="ns1",
-                        browser_proxy_host=pc.get("bind_ip"),
-                        browser_proxy_port=pc.get("proxy_port"),
+                        browser_proxy_host=pc.get("bind_ip") if _has_proxy else None,
+                        browser_proxy_port=pc.get("proxy_port") if _has_proxy else None,
+                        shell_bind_ip=pc.get("bind_ip") if not _has_proxy and pc.get("bind_ip") else None,
                     )
                     thread_results[key] = r
                     print(f"[MULTI-APP] Workflow {i} ({a}) completed")

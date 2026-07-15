@@ -626,6 +626,17 @@ class RunExperimentRequest(BaseModel):
             "env var. Required when app_fwmark is set."
         ),
     )
+    shell_bind_ip: Optional[str] = Field(
+        None,
+        description=(
+            "Alias IP to bind shell workflow tools to (e.g. '172.16.1.5'). "
+            "When set, the appropriate source-bind flag is injected into every "
+            "shell action that supports it: -B for iperf3, --bind-address= for "
+            "wget, -I for ping. Must match a bind_ip registered via "
+            "POST /shape/per_app_marks so ns2 classifies the connections into "
+            "the correct netem lane. Has no effect on browser workflows."
+        ),
+    )
 
 
 class RunExperimentResponse(BaseModel):
@@ -2111,9 +2122,58 @@ def teardown_per_app_netem(
 # Global registry of per-app proxy processes: port → subprocess.Popen
 _APP_PROXY_PROCS: Dict[int, subprocess.Popen] = {}
 
+# Global registry of alias IPs added to ns1:veth1 for teardown.
+_APP_ALIAS_IPS: List[str] = []
+
+
+_SHELL_BIND_FLAGS: Dict[str, "Callable[[str], List[str]]"] = {
+    # iperf3: -B <ip> binds the client socket to the given source address.
+    "iperf": lambda ip: ["-B", ip],
+    # wget: --bind-address=<ip> selects the outgoing interface address.
+    "wget": lambda ip: [f"--bind-address={ip}"],
+    # ping: -I <ip> sets the source IP for ICMP packets.
+    "ping": lambda ip: ["-I", ip],
+    # ndt-client has no --bind-address flag — intentionally omitted.
+}
+
+
+def _inject_shell_bind_flags(workflow: Dict, bind_ip: str) -> Dict:
+    """Return a deep copy of *workflow* with source-bind flags injected.
+
+    Walks ``states[].actions[]`` and prepends the appropriate bind flag to
+    each action's ``extra_args`` based on its type::
+
+        iperf  → ["-B", bind_ip, ...]
+        wget   → ["--bind-address=<ip>", ...]
+        ping   → ["-I", bind_ip, ...]
+
+    Actions whose type is not in ``_SHELL_BIND_FLAGS`` (e.g. ``ndt``) are
+    left unchanged.  Existing ``extra_args`` are preserved and appended after
+    the bind flag so user-supplied args still take effect.
+    """
+    import copy
+
+    wf = copy.deepcopy(workflow)
+    for state in wf.get("states", []):
+        for action in state.get("actions", []):
+            action_type = action.get("type", "")
+            flag_fn = _SHELL_BIND_FLAGS.get(action_type)
+            if flag_fn is None:
+                continue
+            params = action.setdefault("params", {})
+            existing = params.get("extra_args") or []
+            if isinstance(existing, str):
+                existing = [existing]
+            bind_flags = flag_fn(bind_ip)
+            # Prepend bind flag; skip if already present (idempotent).
+            params["extra_args"] = bind_flags + [
+                f for f in existing if f not in bind_flags
+            ]
+    return wf
+
 
 def _add_ns1_alias(bind_ip: str) -> None:
-    """Add an alias IP to ns1's veth1 (idempotent)."""
+    """Add an alias IP to ns1's veth1 (idempotent) and track it for teardown."""
     check = subprocess.run(
         f"ip netns exec ns1 ip addr show dev veth1",
         shell=True,
@@ -2132,6 +2192,8 @@ def _add_ns1_alias(bind_ip: str) -> None:
             shell=True,
             check=False,
         )
+    if bind_ip not in _APP_ALIAS_IPS:
+        _APP_ALIAS_IPS.append(bind_ip)
 
 
 def _start_app_proxy(port: int, mark: int, bind_ip: str) -> None:
@@ -2178,7 +2240,11 @@ def setup_per_app_marks(req: PerAppMarkRequest) -> Dict:
 
     Stage 1 (always executed):
       - Adds /32 alias IPs to ns1:veth1 (one per app).
-      - Starts a dedicated browser_proxy in ns1 bound to each alias IP.
+      - For browser apps (proxy_port present): starts a dedicated browser_proxy
+        in ns1 bound to each alias IP so Chrome tunnels through it.
+      - For shell apps (proxy_port absent): skips proxy; the binary is expected
+        to bind directly to the alias IP via -B / --bind-address / -I flags
+        injected by the ``shell_bind_ip`` field on POST /run.
       - Installs iptables MARK (by source IP) + CONNMARK save/restore in ns2
         so the per-app mark is available on the return path at veth3 egress.
 
@@ -2203,27 +2269,28 @@ def setup_per_app_marks(req: PerAppMarkRequest) -> Dict:
 
     for app_name, cfg in req.app_marks.items():
         mark = cfg.get("mark")
-        port = cfg.get("proxy_port")
+        port = cfg.get("proxy_port")  # optional — absent for shell apps
         bind_ip = cfg.get("bind_ip")
-        if not mark or not port or not bind_ip:
+        if not mark or not bind_ip:
             raise HTTPException(
                 status_code=422,
-                detail=f"app '{app_name}' missing 'mark', 'proxy_port', or 'bind_ip'",
+                detail=f"app '{app_name}' missing 'mark' or 'bind_ip'",
             )
         try:
             _add_ns1_alias(bind_ip)
-            _start_app_proxy(port=port, mark=mark, bind_ip=bind_ip)
+            if port:
+                _start_app_proxy(port=port, mark=mark, bind_ip=bind_ip)
         except Exception as exc:
             raise HTTPException(
                 status_code=500,
-                detail=f"Failed to configure proxy for '{app_name}': {exc}",
+                detail=f"Failed to configure alias/proxy for '{app_name}': {exc}",
             )
         results[app_name] = {
             "mark": mark,
             "proxy_port": port,
             "bind_ip": bind_ip,
             "latency_ms": cfg.get("latency_ms"),
-            "status": "started",
+            "status": "started" if port else "alias_only",
         }
 
     try:
@@ -2268,7 +2335,7 @@ def teardown_per_app_marks(
       at ``restore_latency_ms`` ms (default 50 ms — matches the original setup).
     - Flushes the ns2 PREROUTING MARK/CONNMARK rules installed by Stage 1/2.
     - Terminates all per-app proxy processes.
-    - Does NOT remove alias IPs from ns1:veth1 (harmless to leave them).
+    - Removes alias IPs from ns1:veth1 and their /32 routes in ns2.
 
     Call this at experiment teardown to return to today's behaviour::
 
@@ -2304,6 +2371,18 @@ def teardown_per_app_marks(
             except Exception:
                 pass
         del _APP_PROXY_PROCS[port]
+
+    # 4. Remove alias IPs from ns1:veth1 and ns2 routes added by _add_ns1_alias.
+    for ip in list(_APP_ALIAS_IPS):
+        subprocess.run(
+            f"ip netns exec ns1 ip addr del {ip}/32 dev veth1 2>/dev/null || true",
+            shell=True,
+        )
+        subprocess.run(
+            f"ip netns exec ns2 ip route del {ip}/32 dev veth3 2>/dev/null || true",
+            shell=True,
+        )
+    _APP_ALIAS_IPS.clear()
 
     return {"status": "ok", "restored_latency_ms": restore_latency_ms}
 
@@ -2407,8 +2486,13 @@ def run_experiment(req: RunExperimentRequest) -> RunExperimentResponse:
             cdp_url=os.environ.get("BROWSERLESS_WS_ENDPOINT", "").strip() or None,
             headless=True,
         )
+        workflow = (
+            _inject_shell_bind_flags(req.workflow, req.shell_bind_ip)
+            if req.shell_bind_ip
+            else req.workflow
+        )
         result = client.run_workflow(
-            req.workflow,
+            workflow,
             type=req.runtime,
             parameters=req.parameters or {},
         )

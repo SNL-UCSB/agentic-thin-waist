@@ -986,6 +986,7 @@ class ConnectivityManager:
         cca_namespace: str | None = None,
         browser_proxy_host: str | None = None,
         browser_proxy_port: int | None = None,
+        shell_bind_ip: str | None = None,
     ) -> dict[str, Any]:
         """Execute a workflow on the worker via ``POST /run``.
 
@@ -1007,6 +1008,11 @@ class ConnectivityManager:
         through a specific per-app marked proxy in ns1 (set up by
         :meth:`setup_per_app_marks`).  Omit for shell workflows or when using
         the default shared proxy.
+
+        ``shell_bind_ip`` routes a shell workflow through a per-app alias IP by
+        injecting source-bind flags (-B / --bind-address / -I) into each
+        matching action before dispatch.  Mutually exclusive with
+        ``browser_proxy_host``/``browser_proxy_port``.
         """
         info = self._backend.get_worker_info(worker_id)
         payload: dict[str, Any] = {
@@ -1025,6 +1031,8 @@ class ConnectivityManager:
             payload["browser_proxy_host"] = browser_proxy_host
         if browser_proxy_port:
             payload["browser_proxy_port"] = browser_proxy_port
+        if shell_bind_ip:
+            payload["shell_bind_ip"] = shell_bind_ip
 
         with httpx.Client(timeout=300) as client:
             resp = client.post(f"{info.endpoint}/run", json=payload)
