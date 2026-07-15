@@ -763,7 +763,11 @@ def _run_experiment_on_worker(
                         cca_namespace="ns1",
                         browser_proxy_host=pc.get("bind_ip") if _has_proxy else None,
                         browser_proxy_port=pc.get("proxy_port") if _has_proxy else None,
-                        shell_bind_ip=pc.get("bind_ip") if not _has_proxy and pc.get("bind_ip") else None,
+                        shell_bind_ip=(
+                            pc.get("bind_ip")
+                            if not _has_proxy and pc.get("bind_ip")
+                            else None
+                        ),
                     )
                     thread_results[key] = r
                     print(f"[MULTI-APP] Workflow {i} ({a}) completed")
