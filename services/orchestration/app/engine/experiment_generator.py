@@ -42,7 +42,15 @@ class ExperimentGenerator:
                 guaranteed via the random UUID suffix.
         """
         capacities = parsed_intent.get("capacities") or [25]
-        latencies = parsed_intent.get("latencies") or [50]
+        application_configs = parsed_intent.get("application_configs") or []
+        # Per-application delays are not a global latency sweep. Keep the legacy
+        # scalar at zero so a later execution stage does not also delay every
+        # packet; application_configs carries the delays that must be enforced.
+        latencies = (
+            [0]
+            if application_configs
+            else (parsed_intent.get("latencies") or [50])
+        )
         cc_algorithms = parsed_intent.get("cc_algorithms") or ["cubic"]
         aqm_policy = parsed_intent.get("aqm_policy") or "pfifo"
         application_type = parsed_intent.get("application_type") or "shell"
@@ -76,6 +84,7 @@ class ExperimentGenerator:
                 application_type=application_type,
                 capacity_mbps=float(cap),
                 latency_ms=float(lat),
+                application_configs=application_configs,
                 cc_algorithm=cc,
                 aqm_policy=aqm_policy,
                 buffer_packets=(

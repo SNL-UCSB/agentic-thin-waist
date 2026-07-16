@@ -49,6 +49,10 @@ that the user has not implied. Prefer asking for clarification when needed.
 
 Return ONLY a JSON object containing:
 - applications
+- application_configs (list of objects with application and latency_ms; use this
+  when a concurrent intent assigns a different latency to each application,
+  e.g. [{"application": "youtube", "latency_ms": 50},
+  {"application": "twitch", "latency_ms": 100}]. Otherwise return [].)
 - application_type
 - capacities
 - latencies
@@ -68,6 +72,10 @@ Return ONLY a JSON object containing:
 - clarification_needed
 - design_type
 - reasoning
+
+When application_configs is non-empty, do not copy its per-application latency
+values into latencies as a sweep. The latencies field is only for latency values
+that apply globally to an entire experiment or for an explicit global sweep.
 
 If the user does not mention cross-traffic / CTP, set both
 ctp_cluster = null AND ctp_capacity_range = null. Do NOT invent a default

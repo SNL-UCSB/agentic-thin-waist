@@ -37,11 +37,25 @@ class ResearchIntent(BaseModel):
     )
 
 
+class ApplicationConfig(BaseModel):
+    """Application-specific network settings retained in an experiment spec."""
+
+    application: str
+    latency_ms: float = Field(..., ge=0)
+
+
 class GeneratedExperiment(BaseModel):
     experiment_id: str
     application_type: Literal["shell", "browser"] = "shell"
     capacity_mbps: float
     latency_ms: float
+    application_configs: List[ApplicationConfig] = Field(
+        default_factory=list,
+        description=(
+            "Per-application network settings for concurrent execution. Empty "
+            "means the global latency_ms applies to all application traffic."
+        ),
+    )
     loss_rate: float = 0.0
     duration_seconds: int = 60
     num_trials: int = 1

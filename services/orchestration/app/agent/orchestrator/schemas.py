@@ -5,11 +5,30 @@ from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
 
+class ApplicationConfig(BaseModel):
+    """Application-specific network settings for a concurrent experiment."""
+
+    application: str = Field(..., description="Application name, e.g. youtube")
+    latency_ms: float = Field(
+        ...,
+        ge=0,
+        description="Additional latency applied only to this application's traffic",
+    )
+
+
 class ParsedIntent(BaseModel):
     """Structured output from IntentParser — Claude's extraction of experiment parameters."""
 
     applications: List[str] = Field(
         ..., description="Application names (e.g. youtube, ndt, ping, wget)"
+    )
+    application_configs: List[ApplicationConfig] = Field(
+        default_factory=list,
+        description=(
+            "Per-application settings when applications in the same concurrent "
+            "experiment require different network conditions. Leave empty when "
+            "the global experiment settings apply to every application."
+        ),
     )
     application_type: Literal["shell", "browser"] = Field(
         "shell",
