@@ -66,8 +66,16 @@ class ExperimentGenerator:
         buffer_packets = parsed_intent.get("buffer_packets")
         qdisc_params = parsed_intent.get("qdisc_params")
 
-        applications = parsed_intent.get("applications") or []
-        app_slug = _slugify_app(applications[0]) if applications else application_type
+        applications = parsed_intent.get("applications") or [
+            config["application"]
+            for config in application_configs
+            if config.get("application")
+        ]
+        app_slug = (
+            "+".join(_slugify_app(application) for application in applications)
+            if applications
+            else application_type
+        )
 
         used: set[str] = set()
         experiments: List[GeneratedExperiment] = []
