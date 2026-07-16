@@ -920,6 +920,60 @@ class ConnectivityManager:
         )
         return result
 
+    def setup_per_app_marks(
+        self,
+        worker_id: str,
+        app_marks: dict[str, dict],
+        *,
+        default_latency_ms: float = 50.0,
+        netem_iface: str = "veth3",
+        netem_ns: str = "ns2",
+    ) -> dict[str, Any]:
+        """Call ``POST /shape/per_app_marks`` on the worker.
+
+        Installs per-app classification (alias IPs, browser proxies, iptables
+        CONNMARK) and, when any entry has a ``latency_ms`` key, also installs
+        HTB + per-app netem lanes on *netem_iface* (Stage 2).
+
+        Returns the full response JSON including the port/IP/mark assignments
+        that should be forwarded to the matching ``run_workflow`` calls.
+        """
+        info = self._backend.get_worker_info(worker_id)
+        payload: dict[str, Any] = {
+            "app_marks": app_marks,
+            "default_latency_ms": default_latency_ms,
+            "netem_iface": netem_iface,
+            "netem_ns": netem_ns,
+        }
+        with httpx.Client(timeout=60) as client:
+            resp = client.post(f"{info.endpoint}/shape/per_app_marks", json=payload)
+        if resp.status_code != 200:
+            raise RuntimeError(
+                f"POST /shape/per_app_marks failed for worker {worker_id} "
+                f"(HTTP {resp.status_code}): {resp.text[:1000]}"
+            )
+        return resp.json()
+
+    def teardown_per_app_marks(
+        self,
+        worker_id: str,
+        *,
+        restore_latency_ms: float = 50.0,
+        netem_iface: str = "veth3",
+        netem_ns: str = "ns2",
+    ) -> None:
+        """Call ``DELETE /shape/per_app_marks`` on the worker to restore flat netem."""
+        info = self._backend.get_worker_info(worker_id)
+        with httpx.Client(timeout=30) as client:
+            client.delete(
+                f"{info.endpoint}/shape/per_app_marks",
+                params={
+                    "restore_latency_ms": restore_latency_ms,
+                    "netem_iface": netem_iface,
+                    "netem_ns": netem_ns,
+                },
+            )
+
     def run_workflow(
         self,
         worker_id: str,
@@ -930,6 +984,9 @@ class ConnectivityManager:
         experiment_max_seconds: float | None = None,
         cca: str | None = None,
         cca_namespace: str | None = None,
+        browser_proxy_host: str | None = None,
+        browser_proxy_port: int | None = None,
+        shell_bind_ip: str | None = None,
     ) -> dict[str, Any]:
         """Execute a workflow on the worker via ``POST /run``.
 
@@ -946,6 +1003,16 @@ class ConnectivityManager:
         handler pins the per-request LD_PRELOAD shim to the right algorithm.
         Without this the substrate request schema defaults ``cca`` to ``cubic``
         and silently overrides whatever ``/congestion`` set.
+
+        ``browser_proxy_host`` / ``browser_proxy_port`` route a browser workflow
+        through a specific per-app marked proxy in ns1 (set up by
+        :meth:`setup_per_app_marks`).  Omit for shell workflows or when using
+        the default shared proxy.
+
+        ``shell_bind_ip`` routes a shell workflow through a per-app alias IP by
+        injecting source-bind flags (-B / --bind-address / -I) into each
+        matching action before dispatch.  Mutually exclusive with
+        ``browser_proxy_host``/``browser_proxy_port``.
         """
         info = self._backend.get_worker_info(worker_id)
         payload: dict[str, Any] = {
@@ -960,6 +1027,12 @@ class ConnectivityManager:
             payload["cca"] = cca
         if cca_namespace:
             payload["cca_namespace"] = cca_namespace
+        if browser_proxy_host:
+            payload["browser_proxy_host"] = browser_proxy_host
+        if browser_proxy_port:
+            payload["browser_proxy_port"] = browser_proxy_port
+        if shell_bind_ip:
+            payload["shell_bind_ip"] = shell_bind_ip
 
         with httpx.Client(timeout=300) as client:
             resp = client.post(f"{info.endpoint}/run", json=payload)
