@@ -622,12 +622,23 @@ def _run_experiment_on_worker(
         if qdisc == "fifo":
             qdisc = "pfifo"
         cca = spec.get("cc_algorithm", "cubic")
-        apps = spec.get("applications") or []
-        app_types = spec.get("application_types") or []
+        application_configs = spec.get("application_configs") or []
+        apps = spec.get("applications") or [
+            str(config.get("application"))
+            for config in application_configs
+            if config.get("application")
+        ]
+        app_types = spec.get("application_types") or [
+            spec.get("application_type", "browser") for _ in apps
+        ]
         latency_ms = float(spec.get("latency_ms", 0))
 
         # per_app_latency: {app_name: latency_ms} — opt-in per-experiment.
-        per_app_latency: dict[str, float] = spec.get("per_app_latency") or {}
+        per_app_latency: dict[str, float] = spec.get("per_app_latency") or {
+            str(config["application"]): float(config["latency_ms"])
+            for config in application_configs
+            if config.get("application") and config.get("latency_ms") is not None
+        }
 
         # Apply shaping + congestion BEFORE the minute boundary so the
         # bottleneck is ready when the workflows fire.
