@@ -2228,10 +2228,13 @@ def _start_app_proxy(port: int, mark: int, bind_ip: str) -> None:
             "--mark",
             str(mark),
         ],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
     )
     _APP_PROXY_PROCS[port] = proc
+    print(
+        f"[PER-APP] proxy started pid={proc.pid} bind_ip={bind_ip} "
+        f"port={port} mark={mark}",
+        flush=True,
+    )
 
 
 @app.post("/shape/per_app_marks")
@@ -2266,6 +2269,12 @@ def setup_per_app_marks(req: PerAppMarkRequest) -> Dict:
     """
     results: Dict[str, Dict] = {}
     stage2 = any(cfg.get("latency_ms") is not None for cfg in req.app_marks.values())
+    print(
+        f"[PER-APP] setup requested stage2={stage2} ns={req.netem_ns} "
+        f"iface={req.netem_iface} default_latency_ms={req.default_latency_ms} "
+        f"app_marks={req.app_marks}",
+        flush=True,
+    )
 
     for app_name, cfg in req.app_marks.items():
         mark = cfg.get("mark")
@@ -2292,6 +2301,11 @@ def setup_per_app_marks(req: PerAppMarkRequest) -> Dict:
             "latency_ms": cfg.get("latency_ms"),
             "status": "started" if port else "alias_only",
         }
+        print(
+            f"[PER-APP] app={app_name} mark={mark} bind_ip={bind_ip} "
+            f"proxy_port={port} latency_ms={cfg.get('latency_ms')} configured",
+            flush=True,
+        )
 
     try:
         _setup_connmark_rules(req.app_marks)
@@ -2308,6 +2322,11 @@ def setup_per_app_marks(req: PerAppMarkRequest) -> Dict:
                 default_latency_ms=req.default_latency_ms,
                 iface=req.netem_iface,
                 ns=req.netem_ns,
+            )
+            print(
+                f"[PER-APP] netem lanes installed ns={req.netem_ns} "
+                f"iface={req.netem_iface}",
+                flush=True,
             )
         except subprocess.CalledProcessError as exc:
             raise HTTPException(
@@ -2341,6 +2360,12 @@ def teardown_per_app_marks(
 
         curl -X DELETE 'http://localhost:8002/shape/per_app_marks?restore_latency_ms=50'
     """
+    print(
+        f"[PER-APP] teardown requested ns={netem_ns} iface={netem_iface} "
+        f"restore_latency_ms={restore_latency_ms} proxies={list(_APP_PROXY_PROCS)} "
+        f"aliases={list(_APP_ALIAS_IPS)}",
+        flush=True,
+    )
     # 1. Restore flat netem on the netem interface.
     try:
         teardown_per_app_netem(
@@ -2383,6 +2408,8 @@ def teardown_per_app_marks(
             shell=True,
         )
     _APP_ALIAS_IPS.clear()
+
+    print("[PER-APP] teardown complete", flush=True)
 
     return {"status": "ok", "restored_latency_ms": restore_latency_ms}
 

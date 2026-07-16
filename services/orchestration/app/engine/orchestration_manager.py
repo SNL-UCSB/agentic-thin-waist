@@ -600,6 +600,13 @@ def _run_experiment_on_worker(
     is_concurrent = (
         spec.get("execution_mode") == "concurrent" and len(multi_workflows) > 1
     )
+    print(
+        f"[MULTI-APP {exp_id}] Dispatch check → "
+        f"mode={spec.get('execution_mode')} apps={spec.get('applications')} "
+        f"workflows={len(multi_workflows)} params={len(multi_params_list)} "
+        f"application_configs={spec.get('application_configs') or []} "
+        f"is_concurrent={is_concurrent}"
+    )
 
     def _fire_workflows() -> None:
         """Apply shaping once, then fire multiple workflows concurrently.
@@ -639,6 +646,11 @@ def _run_experiment_on_worker(
             for config in application_configs
             if config.get("application") and config.get("latency_ms") is not None
         }
+        print(
+            f"[MULTI-APP {exp_id}] Resolved topology → apps={apps} "
+            f"types={app_types} flat_latency_ms={latency_ms} "
+            f"per_app_latency={per_app_latency}"
+        )
 
         # Apply shaping + congestion BEFORE the minute boundary so the
         # bottleneck is ready when the workflows fire.
@@ -715,12 +727,19 @@ def _run_experiment_on_worker(
                         "mark": _mark,
                     }
             try:
+                print(
+                    f"[MULTI-APP {exp_id}] POST /shape/per_app_marks → "
+                    f"default_latency_ms={latency_ms} app_marks={app_marks_cfg}"
+                )
                 marks_resp = manager.setup_per_app_marks(
                     worker.worker_id,
                     app_marks=app_marks_cfg,
                     default_latency_ms=latency_ms,
                 )
-                print(f"[MULTI-APP] Per-app marks + netem: {marks_resp}")
+                print(
+                    f"[MULTI-APP {exp_id}] Per-app marks + netem response: "
+                    f"{marks_resp}"
+                )
             except Exception as exc:
                 print(
                     f"[MULTI-APP] Per-app marks FAILED (falling back to flat netem): {exc}"
@@ -764,6 +783,12 @@ def _run_experiment_on_worker(
                     # workflow actions (shell_bind_ip).  The two paths are
                     # mutually exclusive: proxy_port present → browser path.
                     _has_proxy = bool(pc.get("proxy_port"))
+                    print(
+                        f"[MULTI-APP {exp_id}] Starting run[{i}] app={a} "
+                        f"runtime={rt} proxy={pc if _has_proxy else None} "
+                        f"shell_bind_ip={pc.get('bind_ip') if not _has_proxy else None} "
+                        f"deadline_seconds={ms}"
+                    )
                     r = manager.run_workflow(
                         worker_id=worker.worker_id,
                         workflow=w,
@@ -781,10 +806,16 @@ def _run_experiment_on_worker(
                         ),
                     )
                     thread_results[key] = r
-                    print(f"[MULTI-APP] Workflow {i} ({a}) completed")
+                    print(
+                        f"[MULTI-APP {exp_id}] Workflow {i} ({a}) completed "
+                        f"status={r.get('status') if isinstance(r, dict) else 'unknown'}"
+                    )
                 except Exception as exc:
                     thread_errors[key] = str(exc)
-                    print(f"[MULTI-APP] Workflow {i} ({a}) FAILED: {exc}")
+                    print(
+                        f"[MULTI-APP {exp_id}] Workflow {i} ({a}) FAILED: "
+                        f"{type(exc).__name__}: {exc}"
+                    )
 
             t = threading.Thread(
                 target=_run_one, name=f"fire-workflow-{idx}", daemon=True
@@ -799,6 +830,10 @@ def _run_experiment_on_worker(
         # Tear down per-app marks and restore flat netem after all workflows done.
         if proxy_assignments:
             try:
+                print(
+                    f"[MULTI-APP {exp_id}] DELETE /shape/per_app_marks → "
+                    f"restore_latency_ms={latency_ms}"
+                )
                 manager.teardown_per_app_marks(
                     worker.worker_id,
                     restore_latency_ms=latency_ms,

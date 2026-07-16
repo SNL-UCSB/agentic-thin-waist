@@ -108,6 +108,11 @@ def parse_intent(state: OrchestratorState) -> dict[str, Any]:
         f"apps={parsed.applications}  capacities={parsed.capacities}  "
         f"cc={parsed.cc_algorithms}"
     )
+    print(
+        f"[AGENT {orchestration_id}] Per-app config → "
+        f"design={parsed.design_type}  application_type={parsed.application_type}  "
+        f"application_configs={[c.model_dump() for c in parsed.application_configs]}"
+    )
 
     reasoning_step = {
         "step": 1,
@@ -173,7 +178,10 @@ def generate_experiments(
         print(
             f"[AGENT {orchestration_id}]   spec[{i}] id={e.experiment_id}  "
             f"capacity={e.capacity_mbps} Mbps  "
-            f"latency={e.latency_ms} ms  cc={e.cc_algorithm}"
+            f"latency={e.latency_ms} ms  cc={e.cc_algorithm}  "
+            f"mode={e.execution_mode}  apps={e.applications}  "
+            f"app_types={e.application_types}  "
+            f"application_configs={[c.model_dump() for c in e.application_configs]}"
         )
 
     return {
