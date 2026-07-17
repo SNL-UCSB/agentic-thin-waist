@@ -5,15 +5,45 @@ from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
 
+class ApplicationConfig(BaseModel):
+    """Application-specific network settings for a concurrent experiment."""
+
+    application: str = Field(..., description="Application name, e.g. youtube")
+    instance_id: Optional[str] = Field(
+        None,
+        description=(
+            "Unique flow identity, required when the same application appears "
+            "more than once (e.g. youtube-1, youtube-2)."
+        ),
+    )
+    latency_ms: float = Field(
+        ...,
+        ge=0,
+        description="Additional latency applied only to this application's traffic",
+    )
+
+
 class ParsedIntent(BaseModel):
     """Structured output from IntentParser — Claude's extraction of experiment parameters."""
 
     applications: List[str] = Field(
         ..., description="Application names (e.g. youtube, ndt, ping, wget)"
     )
-    application_type: Literal["shell", "browser"] = Field(
+    application_configs: List[ApplicationConfig] = Field(
+        default_factory=list,
+        description=(
+            "Per-application settings when applications in the same concurrent "
+            "experiment require different network conditions. Leave empty when "
+            "the global experiment settings apply to every application."
+        ),
+    )
+    application_type: Literal["shell", "browser", "mixed"] = Field(
         "shell",
-        description="Runtime type: 'shell' for CLI tools (ndt, iperf, ping, speedtest, wget) or 'browser' for web applications (youtube, zoom, browsing)",
+        description=(
+            "Runtime type: 'shell' for CLI tools (ndt, iperf, ping, speedtest, wget), "
+            "'browser' for web applications (youtube, zoom, browsing), or "
+            "'mixed' when the intent includes both shell and browser applications"
+        ),
     )
     capacities: Optional[List[float]] = Field(
         None, description="Link capacities in Mbps"

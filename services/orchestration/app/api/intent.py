@@ -172,6 +172,7 @@ def process_intent(orch_id: str, request: ResearchIntent) -> None:
         for key in (
             "capacities",
             "latencies",
+            "application_configs",
             "cc_algorithms",
             "aqm_policy",
             "buffer_packets",

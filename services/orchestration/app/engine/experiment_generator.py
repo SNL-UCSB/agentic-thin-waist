@@ -2,6 +2,14 @@
 
 Pure logic: Cartesian product over capacities, latencies,
 and CC algorithms; no API calls or side effects.
+
+When the parsed intent contains multiple applications and the LLM sets
+``design_type`` accordingly, the generator produces:
+
+- ``"isolated"`` experiments: one per (app × capacity × latency × cc)
+- ``"concurrent"`` experiments: one per (capacity × latency × cc) with all
+  applications bundled together for simultaneous execution on one worker
+- ``"full"``: both isolated AND concurrent experiments
 """
 
 import re
@@ -15,10 +23,35 @@ _DEFAULT_DURATION_SECONDS = 60
 _UUID_LEN = 8
 _MAX_UNIQUENESS_ATTEMPTS = 8
 
+_SHELL_APPS = {"ping", "iperf", "iperf3", "ndt", "ndt7", "wget", "speedtest", "curl"}
+_BROWSER_APPS = {
+    "youtube",
+    "zoom",
+    "teams",
+    "netflix",
+    "browsing",
+    "twitch",
+    "tubi",
+    "web",
+}
+
 
 def _slugify_app(name: str) -> str:
     s = re.sub(r"[^a-z0-9]+", "", (name or "").lower())
     return s or "app"
+
+
+def _base_app_name(name: str) -> str:
+    """Strip a generated numeric instance suffix for runtime classification."""
+    return re.sub(r"[-_ ]\d+$", "", (name or "").lower())
+
+
+def _classify_app(name: str) -> str:
+    """Return 'shell' or 'browser' for a given application name."""
+    slug = _slugify_app(_base_app_name(name))
+    if slug in _BROWSER_APPS:
+        return "browser"
+    return "shell"
 
 
 def _fmt_num(x: float) -> str:
@@ -49,21 +82,133 @@ class ExperimentGenerator:
         duration = parsed_intent.get("duration_seconds") or _DEFAULT_DURATION_SECONDS
         num_trials = parsed_intent.get("num_trials", 1) or 1
         reasoning = parsed_intent.get("reasoning") or ""
-        # When the intent does not mention CTP, leave both fields as None so
-        # the orchestrator skips CTP selection + replay entirely (no
-        # background cross-traffic, no 172.16.1.20 packets in the pcap).
         ctp_cluster = parsed_intent.get("ctp_cluster")
         ctp_capacity_range = parsed_intent.get("ctp_capacity_range")
 
         buffer_packets = parsed_intent.get("buffer_packets")
         qdisc_params = parsed_intent.get("qdisc_params")
 
-        applications = parsed_intent.get("applications") or []
-        app_slug = _slugify_app(applications[0]) if applications else application_type
+        application_configs = parsed_intent.get("application_configs") or []
+        applications = (
+            [
+                str(config.get("instance_id") or config["application"])
+                for config in application_configs
+                if config.get("application")
+            ]
+            if application_configs
+            else (parsed_intent.get("applications") or [])
+        )
+        design_types = parsed_intent.get("design_type") or []
+
+        # Single-app or no apps: preserve original behavior exactly.
+        if len(applications) <= 1:
+            return self._generate_single_app(
+                parsed_intent,
+                capacities=capacities,
+                latencies=latencies,
+                cc_algorithms=cc_algorithms,
+                aqm_policy=aqm_policy,
+                application_type=application_type,
+                duration=duration,
+                num_trials=num_trials,
+                reasoning=reasoning,
+                ctp_cluster=ctp_cluster,
+                ctp_capacity_range=ctp_capacity_range,
+                buffer_packets=buffer_packets,
+                qdisc_params=qdisc_params,
+                applications=applications,
+                application_configs=application_configs,
+                id_taken=id_taken,
+            )
+
+        # Multi-app: use design_type to decide which experiments to generate.
+        want_isolated = "isolated" in design_types or "full" in design_types
+        want_concurrent = "concurrent" in design_types or "full" in design_types
+
+        # If design_type is empty or unrecognized with multiple apps, let the
+        # LLM's omission default to concurrent (the primary multi-app use case).
+        if not want_isolated and not want_concurrent:
+            want_concurrent = True
 
         used: set[str] = set()
         experiments: List[GeneratedExperiment] = []
-        for cap, lat, cc in product(capacities, latencies, cc_algorithms):
+        common = dict(
+            aqm_policy=aqm_policy,
+            duration=duration,
+            num_trials=num_trials,
+            reasoning=reasoning,
+            ctp_cluster=ctp_cluster,
+            ctp_capacity_range=ctp_capacity_range,
+            buffer_packets=buffer_packets,
+            qdisc_params=qdisc_params,
+        )
+
+        if want_isolated:
+            experiments.extend(
+                self._generate_isolated(
+                    parsed_intent,
+                    applications=applications,
+                    application_configs=application_configs,
+                    capacities=capacities,
+                    latencies=latencies,
+                    cc_algorithms=cc_algorithms,
+                    used=used,
+                    id_taken=id_taken,
+                    **common,
+                )
+            )
+
+        if want_concurrent:
+            experiments.extend(
+                self._generate_concurrent(
+                    parsed_intent,
+                    applications=applications,
+                    application_type=application_type,
+                    application_configs=application_configs,
+                    capacities=capacities,
+                    latencies=latencies,
+                    cc_algorithms=cc_algorithms,
+                    used=used,
+                    id_taken=id_taken,
+                    **common,
+                )
+            )
+
+        return experiments
+
+    # ------------------------------------------------------------------
+    # Single-app generation (backward-compatible path)
+    # ------------------------------------------------------------------
+
+    def _generate_single_app(
+        self,
+        parsed_intent: dict,
+        *,
+        capacities: list,
+        latencies: list,
+        cc_algorithms: list,
+        aqm_policy: str,
+        application_type: str,
+        duration: int,
+        num_trials: int,
+        reasoning: str,
+        ctp_cluster,
+        ctp_capacity_range,
+        buffer_packets,
+        qdisc_params,
+        applications: list,
+        application_configs: list,
+        id_taken,
+    ) -> List[GeneratedExperiment]:
+        app_slug = _slugify_app(applications[0]) if applications else application_type
+        app_config = application_configs[0] if application_configs else None
+        effective_latencies = (
+            [float(app_config["latency_ms"])] if app_config else latencies
+        )
+
+        used: set[str] = set()
+        experiments: List[GeneratedExperiment] = []
+        for cap, lat, cc in product(capacities, effective_latencies, cc_algorithms):
             download = _fmt_num(cap)
             upload = _fmt_num(parsed_intent.get("upload_mbps") or cap)
             base_lat = _fmt_num(lat)
@@ -76,6 +221,7 @@ class ExperimentGenerator:
                 application_type=application_type,
                 capacity_mbps=float(cap),
                 latency_ms=float(lat),
+                application_configs=[app_config] if app_config else [],
                 cc_algorithm=cc,
                 aqm_policy=aqm_policy,
                 buffer_packets=(
@@ -87,6 +233,148 @@ class ExperimentGenerator:
                 reasoning=reasoning,
                 ctp_cluster=ctp_cluster,
                 ctp_capacity_range=ctp_capacity_range,
+            )
+            experiments.append(exp)
+        return experiments
+
+    # ------------------------------------------------------------------
+    # Isolated: one experiment per (app × capacity × latency × cc)
+    # ------------------------------------------------------------------
+
+    def _generate_isolated(
+        self,
+        parsed_intent: dict,
+        *,
+        applications: list,
+        application_configs: list,
+        capacities: list,
+        latencies: list,
+        cc_algorithms: list,
+        aqm_policy: str,
+        duration: int,
+        num_trials: int,
+        reasoning: str,
+        ctp_cluster,
+        ctp_capacity_range,
+        buffer_packets,
+        qdisc_params,
+        used: set,
+        id_taken,
+    ) -> List[GeneratedExperiment]:
+        experiments: List[GeneratedExperiment] = []
+        configs_by_app = {
+            str(config.get("instance_id") or config["application"]): config
+            for config in application_configs
+            if config.get("application")
+        }
+        for app in applications:
+            app_slug = _slugify_app(app)
+            app_type = _classify_app(app)
+            app_config = configs_by_app.get(app)
+            app_latencies = (
+                [float(app_config["latency_ms"])] if app_config else latencies
+            )
+            for cap, lat, cc in product(capacities, app_latencies, cc_algorithms):
+                download = _fmt_num(cap)
+                upload = _fmt_num(parsed_intent.get("upload_mbps") or cap)
+                base_lat = _fmt_num(lat)
+                prefix = f"{app_slug}_{download}_{upload}_{base_lat}_{aqm_policy}_{cc}"
+                exp_id = self._mint_unique_id(prefix, used, id_taken)
+                used.add(exp_id)
+
+                exp = GeneratedExperiment(
+                    experiment_id=exp_id,
+                    application_type=app_type,
+                    capacity_mbps=float(cap),
+                    latency_ms=float(lat),
+                    application_configs=[app_config] if app_config else [],
+                    cc_algorithm=cc,
+                    aqm_policy=aqm_policy,
+                    buffer_packets=(
+                        int(buffer_packets) if buffer_packets is not None else None
+                    ),
+                    qdisc_params=qdisc_params if qdisc_params else None,
+                    duration_seconds=int(duration),
+                    num_trials=int(num_trials),
+                    reasoning=reasoning,
+                    ctp_cluster=ctp_cluster,
+                    ctp_capacity_range=ctp_capacity_range,
+                    applications=[app],
+                    application_types=[app_type],
+                    execution_mode="isolated",
+                )
+                experiments.append(exp)
+        return experiments
+
+    # ------------------------------------------------------------------
+    # Concurrent: one experiment per (capacity × latency × cc) with
+    # all applications bundled for simultaneous execution.
+    # ------------------------------------------------------------------
+
+    def _generate_concurrent(
+        self,
+        parsed_intent: dict,
+        *,
+        applications: list,
+        application_type: str,
+        application_configs: list,
+        capacities: list,
+        latencies: list,
+        cc_algorithms: list,
+        aqm_policy: str,
+        duration: int,
+        num_trials: int,
+        reasoning: str,
+        ctp_cluster,
+        ctp_capacity_range,
+        buffer_packets,
+        qdisc_params,
+        used: set,
+        id_taken,
+    ) -> List[GeneratedExperiment]:
+        composite_slug = "+".join(_slugify_app(a) for a in applications)
+        app_types = [_classify_app(a) for a in applications]
+        unique_types = set(app_types)
+        if len(unique_types) == 1:
+            resolved_type = unique_types.pop()
+        else:
+            resolved_type = "mixed"
+
+        experiments: List[GeneratedExperiment] = []
+        # Per-app delays replace the flat global netem delay. Keep latency_ms at
+        # zero so /shape installs only the shared bottleneck before
+        # /shape/per_app_marks creates the individual delay lanes.
+        effective_latencies = [0] if application_configs else latencies
+        for cap, lat, cc in product(capacities, effective_latencies, cc_algorithms):
+            download = _fmt_num(cap)
+            upload = _fmt_num(parsed_intent.get("upload_mbps") or cap)
+            base_lat = _fmt_num(lat)
+            prefix = (
+                f"{composite_slug}_{download}_{upload}_{base_lat}_{aqm_policy}_{cc}"
+            )
+            exp_id = self._mint_unique_id(prefix, used, id_taken)
+            used.add(exp_id)
+
+            exp = GeneratedExperiment(
+                experiment_id=exp_id,
+                application_type=resolved_type,
+                capacity_mbps=float(cap),
+                latency_ms=float(lat),
+                application_configs=application_configs,
+                cc_algorithm=cc,
+                aqm_policy=aqm_policy,
+                buffer_packets=(
+                    int(buffer_packets) if buffer_packets is not None else None
+                ),
+                qdisc_params=qdisc_params if qdisc_params else None,
+                duration_seconds=int(duration),
+                num_trials=int(num_trials),
+                reasoning=reasoning,
+                ctp_cluster=ctp_cluster,
+                ctp_capacity_range=ctp_capacity_range,
+                applications=list(applications),
+                application_types=app_types,
+                execution_mode="concurrent",
             )
             experiments.append(exp)
         return experiments
@@ -106,8 +394,6 @@ class ExperimentGenerator:
                     if id_taken(candidate):
                         continue
                 except Exception:
-                    # Telemetry unreachable: trust the random suffix.
                     return candidate
             return candidate
-        # Extremely unlikely — fall back to a longer suffix.
         return f"{prefix}_{uuid.uuid4().hex}"
