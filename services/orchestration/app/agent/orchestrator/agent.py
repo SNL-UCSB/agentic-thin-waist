@@ -96,6 +96,12 @@ def parse_intent(state: OrchestratorState) -> dict[str, Any]:
     structured_model = with_structured_output(model, ParsedIntent)
     parsed: ParsedIntent = structured_model.invoke(prompt_value.messages)
     parsed_dict = parsed.model_dump()
+    # Preserve repeated application flows positionally for workflow generation.
+    # Unique instance IDs are used later for shaping and result keys.
+    if parsed.application_configs:
+        parsed_dict["applications"] = [
+            config.application for config in parsed.application_configs
+        ]
     log_claude_step(
         "parse_intent",
         orchestration_id=orchestration_id,

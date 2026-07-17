@@ -41,9 +41,14 @@ def _slugify_app(name: str) -> str:
     return s or "app"
 
 
+def _base_app_name(name: str) -> str:
+    """Strip a generated numeric instance suffix for runtime classification."""
+    return re.sub(r"[-_ ]\d+$", "", (name or "").lower())
+
+
 def _classify_app(name: str) -> str:
     """Return 'shell' or 'browser' for a given application name."""
-    slug = _slugify_app(name)
+    slug = _slugify_app(_base_app_name(name))
     if slug in _BROWSER_APPS:
         return "browser"
     return "shell"
@@ -84,11 +89,15 @@ class ExperimentGenerator:
         qdisc_params = parsed_intent.get("qdisc_params")
 
         application_configs = parsed_intent.get("application_configs") or []
-        applications = parsed_intent.get("applications") or [
-            config["application"]
-            for config in application_configs
-            if config.get("application")
-        ]
+        applications = (
+            [
+                str(config.get("instance_id") or config["application"])
+                for config in application_configs
+                if config.get("application")
+            ]
+            if application_configs
+            else (parsed_intent.get("applications") or [])
+        )
         design_types = parsed_intent.get("design_type") or []
 
         # Single-app or no apps: preserve original behavior exactly.
@@ -254,7 +263,7 @@ class ExperimentGenerator:
     ) -> List[GeneratedExperiment]:
         experiments: List[GeneratedExperiment] = []
         configs_by_app = {
-            str(config["application"]): config
+            str(config.get("instance_id") or config["application"]): config
             for config in application_configs
             if config.get("application")
         }

@@ -635,7 +635,9 @@ def _run_experiment_on_worker(
 
         # per_app_latency: {app_name: latency_ms} — opt-in per-experiment.
         per_app_latency: dict[str, float] = spec.get("per_app_latency") or {
-            str(config["application"]): float(config["latency_ms"])
+            str(config.get("instance_id") or config["application"]): float(
+                config["latency_ms"]
+            )
             for config in application_configs
             if config.get("application") and config.get("latency_ms") is not None
         }

@@ -49,7 +49,8 @@ that the user has not implied. Prefer asking for clarification when needed.
 
 Return ONLY a JSON object containing:
 - applications
-- application_configs (list of objects with application and latency_ms; use this
+- application_configs (list of objects with application, optional instance_id,
+  and latency_ms; use this
   when a concurrent intent assigns a different latency to each application,
   e.g. [{"application": "youtube", "latency_ms": 50},
   {"application": "twitch", "latency_ms": 100}]. Otherwise return [].)
@@ -76,6 +77,11 @@ Return ONLY a JSON object containing:
 When application_configs is non-empty, do not copy its per-application latency
 values into latencies as a sweep. The latencies field is only for latency values
 that apply globally to an entire experiment or for an explicit global sweep.
+
+When the same application is requested multiple times, emit one applications
+entry and one application_configs entry per flow. Keep application as the base
+type (e.g. "youtube") and assign every flow a unique instance_id such as
+"youtube-1", "youtube-2", and "youtube-3".
 
 If the user does not mention cross-traffic / CTP, set both
 ctp_cluster = null AND ctp_capacity_range = null. Do NOT invent a default

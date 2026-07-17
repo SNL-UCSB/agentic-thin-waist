@@ -9,6 +9,13 @@ class ApplicationConfig(BaseModel):
     """Application-specific network settings for a concurrent experiment."""
 
     application: str = Field(..., description="Application name, e.g. youtube")
+    instance_id: Optional[str] = Field(
+        None,
+        description=(
+            "Unique flow identity, required when the same application appears "
+            "more than once (e.g. youtube-1, youtube-2)."
+        ),
+    )
     latency_ms: float = Field(
         ...,
         ge=0,

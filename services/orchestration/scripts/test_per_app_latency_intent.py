@@ -31,12 +31,12 @@ TIMEOUT_SECONDS = float(os.getenv("TIMEOUT_SECONDS", "1200"))
 TERMINAL_STATUSES = {"complete", "failed", "partial", "canceled", "cancelled"}
 
 INTENT = (
-    "Run YouTube at https://www.youtube.com/watch?v=dQw4w9WgXcQ, Twitch, and "
-    "Tubi concurrently on a shared 6 Mbps bottleneck "
-    "with YouTube at 50 ms latency, Twitch at 100 ms latency, and Tubi at 0 ms "
-    "latency for 60 seconds using CUBIC congestion control and a pfifo queue."
+    "Run three concurrent YouTube flows playing "
+    "https://www.youtube.com/watch?v=dQw4w9WgXcQ on a shared 6 Mbps bottleneck. "
+    "Use 50 ms latency for youtube-1, 100 ms for youtube-2, and 0 ms for youtube-3 "
+    "for 60 seconds using CUBIC congestion control and a pfifo queue."
 )
-EXPECTED_LATENCIES = {"youtube": 50.0, "twitch": 100.0, "tubi": 0.0}
+EXPECTED_LATENCIES = {"youtube-1": 50.0, "youtube-2": 100.0, "youtube-3": 0.0}
 
 
 def request(method: str, path: str, payload: dict | None = None) -> dict[str, Any]:
@@ -80,13 +80,15 @@ def validate_spec(spec: dict[str, Any]) -> None:
         fail("duration is not 60 seconds", spec)
 
     apps = [str(app).lower() for app in spec.get("applications") or []]
-    if apps != ["youtube", "twitch", "tubi"]:
+    if apps != ["youtube-1", "youtube-2", "youtube-3"]:
         fail("applications are missing or out of alignment", spec)
     if spec.get("application_types") != ["browser", "browser", "browser"]:
         fail("not every application was classified as browser", spec)
 
     actual = {
-        str(config.get("application", "")).lower(): float(config["latency_ms"])
+        str(config.get("instance_id") or config.get("application", "")).lower(): float(
+            config["latency_ms"]
+        )
         for config in spec.get("application_configs") or []
     }
     if actual != EXPECTED_LATENCIES:

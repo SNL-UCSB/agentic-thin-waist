@@ -41,6 +41,7 @@ class ApplicationConfig(BaseModel):
     """Application-specific network settings retained in an experiment spec."""
 
     application: str
+    instance_id: Optional[str] = None
     latency_ms: float = Field(..., ge=0)
 
 
