@@ -31,7 +31,8 @@ TIMEOUT_SECONDS = float(os.getenv("TIMEOUT_SECONDS", "1200"))
 TERMINAL_STATUSES = {"complete", "failed", "partial", "canceled", "cancelled"}
 
 INTENT = (
-    "Run YouTube, Twitch, and Tubi concurrently on a shared 6 Mbps bottleneck "
+    "Run YouTube at https://www.youtube.com/watch?v=dQw4w9WgXcQ, Twitch, and "
+    "Tubi concurrently on a shared 6 Mbps bottleneck "
     "with YouTube at 50 ms latency, Twitch at 100 ms latency, and Tubi at 0 ms "
     "latency for 60 seconds using CUBIC congestion control and a pfifo queue."
 )
