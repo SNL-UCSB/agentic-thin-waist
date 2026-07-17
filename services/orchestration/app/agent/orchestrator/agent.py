@@ -290,6 +290,7 @@ def mixed_workflow(state: OrchestratorState) -> dict[str, Any]:
     parsed = state.get("parsed_intent") or {}
     applications = parsed.get("applications") or []
     intent = state["intent"]
+    workflow_parameters = parsed.get("workflow_parameters") or {}
 
     print(f"[AGENT {orchestration_id}] Routing → mixed workflow for {applications}")
 
@@ -304,7 +305,19 @@ def mixed_workflow(state: OrchestratorState) -> dict[str, Any]:
         app_type = _classify_app(app)
         # Preserve app-specific targets such as a YouTube video URL while still
         # telling the workflow picker which application this workflow belongs to.
-        app_intent = f"Run {app} for this experiment: {intent}"
+        if app.lower() == "youtube" and workflow_parameters.get("url"):
+            watch_seconds = (
+                workflow_parameters.get("watch_seconds")
+                or workflow_parameters.get("duration")
+                or parsed.get("duration_seconds")
+                or 60
+            )
+            app_intent = (
+                f"Play the YouTube video at {workflow_parameters['url']} "
+                f"for {watch_seconds} seconds."
+            )
+        else:
+            app_intent = f"Run {app} for this experiment: {intent}"
 
         if app_type == "shell":
             agent = create_shell_agent()
