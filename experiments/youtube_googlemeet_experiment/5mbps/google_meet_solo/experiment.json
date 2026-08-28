@@ -1,0 +1,15 @@
+{
+  "experiment_id": "google_meet-5mbps-100ms-pfifo",
+  "applications": [
+    "google_meet"
+  ],
+  "execution_mode": "single",
+  "capacity_mbps": 5,
+  "upload_mbps": 5,
+  "latency_ms": 100,
+  "latency_location": "upstream",
+  "aqm_policy": "pfifo",
+  "buffer_packets": 50,
+  "cc_algorithm": "cubic",
+  "duration_seconds": 30
+}
