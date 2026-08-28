@@ -36,7 +36,12 @@ EXPERIMENT_DURATION_SECONDS = 30
 YOUTUBE_URL = "https://www.youtube.com/watch?v=eOrNdBpGMv8&autoplay=1&mute=1"
 # Replace this when the test meeting changes. It must be accessible to the
 # collector without manual host admission for an unattended run.
-GOOGLE_MEET_URL = "https://meet.google.com/duz-aezo-ztr"
+GOOGLE_MEET_URL = os.environ.get(
+    "GOOGLE_MEET_URL", "https://meet.google.com/duz-aezo-ztr"
+)
+GOOGLE_MEET_GUEST_NAME = os.environ.get(
+    "GOOGLE_MEET_GUEST_NAME", "NetGent QoE Collector"
+)
 # Path to a persistent Linux Chrome user-data directory that has already been
 # logged into the receiver account. Keep it outside this repository.
 GOOGLE_MEET_PROFILE_DIR = os.environ.get("GOOGLE_MEET_PROFILE_DIR", "")
@@ -85,12 +90,9 @@ def result_dir_for(capacity_mbps: int, latency_ms: int, qdisc: str) -> Path:
     )
 
 
-def resolve_google_meet_profile(profile_dir: str) -> Path:
+def resolve_google_meet_profile(profile_dir: str) -> Path | None:
     if not profile_dir.strip():
-        raise RuntimeError(
-            "Set GOOGLE_MEET_PROFILE_DIR to a persistent Linux Chrome profile "
-            "that is already logged into the Google Meet receiver account."
-        )
+        return None
     resolved = Path(profile_dir).expanduser().resolve()
     if not resolved.is_dir():
         raise RuntimeError(f"Google Meet Chrome profile does not exist: {resolved}")
@@ -226,19 +228,22 @@ def main(
             "4/5 playing YouTube and Google Meet concurrently "
             "(SeleniumBase + undetected-chromedriver)"
         )
+        meet_job_options: dict[str, Any] = {
+            "guest_name": GOOGLE_MEET_GUEST_NAME,
+            "join_timeout_seconds": GOOGLE_MEET_JOIN_TIMEOUT_SECONDS,
+        }
+        profile_mounts: list[str] = []
+        if meet_profile is not None:
+            meet_job_options["user_data_dir"] = "/profiles/google-meet"
+            profile_mounts.append(f"{meet_profile}:/profiles/google-meet")
         run_video_collectors_concurrently(
             container,
             result_dir,
             duration_seconds,
             video_urls=VIDEO_URLS,
             display_nums=DISPLAY_NUMS,
-            job_options={
-                "google_meet": {
-                    "user_data_dir": "/profiles/google-meet",
-                    "join_timeout_seconds": GOOGLE_MEET_JOIN_TIMEOUT_SECONDS,
-                }
-            },
-            volume_mounts=[f"{meet_profile}:/profiles/google-meet"],
+            job_options={"google_meet": meet_job_options},
+            volume_mounts=profile_mounts,
         )
 
         summaries: dict[str, Any] = {}
