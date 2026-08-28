@@ -110,6 +110,157 @@ addVideoElementStats(out, video);
 return out;
 """
 
+# Installed before any Google Meet page JavaScript runs. Keeping references to
+# the real RTCPeerConnection objects lets the collector query receiver-side
+# inbound RTP statistics instead of mistaking Meet's local preview <video> for
+# remote-call QoE.
+WEBRTC_HOOK_JS = r"""
+(() => {
+    const key = '__netgentPeerConnections';
+    if (!Array.isArray(window[key])) {
+        Object.defineProperty(window, key, {
+            value: [], configurable: false, enumerable: false, writable: false
+        });
+    }
+
+    function wrap(name) {
+        const Native = window[name];
+        if (!Native || Native.__netgentWrapped) return;
+        const Wrapped = new Proxy(Native, {
+            construct(target, args, newTarget) {
+                const pc = Reflect.construct(target, args, newTarget);
+                window[key].push(pc);
+                return pc;
+            }
+        });
+        Object.defineProperty(Wrapped, '__netgentWrapped', {value: true});
+        window[name] = Wrapped;
+    }
+
+    wrap('RTCPeerConnection');
+    wrap('webkitRTCPeerConnection');
+})();
+"""
+
+# Selenium's execute_async_script supplies the final argument as a completion
+# callback. Aggregate every active inbound video RTP stream: a Meet call may
+# change SSRCs or receive more than one remote tile during a run.
+GOOGLE_MEET_STATS_JS = r"""
+const done = arguments[arguments.length - 1];
+(async () => {
+    const pcs = Array.from(new Set(window.__netgentPeerConnections || []));
+    const inbound = [];
+
+    for (let pcIndex = 0; pcIndex < pcs.length; pcIndex += 1) {
+        const pc = pcs[pcIndex];
+        const report = await pc.getStats();
+        const codecs = {};
+        report.forEach(stat => {
+            if (stat.type === 'codec') codecs[stat.id] = stat.mimeType || null;
+        });
+        report.forEach(stat => {
+            const mediaKind = stat.kind || stat.mediaType;
+            if (stat.type !== 'inbound-rtp' || mediaKind !== 'video' || stat.isRemote) {
+                return;
+            }
+            inbound.push({
+                peer_connection_index: pcIndex,
+                id: stat.id,
+                ssrc: stat.ssrc ?? null,
+                codec: codecs[stat.codecId] || null,
+                bytes_received: stat.bytesReceived || 0,
+                header_bytes_received: stat.headerBytesReceived || 0,
+                packets_received: stat.packetsReceived || 0,
+                packets_lost: stat.packetsLost || 0,
+                packets_discarded: stat.packetsDiscarded || 0,
+                jitter_seconds: stat.jitter || 0,
+                frames_received: stat.framesReceived || 0,
+                frames_decoded: stat.framesDecoded || 0,
+                frames_rendered: stat.framesRendered || 0,
+                frames_dropped: stat.framesDropped || 0,
+                key_frames_decoded: stat.keyFramesDecoded || 0,
+                frames_per_second: stat.framesPerSecond || 0,
+                frame_width: stat.frameWidth || 0,
+                frame_height: stat.frameHeight || 0,
+                total_decode_time_seconds: stat.totalDecodeTime || 0,
+                jitter_buffer_delay_seconds: stat.jitterBufferDelay || 0,
+                jitter_buffer_emitted_count: stat.jitterBufferEmittedCount || 0,
+                freeze_count: stat.freezeCount || 0,
+                total_freezes_duration_seconds: stat.totalFreezesDuration || 0,
+                pause_count: stat.pauseCount || 0,
+                total_pauses_duration_seconds: stat.totalPausesDuration || 0,
+                nack_count: stat.nackCount || 0,
+                pli_count: stat.pliCount || 0,
+                fir_count: stat.firCount || 0,
+            });
+        });
+    }
+
+    const active = inbound.filter(
+        stream => stream.bytes_received > 0 || stream.frames_decoded > 0
+    );
+    const primary = active.reduce(
+        (best, stream) => !best || stream.bytes_received > best.bytes_received
+            ? stream : best,
+        null,
+    );
+    const sum = field => active.reduce((total, stream) => total + (stream[field] || 0), 0);
+
+    done({
+        platform: 'google_meet',
+        source: 'webrtc_inbound_rtp',
+        peer_connection_count: pcs.length,
+        inbound_video_stream_count: active.length,
+        bytes_received: sum('bytes_received'),
+        header_bytes_received: sum('header_bytes_received'),
+        packets_received: sum('packets_received'),
+        packets_lost: sum('packets_lost'),
+        packets_discarded: sum('packets_discarded'),
+        frames_received: sum('frames_received'),
+        frames_decoded: sum('frames_decoded'),
+        frames_rendered: sum('frames_rendered'),
+        frames_dropped: sum('frames_dropped'),
+        key_frames_decoded: sum('key_frames_decoded'),
+        frames_per_second: sum('frames_per_second'),
+        total_decode_time_seconds: sum('total_decode_time_seconds'),
+        jitter_buffer_delay_seconds: sum('jitter_buffer_delay_seconds'),
+        jitter_buffer_emitted_count: sum('jitter_buffer_emitted_count'),
+        freeze_count: sum('freeze_count'),
+        total_freezes_duration_seconds: sum('total_freezes_duration_seconds'),
+        pause_count: sum('pause_count'),
+        total_pauses_duration_seconds: sum('total_pauses_duration_seconds'),
+        nack_count: sum('nack_count'),
+        pli_count: sum('pli_count'),
+        fir_count: sum('fir_count'),
+        jitter_seconds: active.reduce(
+            (maximum, stream) => Math.max(maximum, stream.jitter_seconds || 0), 0
+        ),
+        frame_width: primary ? primary.frame_width : 0,
+        frame_height: primary ? primary.frame_height : 0,
+        resolution: primary ? `${primary.frame_width}x${primary.frame_height}` : '0x0',
+        codecs: Array.from(new Set(active.map(stream => stream.codec).filter(Boolean))),
+        inbound_streams: active,
+    });
+})().catch(error => done({
+    platform: 'google_meet',
+    source: 'webrtc_inbound_rtp',
+    error: String(error),
+}));
+"""
+
+GOOGLE_MEET_JOIN_JS = r"""
+const buttons = Array.from(document.querySelectorAll('button'));
+for (const button of buttons) {
+    const label = `${button.innerText || ''} ${button.getAttribute('aria-label') || ''}`
+        .trim().toLowerCase();
+    if (label.includes('join now') || label.includes('ask to join')) {
+        button.click();
+        return {clicked: true, label};
+    }
+}
+return {clicked: false};
+"""
+
 
 def start_display(dnum: str) -> None:
     """Start Xvfb + fluxbox on display :dnum, matching netgent-dev's start.sh."""
@@ -125,7 +276,7 @@ def start_display(dnum: str) -> None:
     time.sleep(1)
 
 
-def build_driver():
+def build_driver(user_data_dir: str | None = None):
     from seleniumbase import Driver
 
     args = [
@@ -155,7 +306,114 @@ def build_driver():
     binary_location = os.environ.get("CHROME_BINARY")
     if binary_location:
         kwargs["binary_location"] = binary_location
+    if user_data_dir:
+        kwargs["user_data_dir"] = user_data_dir
     return Driver(**kwargs)
+
+
+def install_webrtc_hook(driver: Any) -> None:
+    """Install the peer-connection hook before Meet loads any page scripts."""
+    driver.execute_cdp_cmd(
+        "Page.addScriptToEvaluateOnNewDocument",
+        {"source": WEBRTC_HOOK_JS},
+    )
+
+
+def get_google_meet_stats(driver: Any) -> dict[str, Any]:
+    stats = driver.execute_async_script(GOOGLE_MEET_STATS_JS)
+    if not isinstance(stats, dict):
+        raise RuntimeError(f"Google Meet returned invalid WebRTC stats: {stats!r}")
+    if stats.get("error"):
+        raise RuntimeError(f"Google Meet WebRTC stats failed: {stats['error']}")
+    return stats
+
+
+def wait_for_google_meet_inbound(
+    driver: Any,
+    timeout_seconds: float,
+) -> dict[str, Any]:
+    """Join Meet and require a genuinely advancing remote inbound video RTP stream."""
+    deadline = time.monotonic() + timeout_seconds
+    previous: dict[str, Any] | None = None
+    join_clicked = False
+    latest: dict[str, Any] = {}
+
+    while time.monotonic() < deadline:
+        if not join_clicked:
+            try:
+                join_result = driver.execute_script(GOOGLE_MEET_JOIN_JS)
+                join_clicked = bool(join_result and join_result.get("clicked"))
+                if join_clicked:
+                    print(f"[google_meet] clicked Meet join control: {join_result}")
+            except Exception as exc:  # noqa: BLE001 - retry while UI settles
+                print(f"[google_meet] join control not ready: {exc}")
+
+        try:
+            latest = get_google_meet_stats(driver)
+        except Exception as exc:  # noqa: BLE001 - retry while Meet initializes
+            print(f"[google_meet] waiting for WebRTC stats: {exc}")
+            time.sleep(1)
+            continue
+
+        if previous is not None and latest.get("inbound_video_stream_count", 0) > 0:
+            bytes_advanced = latest.get("bytes_received", 0) > previous.get(
+                "bytes_received", 0
+            )
+            frames_advanced = latest.get("frames_decoded", 0) > previous.get(
+                "frames_decoded", 0
+            )
+            if bytes_advanced and frames_advanced:
+                print(
+                    "[google_meet] confirmed advancing remote inbound video: "
+                    f"bytes={latest['bytes_received']} "
+                    f"frames={latest['frames_decoded']}"
+                )
+                return latest
+        previous = latest
+        time.sleep(1)
+
+    raise RuntimeError(
+        "Google Meet never produced an advancing inbound video RTP stream. "
+        "Confirm the profile is logged in, the browser joined the room, and "
+        "another participant is publishing video. Local preview video is not accepted. "
+        f"Last WebRTC stats: {latest}"
+    )
+
+
+def add_google_meet_interval_metrics(
+    current: dict[str, Any],
+    previous: dict[str, Any] | None,
+    elapsed_seconds: float | None,
+) -> None:
+    """Add rates/deltas derived from cumulative WebRTC counters."""
+    if previous is None or elapsed_seconds is None or elapsed_seconds <= 0:
+        return
+
+    def delta(field: str) -> float:
+        return max(0.0, float(current.get(field, 0)) - float(previous.get(field, 0)))
+
+    byte_delta = delta("bytes_received")
+    received_delta = delta("packets_received")
+    lost_delta = delta("packets_lost")
+    decoded_delta = delta("frames_decoded")
+    dropped_delta = delta("frames_dropped")
+    current["inbound_bitrate_mbps"] = byte_delta * 8 / elapsed_seconds / 1_000_000
+    current["packets_received_delta"] = int(received_delta)
+    current["packets_lost_delta"] = int(lost_delta)
+    packet_total = received_delta + lost_delta
+    current["packet_loss_percent"] = (
+        100 * lost_delta / packet_total if packet_total else 0.0
+    )
+    current["frames_decoded_delta"] = int(decoded_delta)
+    current["frames_dropped_delta"] = int(dropped_delta)
+    frame_total = decoded_delta + dropped_delta
+    current["frame_drop_percent"] = (
+        100 * dropped_delta / frame_total if frame_total else 0.0
+    )
+    current["freeze_count_delta"] = int(delta("freeze_count"))
+    current["freeze_duration_delta_seconds"] = delta(
+        "total_freezes_duration_seconds"
+    )
 
 
 def run_job(
@@ -169,6 +427,9 @@ def run_job(
     out_path = Path(job["out_path"])
     duration_seconds = float(job["duration_seconds"])
     sample_interval_seconds = float(job.get("sample_interval_seconds", 1.0))
+    user_data_dir = job.get("user_data_dir")
+    meet_join_timeout_seconds = float(job.get("join_timeout_seconds", 180))
+    barrier_timeout_seconds = float(job.get("barrier_timeout_seconds", 360))
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     print(f"[{app}] starting Xvfb+fluxbox on :{display_num}")
@@ -192,10 +453,15 @@ def run_job(
             print(f"[{app}] warning: could not wire Xlib display for pyautogui: {exc}")
 
         print(f"[{app}] launching undetected-chromedriver Chrome (headed, DISPLAY=:{display_num})")
-        driver = build_driver()
+        driver = build_driver(user_data_dir=user_data_dir)
 
     samples: list[dict] = []
+    meet_ready_stats: dict[str, Any] | None = None
+    meet_ready_timestamp: float | None = None
     try:
+        if app == "google_meet":
+            install_webrtc_hook(driver)
+            driver.set_script_timeout(15)
         print(f"[{app}] navigating to {video_url}")
         driver.set_page_load_timeout(45)
         try:
@@ -206,28 +472,44 @@ def run_job(
                 f"sampling the loaded page anyway: {type(exc).__name__}: {exc}"
             )
 
-        print(f"[{app}] ready; waiting for all applications before sampling")
-        sampling_barrier.wait(timeout=180)
-        print(f"[{app}] all applications ready; starting synchronized sampling")
-        try:
-            play_result = driver.execute_script(
-                """
-                const video = document.querySelector('video');
-                if (!video) return {started: false, reason: 'no_video'};
-                video.muted = true;
-                video.play().catch(() => {});
-                return {
-                    started: true,
-                    paused: video.paused,
-                    ready_state: video.readyState,
-                    current_time: video.currentTime,
-                };
-                """
+        if app == "google_meet":
+            print(
+                "[google_meet] joining room and waiting for remote inbound WebRTC video"
             )
-            print(f"[{app}] synchronized play result: {play_result}")
-        except Exception as exc:  # sampling below records whether playback recovers
-            print(f"[{app}] synchronized play nudge failed: {type(exc).__name__}: {exc}")
+            meet_ready_stats = wait_for_google_meet_inbound(
+                driver,
+                meet_join_timeout_seconds,
+            )
+            meet_ready_timestamp = time.time()
+
+        print(f"[{app}] ready; waiting for all applications before sampling")
+        sampling_barrier.wait(timeout=barrier_timeout_seconds)
+        print(f"[{app}] all applications ready; starting synchronized sampling")
+        if app != "google_meet":
+            try:
+                play_result = driver.execute_script(
+                    """
+                    const video = document.querySelector('video');
+                    if (!video) return {started: false, reason: 'no_video'};
+                    video.muted = true;
+                    video.play().catch(() => {});
+                    return {
+                        started: true,
+                        paused: video.paused,
+                        ready_state: video.readyState,
+                        current_time: video.currentTime,
+                    };
+                    """
+                )
+                print(f"[{app}] synchronized play result: {play_result}")
+            except Exception as exc:  # sampling records whether playback recovers
+                print(
+                    f"[{app}] synchronized play nudge failed: "
+                    f"{type(exc).__name__}: {exc}"
+                )
         deadline = time.monotonic() + duration_seconds
+        previous_meet_stats = meet_ready_stats
+        previous_meet_timestamp = meet_ready_timestamp
         with open(out_path, "a", buffering=1) as f:
             while time.monotonic() < deadline:
                 sample = {"timestamp": time.time()}
@@ -237,7 +519,23 @@ def run_job(
                     sample["url"] = None
                     sample["url_error"] = str(exc)
                 try:
-                    sample["stats"] = driver.execute_script(STATS_JS)
+                    if app == "google_meet":
+                        stats = get_google_meet_stats(driver)
+                        elapsed = (
+                            sample["timestamp"] - previous_meet_timestamp
+                            if previous_meet_timestamp is not None
+                            else None
+                        )
+                        add_google_meet_interval_metrics(
+                            stats,
+                            previous_meet_stats,
+                            elapsed,
+                        )
+                        sample["stats"] = stats
+                        previous_meet_stats = stats
+                        previous_meet_timestamp = sample["timestamp"]
+                    else:
+                        sample["stats"] = driver.execute_script(STATS_JS)
                 except Exception as exc:  # noqa: BLE001
                     sample["stats"] = None
                     sample["sample_error"] = str(exc)
@@ -251,21 +549,30 @@ def run_job(
         except Exception as exc:  # noqa: BLE001
             print(f"[{app}] warning: driver.quit() raised: {exc}")
 
-    times = [
-        s["stats"]["current_time_secs"]
-        for s in samples
-        if s.get("stats") and s["stats"].get("current_time_secs") is not None
-    ]
+    stats_samples = [s["stats"] for s in samples if s.get("stats")]
+    if app == "google_meet":
+        times = [
+            stats["frames_decoded"]
+            for stats in stats_samples
+            if stats.get("frames_decoded") is not None
+        ]
+    else:
+        times = [
+            stats["current_time_secs"]
+            for stats in stats_samples
+            if stats.get("current_time_secs") is not None
+        ]
     resolutions = [
-        s["stats"]["resolution"]
-        for s in samples
-        if s.get("stats") and s["stats"].get("resolution")
+        stats["resolution"]
+        for stats in stats_samples
+        if stats.get("resolution") and stats["resolution"] != "0x0"
     ]
-    advanced = bool(times) and max(times) > (times[0] if times else 0)
+    advanced = bool(times) and max(times) > times[0]
     final_resolution = resolutions[-1] if resolutions else None
+    progress_label = "frames_decoded" if app == "google_meet" else "current_time_secs"
     print(
         f"[{app}] summary: {len(samples)} samples written to {out_path} | "
-        f"current_time_secs range=[{min(times) if times else None}, "
+        f"{progress_label} range=[{min(times) if times else None}, "
         f"{max(times) if times else None}] | advanced={advanced} | "
         f"final_resolution={final_resolution}"
     )

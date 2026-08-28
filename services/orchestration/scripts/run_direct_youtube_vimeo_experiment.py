@@ -126,6 +126,8 @@ def run_video_collectors_concurrently(
     duration_seconds: int,
     video_urls: dict[str, str] | None = None,
     display_nums: dict[str, int] | None = None,
+    job_options: dict[str, dict[str, Any]] | None = None,
+    volume_mounts: list[str] | None = None,
 ) -> None:
     """Play multiple video applications as sibling threads inside one
     video-qoe-collector container, network-namespace-joined onto ns1 (the
@@ -146,6 +148,8 @@ def run_video_collectors_concurrently(
     """
     video_urls = video_urls or VIDEO_URLS
     display_nums = display_nums or DISPLAY_NUMS
+    job_options = job_options or {}
+    volume_mounts = volume_mounts or []
 
     ns1_pid = docker(
         "exec", network_container, "cat", "/var/run/substrate/ns1.pid"
@@ -153,8 +157,9 @@ def run_video_collectors_concurrently(
     if not ns1_pid.isdigit():
         raise RuntimeError(f"could not resolve ns1 anchor PID: {ns1_pid!r}")
 
-    jobs = [
-        {
+    jobs = []
+    for app, url in video_urls.items():
+        job = {
             "app": app,
             "url": url,
             "display_num": display_nums[app],
@@ -162,9 +167,10 @@ def run_video_collectors_concurrently(
             "duration_seconds": duration_seconds,
             "sample_interval_seconds": 1.0,
         }
-        for app, url in video_urls.items()
-    ]
-    collector_output = docker(
+        job.update(job_options.get(app, {}))
+        jobs.append(job)
+
+    docker_args = [
         "run",
         "--rm",
         "--platform",
@@ -182,14 +188,21 @@ def run_video_collectors_concurrently(
         f"JOBS={json.dumps(jobs)}",
         "--volume",
         f"{result_dir}:/out",
-        "--entrypoint",
-        "nsenter",
-        VIDEO_QOE_IMAGE,
-        f"--net=/proc/{ns1_pid}/ns/net",
-        "--",
-        "python3",
-        "collect.py",
+    ]
+    for volume_mount in volume_mounts:
+        docker_args.extend(["--volume", volume_mount])
+    docker_args.extend(
+        [
+            "--entrypoint",
+            "nsenter",
+            VIDEO_QOE_IMAGE,
+            f"--net=/proc/{ns1_pid}/ns/net",
+            "--",
+            "python3",
+            "collect.py",
+        ]
     )
+    collector_output = docker(*docker_args)
     if collector_output:
         print(collector_output)
 
@@ -208,19 +221,44 @@ def summarize_stats_jsonl(path: Any) -> dict[str, Any]:
                 continue
 
     stats = [s.get("stats") or {} for s in samples]
-    times = [
-        s["current_time_secs"] for s in stats if s.get("current_time_secs") is not None
-    ]
+    is_google_meet = any(s.get("platform") == "google_meet" for s in stats)
+    progress_field = "frames_decoded" if is_google_meet else "current_time_secs"
+    times = [s[progress_field] for s in stats if s.get(progress_field) is not None]
     resolutions = sorted(
         {s["resolution"] for s in stats if s.get("resolution") and s["resolution"] != "0x0"}
     )
-    return {
+    summary = {
         "sample_count": len(samples),
         "advanced": bool(times) and max(times) > (times[0] if times else 0),
-        "current_time_range": [min(times), max(times)] if times else None,
+        "progress_field": progress_field,
+        "progress_range": [min(times), max(times)] if times else None,
         "resolutions_observed": resolutions,
         "final_resolution": stats[-1].get("resolution") if stats else None,
     }
+    # Preserve the original field for existing YouTube/Vimeo consumers.
+    if not is_google_meet:
+        summary["current_time_range"] = summary["progress_range"]
+    else:
+        summary.update(
+            {
+                "measurement_source": "webrtc_inbound_rtp",
+                "final_inbound_bitrate_mbps": stats[-1].get(
+                    "inbound_bitrate_mbps"
+                )
+                if stats
+                else None,
+                "final_packets_lost": stats[-1].get("packets_lost")
+                if stats
+                else None,
+                "final_frames_dropped": stats[-1].get("frames_dropped")
+                if stats
+                else None,
+                "final_freeze_count": stats[-1].get("freeze_count")
+                if stats
+                else None,
+            }
+        )
+    return summary
 
 
 def main(capacity_mbps: int = 3, duration_seconds: int = 15) -> int:

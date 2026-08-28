@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import tempfile
 import time
 import uuid
@@ -36,6 +37,10 @@ YOUTUBE_URL = "https://www.youtube.com/watch?v=eOrNdBpGMv8&autoplay=1&mute=1"
 # Replace this when the test meeting changes. It must be accessible to the
 # collector without manual host admission for an unattended run.
 GOOGLE_MEET_URL = "https://meet.google.com/duz-aezo-ztr"
+# Path to a persistent Linux Chrome user-data directory that has already been
+# logged into the receiver account. Keep it outside this repository.
+GOOGLE_MEET_PROFILE_DIR = os.environ.get("GOOGLE_MEET_PROFILE_DIR", "")
+GOOGLE_MEET_JOIN_TIMEOUT_SECONDS = 180
 
 VIDEO_URLS: dict[str, str] = {
     "youtube": YOUTUBE_URL,
@@ -66,6 +71,7 @@ def build_experiment(
         "cc_algorithm": "cubic",
         "duration_seconds": duration_seconds,
         "urls": VIDEO_URLS,
+        "google_meet_qoe_source": "webrtc_inbound_rtp",
     }
 
 
@@ -79,13 +85,34 @@ def result_dir_for(capacity_mbps: int, latency_ms: int, qdisc: str) -> Path:
     )
 
 
+def resolve_google_meet_profile(profile_dir: str) -> Path:
+    if not profile_dir.strip():
+        raise RuntimeError(
+            "Set GOOGLE_MEET_PROFILE_DIR to a persistent Linux Chrome profile "
+            "that is already logged into the Google Meet receiver account."
+        )
+    resolved = Path(profile_dir).expanduser().resolve()
+    if not resolved.is_dir():
+        raise RuntimeError(f"Google Meet Chrome profile does not exist: {resolved}")
+    try:
+        resolved.relative_to(REPO_ROOT)
+    except ValueError:
+        return resolved
+    raise RuntimeError(
+        "Google Meet Chrome profiles contain credentials and must live outside "
+        f"the repository: {resolved}"
+    )
+
+
 def main(
     capacity_mbps: int = BOTTLENECK_CAPACITY_MBPS,
     duration_seconds: int = EXPERIMENT_DURATION_SECONDS,
     latency_ms: int = BOTTLENECK_LATENCY_MS,
     qdisc: str = BOTTLENECK_QUEUE,
     buffer_packets: int = BOTTLENECK_BUFFER_PACKETS,
+    google_meet_profile_dir: str = GOOGLE_MEET_PROFILE_DIR,
 ) -> int:
+    meet_profile = resolve_google_meet_profile(google_meet_profile_dir)
     experiment = build_experiment(
         capacity_mbps,
         duration_seconds,
@@ -205,6 +232,13 @@ def main(
             duration_seconds,
             video_urls=VIDEO_URLS,
             display_nums=DISPLAY_NUMS,
+            job_options={
+                "google_meet": {
+                    "user_data_dir": "/profiles/google-meet",
+                    "join_timeout_seconds": GOOGLE_MEET_JOIN_TIMEOUT_SECONDS,
+                }
+            },
+            volume_mounts=[f"{meet_profile}:/profiles/google-meet"],
         )
 
         summaries: dict[str, Any] = {}
@@ -280,6 +314,11 @@ def parse_args() -> argparse.Namespace:
         default=BOTTLENECK_BUFFER_PACKETS,
         help="Queue packet limit",
     )
+    parser.add_argument(
+        "--google-meet-profile",
+        default=GOOGLE_MEET_PROFILE_DIR,
+        help="Persistent authenticated Linux Chrome user-data directory",
+    )
     return parser.parse_args()
 
 
@@ -292,5 +331,6 @@ if __name__ == "__main__":
             latency_ms=args.latency_ms,
             qdisc=args.qdisc,
             buffer_packets=args.buffer_packets,
+            google_meet_profile_dir=args.google_meet_profile,
         )
     )
