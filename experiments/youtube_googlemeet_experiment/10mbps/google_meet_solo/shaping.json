@@ -1,0 +1,39 @@
+{
+  "status": "shaped",
+  "bottleneck_state": {
+    "download_mbps": 10.0,
+    "upload_mbps": 10.0,
+    "latency_ms": 100.0,
+    "latency_location": "upstream",
+    "qdisc": "pfifo",
+    "verified": false,
+    "buffer_packets": 50,
+    "qdisc_params": null,
+    "loss_rate_percent": 0.0,
+    "verification_log": [
+      "upload: measured=17.42Mbps expected=10.0Mbps diff=74.2%",
+      "FAIL: upload out of \u00b120% range",
+      "download: measured=9.42Mbps expected=10.0Mbps diff=5.8%",
+      "PASS: download",
+      "latency: measured_rtt=142.12ms expected_rtt=100.00ms diff=42.12ms",
+      "FAIL: latency out of \u00b110.0ms range"
+    ]
+  },
+  "applied_commands": [
+    "tc qdisc del dev veth2 root 2>/dev/null || true",
+    "tc qdisc add dev veth2 root handle 1: htb default 10 r2q 100",
+    "tc class add dev veth2 parent 1: classid 1:10 htb rate 10.0Mbit ceil 10.0Mbit",
+    "tc qdisc add dev veth2 parent 1:10 handle 10: pfifo limit 50",
+    "tc qdisc del dev veth4 root 2>/dev/null || true",
+    "tc qdisc add dev veth4 root handle 1: htb default 10 r2q 100",
+    "tc class add dev veth4 parent 1: classid 1:10 htb rate 10.0Mbit ceil 10.0Mbit",
+    "tc qdisc add dev veth4 parent 1:10 handle 10: pfifo limit 50",
+    "tc qdisc del dev eth0 root 2>/dev/null || true",
+    "tc qdisc add dev eth0 root handle 1: htb default 10 r2q 100",
+    "tc class add dev eth0 parent 1: classid 1:10 htb rate 10.0Mbit ceil 10.0Mbit",
+    "tc qdisc add dev eth0 parent 1:10 handle 10: pfifo limit 50",
+    "ip netns exec ns1 tc qdisc del dev veth1 root 2>/dev/null || true",
+    "ip netns exec ns2 tc qdisc del dev veth3 root 2>/dev/null || true",
+    "ip netns exec ns2 tc qdisc add dev veth3 root netem delay 100.0ms"
+  ]
+}

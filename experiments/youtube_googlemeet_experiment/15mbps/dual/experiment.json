@@ -1,0 +1,16 @@
+{
+  "experiment_id": "google_meet-youtube-15mbps-100ms-pfifo",
+  "applications": [
+    "google_meet",
+    "youtube"
+  ],
+  "execution_mode": "concurrent",
+  "capacity_mbps": 15,
+  "upload_mbps": 15,
+  "latency_ms": 100,
+  "latency_location": "upstream",
+  "aqm_policy": "pfifo",
+  "buffer_packets": 50,
+  "cc_algorithm": "cubic",
+  "duration_seconds": 30
+}
