@@ -124,8 +124,10 @@ def run_video_collectors_concurrently(
     network_container: str,
     result_dir: Any,
     duration_seconds: int,
+    video_urls: dict[str, str] | None = None,
+    display_nums: dict[str, int] | None = None,
 ) -> None:
-    """Play YouTube and Vimeo concurrently as sibling threads inside one
+    """Play multiple video applications as sibling threads inside one
     video-qoe-collector container, network-namespace-joined onto ns1 (the
     substrate worker's client-side namespace) so traffic is actually shaped
     and captured. Writes {app}_stats.jsonl per app into result_dir.
@@ -142,6 +144,9 @@ def run_video_collectors_concurrently(
     --pid host, the PID it sees is already the shared PID-namespace value,
     so nsenter can join that exact network namespace directly from here.
     """
+    video_urls = video_urls or VIDEO_URLS
+    display_nums = display_nums or DISPLAY_NUMS
+
     ns1_pid = docker(
         "exec", network_container, "cat", "/var/run/substrate/ns1.pid"
     ).strip()
@@ -152,12 +157,12 @@ def run_video_collectors_concurrently(
         {
             "app": app,
             "url": url,
-            "display_num": DISPLAY_NUMS[app],
+            "display_num": display_nums[app],
             "out_path": f"/out/{app}_stats.jsonl",
             "duration_seconds": duration_seconds,
             "sample_interval_seconds": 1.0,
         }
-        for app, url in VIDEO_URLS.items()
+        for app, url in video_urls.items()
     ]
     collector_output = docker(
         "run",

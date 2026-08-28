@@ -103,7 +103,9 @@ if (host.indexOf('youtube.com') !== -1 || host.indexOf('youtu.be') !== -1) {
 }
 const video = document.querySelector('video');
 if (!video) { return {platform: 'unknown', error: 'no_video'}; }
-const out = {platform: 'unknown'};
+const out = {
+    platform: host.indexOf('meet.google.com') !== -1 ? 'google_meet' : 'unknown'
+};
 addVideoElementStats(out, video);
 return out;
 """
