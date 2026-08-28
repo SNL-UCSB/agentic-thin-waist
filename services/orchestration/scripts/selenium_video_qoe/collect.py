@@ -249,13 +249,36 @@ const done = arguments[arguments.length - 1];
 """
 
 GOOGLE_MEET_JOIN_JS = r"""
+const guestName = arguments[0];
+
+// Guest rooms show a name field before "Ask to join". Use the native setter
+// so Meet's React handlers observe the value instead of only the DOM changing.
+const nameInput = Array.from(document.querySelectorAll('input')).find(input => {
+    const label = `${input.placeholder || ''} ${input.getAttribute('aria-label') || ''}`
+        .trim().toLowerCase();
+    return label.includes('your name') || label === 'name';
+});
+if (nameInput && guestName && nameInput.value !== guestName) {
+    const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype, 'value'
+    ).set;
+    setter.call(nameInput, guestName);
+    nameInput.dispatchEvent(new Event('input', {bubbles: true}));
+    nameInput.dispatchEvent(new Event('change', {bubbles: true}));
+    return {
+        clicked: false,
+        guest_name_entered: true,
+        state: 'waiting_for_ui_update',
+    };
+}
+
 const buttons = Array.from(document.querySelectorAll('button'));
 for (const button of buttons) {
     const label = `${button.innerText || ''} ${button.getAttribute('aria-label') || ''}`
         .trim().toLowerCase();
     if (label.includes('join now') || label.includes('ask to join')) {
         button.click();
-        return {clicked: true, label};
+        return {clicked: true, label, guest_name_entered: Boolean(nameInput)};
     }
 }
 return {clicked: false};
@@ -331,22 +354,20 @@ def get_google_meet_stats(driver: Any) -> dict[str, Any]:
 def wait_for_google_meet_inbound(
     driver: Any,
     timeout_seconds: float,
+    guest_name: str,
 ) -> dict[str, Any]:
     """Join Meet and require a genuinely advancing remote inbound video RTP stream."""
     deadline = time.monotonic() + timeout_seconds
     previous: dict[str, Any] | None = None
-    join_clicked = False
     latest: dict[str, Any] = {}
 
     while time.monotonic() < deadline:
-        if not join_clicked:
-            try:
-                join_result = driver.execute_script(GOOGLE_MEET_JOIN_JS)
-                join_clicked = bool(join_result and join_result.get("clicked"))
-                if join_clicked:
-                    print(f"[google_meet] clicked Meet join control: {join_result}")
-            except Exception as exc:  # noqa: BLE001 - retry while UI settles
-                print(f"[google_meet] join control not ready: {exc}")
+        try:
+            join_result = driver.execute_script(GOOGLE_MEET_JOIN_JS, guest_name)
+            if join_result and join_result.get("clicked"):
+                print(f"[google_meet] clicked Meet join control: {join_result}")
+        except Exception as exc:  # noqa: BLE001 - retry while UI settles
+            print(f"[google_meet] join control not ready: {exc}")
 
         try:
             latest = get_google_meet_stats(driver)
@@ -428,6 +449,7 @@ def run_job(
     duration_seconds = float(job["duration_seconds"])
     sample_interval_seconds = float(job.get("sample_interval_seconds", 1.0))
     user_data_dir = job.get("user_data_dir")
+    guest_name = str(job.get("guest_name", "NetGent QoE Collector"))
     meet_join_timeout_seconds = float(job.get("join_timeout_seconds", 180))
     barrier_timeout_seconds = float(job.get("barrier_timeout_seconds", 360))
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -479,6 +501,7 @@ def run_job(
             meet_ready_stats = wait_for_google_meet_inbound(
                 driver,
                 meet_join_timeout_seconds,
+                guest_name,
             )
             meet_ready_timestamp = time.time()
 

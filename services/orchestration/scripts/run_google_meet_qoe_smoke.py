@@ -10,9 +10,14 @@ from pathlib import Path
 from typing import Any
 
 
-# Edit these values, or set GOOGLE_MEET_PROFILE_DIR in your shell.
-GOOGLE_MEET_URL = "https://meet.google.com/duz-aezo-ztr"
+# Edit these values, or override them in your shell.
+GOOGLE_MEET_URL = os.environ.get(
+    "GOOGLE_MEET_URL", "https://meet.google.com/duz-aezo-ztr"
+)
 GOOGLE_MEET_PROFILE_DIR = os.environ.get("GOOGLE_MEET_PROFILE_DIR", "")
+GOOGLE_MEET_GUEST_NAME = os.environ.get(
+    "GOOGLE_MEET_GUEST_NAME", "NetGent QoE Collector"
+)
 DURATION_SECONDS = 15
 JOIN_TIMEOUT_SECONDS = 180
 VIDEO_QOE_IMAGE = "video-qoe-collector:latest"
@@ -22,12 +27,9 @@ RESULT_DIR = REPO_ROOT / "experiments" / "google_meet_qoe_smoke" / "results"
 OUTPUT_FILE = RESULT_DIR / "google_meet_stats.jsonl"
 
 
-def resolve_profile() -> Path:
+def resolve_profile() -> Path | None:
     if not GOOGLE_MEET_PROFILE_DIR.strip():
-        raise RuntimeError(
-            "Set GOOGLE_MEET_PROFILE_DIR to a persistent Linux Chrome profile "
-            "that is already logged into the receiver Google account."
-        )
+        return None
     profile = Path(GOOGLE_MEET_PROFILE_DIR).expanduser().resolve()
     if not profile.is_dir():
         raise RuntimeError(f"Chrome profile directory does not exist: {profile}")
@@ -62,10 +64,12 @@ def main() -> int:
             "out_path": "/out/google_meet_stats.jsonl",
             "duration_seconds": DURATION_SECONDS,
             "sample_interval_seconds": 1.0,
-            "user_data_dir": "/profiles/google-meet",
+            "guest_name": GOOGLE_MEET_GUEST_NAME,
             "join_timeout_seconds": JOIN_TIMEOUT_SECONDS,
         }
     ]
+    if profile is not None:
+        jobs[0]["user_data_dir"] = "/profiles/google-meet"
     command = [
         "docker",
         "run",
@@ -78,10 +82,10 @@ def main() -> int:
         f"JOBS={json.dumps(jobs)}",
         "--volume",
         f"{RESULT_DIR}:/out",
-        "--volume",
-        f"{profile}:/profiles/google-meet",
-        VIDEO_QOE_IMAGE,
     ]
+    if profile is not None:
+        command.extend(["--volume", f"{profile}:/profiles/google-meet"])
+    command.append(VIDEO_QOE_IMAGE)
     subprocess.run(command, check=True)
 
     samples = read_samples()
