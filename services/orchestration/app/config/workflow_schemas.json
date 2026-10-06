@@ -68,5 +68,49 @@
       "default": 1,
       "description": "Maximum number of retry attempts"
     }
+  },
+  "test_iperf3_workflow": {
+    "host": {
+      "type": "string",
+      "default": "128.111.5.237",
+      "description": "iperf3 server hostname/IP reachable from the shaped client namespace"
+    },
+    "port": {
+      "type": "integer",
+      "default": 5399,
+      "description": "iperf3 server port"
+    },
+    "duration_seconds": {
+      "type": "integer",
+      "default": 20,
+      "description": "Test duration in seconds (paper: ~20 s suffices for a training trace)"
+    },
+    "reverse": {
+      "type": "boolean",
+      "default": true,
+      "description": "Server sends to client (download direction) so the bottleneck queue fills under the sender's CCA"
+    }
+  },
+  "test_h2load_workflow": {
+    "url": {
+      "type": "string",
+      "default": "https://www.cloudflare.com/",
+      "description": "Target website URL to saturate over HTTP/2"
+    },
+    "requests": {
+      "type": "integer",
+      "default": 200,
+      "description": "Total HTTP/2 requests (h2load -n)"
+    },
+    "clients": {
+      "type": "integer",
+      "default": 20,
+      "description": "Concurrent HTTP/2 connections (h2load -c)"
+    },
+    "duration_seconds": {
+      "type": "integer",
+      "default": 60,
+      "description": "Optional time cap for the run"
+    }
   }
 }

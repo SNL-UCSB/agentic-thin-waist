@@ -27,5 +27,63 @@
       ],
       "parameters": ["url", "output_file", "timeout_seconds", "tries"]
     }
+  },
+  {
+    "id": "test_iperf3_workflow",
+    "name": "iperf3 Throughput Test",
+    "description": "Runs an iperf3 throughput test against an iperf3 server. Parameter 'host': iperf3 server hostname/IP. Parameter 'port': server port. Parameter 'duration_seconds': test length. Parameter 'reverse': when true the SERVER sends to the client (download direction) — use this for CCAnalyzer-style training so the queue-occupancy trace reflects the sender's congestion control.",
+    "specification": "Run an iperf3 test to 'host':'port' for 'duration_seconds' seconds; when 'reverse' is true the server sends toward the client so the bottleneck queue fills under the sender's CCA.",
+    "version": "1.0.0",
+    "type": "shell",
+    "parameters": ["host", "port", "duration_seconds", "reverse"],
+    "workflow": {
+      "specification": "Run an iperf3 test to 'host':'port' for 'duration_seconds' seconds in reverse mode when requested.",
+      "states": [
+        {
+          "checks": [{"type": "always_true", "params": {}}],
+          "actions": [
+            {
+              "type": "iperf",
+              "params": {
+                "host": "{{host}}",
+                "port": "{{port}}",
+                "duration_seconds": "{{duration_seconds}}",
+                "reverse": "{{reverse}}"
+              }
+            }
+          ]
+        }
+      ],
+      "parameters": ["host", "port", "duration_seconds", "reverse"]
+    }
+  },
+  {
+    "id": "test_h2load_workflow",
+    "name": "h2load Website Throughput Test",
+    "description": "Saturates the shaped bottleneck by fetching a website over HTTP/2 with h2load (pipelined requests), for CCAnalyzer's Top-10K measurement study. Parameter 'url': target website URL. Parameter 'requests': total requests (-n). Parameter 'clients': concurrent clients (-c). Parameter 'duration_seconds': optional time cap. Produces the bottleneck queue-occupancy trace for 1NN-DTW classification.",
+    "specification": "Run h2load against 'url' with 'requests' total requests over 'clients' concurrent HTTP/2 connections to saturate the shaped link and capture the queue-occupancy trace.",
+    "version": "1.0.0",
+    "type": "shell",
+    "parameters": ["url", "requests", "clients", "duration_seconds"],
+    "workflow": {
+      "specification": "Run h2load against 'url' with 'requests' requests over 'clients' HTTP/2 connections.",
+      "states": [
+        {
+          "checks": [{"type": "always_true", "params": {}}],
+          "actions": [
+            {
+              "type": "h2load",
+              "params": {
+                "url": "{{url}}",
+                "requests": "{{requests}}",
+                "clients": "{{clients}}",
+                "duration_seconds": "{{duration_seconds}}"
+              }
+            }
+          ]
+        }
+      ],
+      "parameters": ["url", "requests", "clients", "duration_seconds"]
+    }
   }
 ]

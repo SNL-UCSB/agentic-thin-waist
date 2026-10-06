@@ -263,6 +263,11 @@ services:
       - LANGSMITH_API_KEY=${LANGSMITH_API_KEY:-}
       - LANGSMITH_PROJECT=${LANGSMITH_PROJECT:-}
       - BROWSERLESS_WS_ENDPOINT=${BROWSERLESS_WS_ENDPOINT:-ws://substrate-worker:3000/chromium/playwright}
+      # Browser viewport for workflow pages. ABR video players pick their
+      # quality ladder from the viewport, so the 1280x720 default caps
+      # YouTube/Vimeo at ~720p (~2.4 Mbps) regardless of link capacity.
+      - NETGENT_VIEWPORT_WIDTH=${NETGENT_VIEWPORT_WIDTH:-1280}
+      - NETGENT_VIEWPORT_HEIGHT=${NETGENT_VIEWPORT_HEIGHT:-720}
       - S3_ENDPOINT_URL=${S3_ENDPOINT_URL}
       - NETGENT_S3_PUBLIC_URL=${NETGENT_S3_PUBLIC_URL:-http://localhost:9000}
       - NETGENT_S3_BUCKET_NAME=${NETGENT_S3_BUCKET_NAME:-netgent}
