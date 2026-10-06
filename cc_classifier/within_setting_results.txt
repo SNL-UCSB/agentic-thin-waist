@@ -1,0 +1,51 @@
+reference: 183 traces / 15 settings  (from /home/jaber/atw_data_backup_20260716_174105/cc_results)
+test:      20 timing traces
+
+=== within-setting, variant=raw ===
+setting            true       pred       ok  rank
+5bw-85rtt-64q      cubic      cubic      Y   1
+5bw-130rtt-64q     bbr        bbr        Y   1
+5bw-275rtt-128q    reno       reno       Y   1
+10bw-85rtt-128q    htcp       htcp       Y   1
+10bw-130rtt-128q   vegas      vegas      Y   1
+10bw-275rtt-256q   bic        bic        Y   1
+15bw-85rtt-256q    cdg        cdg        Y   1
+15bw-130rtt-256q   highspeed  highspeed  Y   1
+15bw-275rtt-512q   hybla      hybla      Y   1
+5bw-275rtt-32q     illinois   illinois   Y   1
+5bw-275rtt-128q    nv         nv         Y   1
+5bw-275rtt-512q    scalable   scalable   Y   1
+5bw-275rtt-1024q   veno       scalable   .   4
+5bw-85rtt-64q      westwood   westwood   Y   1
+5bw-130rtt-64q     yeah       yeah       Y   1
+10bw-85rtt-128q    cubic      scalable   .   2
+10bw-130rtt-128q   bbr        bbr        Y   1
+5bw-85rtt-64q      reno       reno       Y   1
+10bw-130rtt-128q   cubic      cubic      Y   1
+5bw-130rtt-64q     bbr        bbr        Y   1
+accuracy: 18/20 = 90.0%
+
+=== within-setting, variant=norm ===
+setting            true       pred       ok  rank
+5bw-85rtt-64q      cubic      cubic      Y   1
+5bw-130rtt-64q     bbr        bbr        Y   1
+5bw-275rtt-128q    reno       reno       Y   1
+10bw-85rtt-128q    htcp       htcp       Y   1
+10bw-130rtt-128q   vegas      vegas      Y   1
+10bw-275rtt-256q   bic        bic        Y   1
+15bw-85rtt-256q    cdg        cdg        Y   1
+15bw-130rtt-256q   highspeed  highspeed  Y   1
+15bw-275rtt-512q   hybla      hybla      Y   1
+5bw-275rtt-32q     illinois   illinois   Y   1
+5bw-275rtt-128q    nv         nv         Y   1
+5bw-275rtt-512q    scalable   scalable   Y   1
+5bw-275rtt-1024q   veno       scalable   .   4
+5bw-85rtt-64q      westwood   westwood   Y   1
+5bw-130rtt-64q     yeah       yeah       Y   1
+10bw-85rtt-128q    cubic      scalable   .   2
+10bw-130rtt-128q   bbr        bbr        Y   1
+5bw-85rtt-64q      reno       reno       Y   1
+10bw-130rtt-128q   cubic      cubic      Y   1
+5bw-130rtt-64q     bbr        bbr        Y   1
+accuracy: 18/20 = 90.0%
+

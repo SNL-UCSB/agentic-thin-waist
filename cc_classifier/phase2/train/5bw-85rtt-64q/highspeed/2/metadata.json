@@ -1,0 +1,4 @@
+{"setting":"5bw-85rtt-64q","bandwidth_mbps":5,"base_rtt_ms":85,"queue_pkts":64,
+ "cca":"highspeed","workload":"iperf3-reverse","role":"training","rep":2,
+ "duration_s_target":20,"duration_s_actual":21.7,
+ "bytes_delivered":12991669,"drops":106,"occupancy_rows":430}

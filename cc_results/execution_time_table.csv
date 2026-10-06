@@ -135,3 +135,8 @@ vegas,5,275,1024,177.07,60,complete,wget_5_5_275_pfifo_vegas_0a1d0036,117.07
 veno,5,275,1024,182.05,60,complete,wget_5_5_275_pfifo_veno_1e7a0e6f,122.05
 westwood,5,275,1024,171.96,60,complete,wget_5_5_275_pfifo_westwood_32a7efb3,111.96
 yeah,5,275,1024,187.05,60,complete,wget_5_5_275_pfifo_yeah_cd1d02ae,127.05
+reno2,10,20,128,162.09,60,complete,wget_10_10_20_pfifo_reno_c6e5c06a,102.09
+cubic,10,20,128,177.15,60,complete,wget_10_10_20_pfifo_cubic_38a955b1,117.15
+bbr,10,20,128,177.07,60,complete,wget_10_10_20_pfifo_bbr_af856796,117.07
+bic,10,20,128,182.16,60,complete,wget_10_10_20_pfifo_bic_27ff6899,122.16
+reno2,10,130,128,177.12,60,complete,wget_10_10_130_pfifo_reno_5528dfae,117.12
