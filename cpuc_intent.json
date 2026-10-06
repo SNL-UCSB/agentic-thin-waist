@@ -1,0 +1,42 @@
+{
+  "intent": "Play the Prudentia YouTube video-on-demand reference workload in a browser, Big Buck Bunny (video id aqz-KE-bpKQ) on youtube.com, over a 6 Mbps bottleneck with 100 ms added latency, pfifo queue, the queue size of 32 packets and cubic congestion control. One trial, 35 seconds",
+  "context": {
+    "capacities": [3],
+    "latencies": [180],
+    "aqm_policy": "pfifo",
+    "buffer_packets": 32,
+    "qdisc_params": {},
+    "cc_algorithms": ["cubic"],
+    "duration_seconds": 35,
+    "num_trials": 1,
+    "workflow": {
+      "specification": "Prudentia YouTube VoD workload with player telemetry. Load the Big Buck Bunny watch page, let it start, then poll the YouTube player's Stats-for-nerds telemetry once a second for 25 seconds.",
+      "states": [
+        {
+          "checks": [{ "type": "always_true", "params": {} }],
+          "actions": [
+            {
+              "type": "go_to_url",
+              "params": {
+                "url": "https://www.youtube.com/watch?v=aqz-KE-bpKQ&autoplay=1",
+                "new_tab": false
+              }
+            },
+            { "type": "wait", "params": { "seconds": "5" } },
+            {
+              "type": "youtube_stats",
+              "params": {
+                "samples": "25",
+                "interval_seconds": "1",
+                "nerd_stats_every": "2"
+              }
+            }
+          ],
+          "end_state": "Workflow Completed",
+          "executed": []
+        }
+      ],
+      "parameters": []
+    }
+  }
+}

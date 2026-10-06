@@ -1,0 +1,47 @@
+{
+  "run_name": "verify_60s",
+  "timestamp": "20260827T222545Z",
+  "capacity_mbps": 6.0,
+  "latency_ms": 100.0,
+  "buffer_packets": 32,
+  "qdisc": "pfifo",
+  "cca": "cubic",
+  "video_id": "aqz-KE-bpKQ",
+  "watch_seconds": 60,
+  "samples_requested": 60,
+  "interval_seconds": 1.0,
+  "nerd_stats_every": 5,
+  "wall_seconds": 35.7,
+  "bdp_packets": 50.0,
+  "shape": {
+    "status": "shaped",
+    "bottleneck_state": {
+      "download_mbps": 6.0,
+      "upload_mbps": 6.0,
+      "latency_ms": 100.0,
+      "latency_location": null,
+      "qdisc": "pfifo",
+      "verified": false,
+      "buffer_packets": 32,
+      "qdisc_params": null,
+      "loss_rate_percent": 0.0,
+      "verification_log": []
+    },
+    "applied_commands": [
+      "tc qdisc del dev veth2 root 2>/dev/null || true",
+      "tc qdisc add dev veth2 root handle 1: htb default 10 r2q 100",
+      "tc class add dev veth2 parent 1: classid 1:10 htb rate 6.0Mbit ceil 6.0Mbit",
+      "tc qdisc add dev veth2 parent 1:10 handle 10: pfifo limit 32",
+      "tc qdisc del dev veth4 root 2>/dev/null || true",
+      "tc qdisc add dev veth4 root handle 1: htb default 10 r2q 100",
+      "tc class add dev veth4 parent 1: classid 1:10 htb rate 6.0Mbit ceil 6.0Mbit",
+      "tc qdisc add dev veth4 parent 1:10 handle 10: pfifo limit 32",
+      "tc qdisc del dev eth0 root 2>/dev/null || true",
+      "tc qdisc add dev eth0 root handle 1: htb default 10 r2q 100",
+      "tc class add dev eth0 parent 1: classid 1:10 htb rate 6.0Mbit ceil 6.0Mbit",
+      "tc qdisc add dev eth0 parent 1:10 handle 10: pfifo limit 32",
+      "ip netns exec ns1 tc qdisc del dev veth1 root 2>/dev/null || true",
+      "ip netns exec ns2 tc qdisc del dev veth3 root 2>/dev/null || true"
+    ]
+  }
+}
