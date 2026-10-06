@@ -36,6 +36,7 @@ RUN apt-get update && apt-get install -y \
     python3-flask python3-requests \
     sudo util-linux kmod \
     gcc libc6-dev \
+    libnetfilter-queue-dev libnfnetlink-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -62,6 +63,15 @@ COPY shared/ /shared/
 
 RUN chmod +x src/browser/wrap-playwright-chrome.sh src/substrate/setup.sh src/substrate/setup_local.sh src/substrate/setup_aws.sh \
     && ./src/browser/wrap-playwright-chrome.sh
+
+# Build the Gordon CWND prober (baseline CC classifier for Exp8 / Fig 13).
+# Vendored from github.com/NUS-SNL/Gordon; probe.c is patched for two stack
+# overflows (see src/gordon/probe.c "ATW patch" notes). Needs NFQUEUE at run
+# time, which the substrate worker has via privileged + NET_ADMIN.
+RUN gcc -O2 -Wall -o /usr/local/bin/gordon-prober src/gordon/probe.c \
+        -lnfnetlink -lnetfilter_queue -lpthread -lm \
+    && test -x /usr/local/bin/gordon-prober \
+    && chmod +x src/gordon/gordon_run.sh src/gordon/gordon_classify.py
 
 ENV PATH="/opt/substrate-worker-venv/bin:$PATH"
 ENV PYTHONPATH="/app/src:/shared:/shared/clients/netgent/src:${PYTHONPATH:-}"

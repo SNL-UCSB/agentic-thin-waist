@@ -1,0 +1,22 @@
+{
+  "specification": "test gordon cwnd-classifier workflow",
+  "states": [
+    {
+      "checks": [
+        {
+          "type": "always_true",
+          "params": {}
+        }
+      ],
+      "actions": [
+        {
+          "type": "shell",
+          "params": {
+            "command": "ip netns exec ns1 /app/src/gordon/gordon_run.sh {{target}} {{trials}}"
+          }
+        }
+      ]
+    }
+  ],
+  "parameters": ["target", "trials"]
+}
